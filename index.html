@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v26</title>
+<title>eatDeSi POS v27</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v26';",
+    "var CACHE='eatdesi-v27';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -15614,7 +15614,9 @@ async function syncOneStateKey(lsKey) {
       // Remote ist neuer -> uebernehmen
       var remoteStr = JSON.stringify(remote.value);
       if (remoteStr !== JSON.stringify(local)) {
+        window._syncWriting = true;  // verhindert dass dieser Schreibvorgang erneut gepusht wird
         localStorage.setItem(lsKey, remoteStr);
+        window._syncWriting = false;
         // generisches Event + spezifisches Event (fuer React-Listener)
         window.dispatchEvent(new CustomEvent('eatdesi_state_synced', { detail: { key: lsKey, value: remote.value } }));
         window.dispatchEvent(new CustomEvent(lsKey + '_synced', { detail: remote.value }));
@@ -15695,6 +15697,27 @@ LS.set = function(key, value) {
     (function(remoteKey, val){
       setTimeout(function(){ pushStateToSupabase(remoteKey, val); }, 300);
     })(_rk, value);
+  }
+};
+
+// AUCH direktes localStorage.setItem abfangen (z.B. Kategorien 'eatdesi_cat_order',
+// Inventar-Transaktionen) - diese gehen NICHT ueber LS.set und wurden bisher nicht gesynct.
+var _origSetItem = localStorage.setItem.bind(localStorage);
+localStorage.setItem = function(key, valueStr) {
+  _origSetItem(key, valueStr);
+  // Wenn die Sync-Engine selbst gerade schreibt: NICHT erneut pushen (Endlosschleife vermeiden)
+  if (window._syncWriting) return;
+  // Diese Keys werden bereits ueber LS.set / eigene Logik behandelt -> hier ueberspringen
+  if (key === 'eatdesi_orders' || key === 'eatdesi_tableorders') return;
+  if (typeof key === 'string' && key.indexOf('eatdesi_') === 0 && !_isLocalOnlyKey(key)) {
+    try {
+      var parsed = JSON.parse(valueStr);
+      var rk = _remoteName(key);
+      _setLocalStamp(rk, Date.now());
+      (function(remoteKey, val){
+        setTimeout(function(){ pushStateToSupabase(remoteKey, val); }, 300);
+      })(rk, parsed);
+    } catch(e) {}
   }
 };
 
