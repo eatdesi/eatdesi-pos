@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v21</title>
+<title>eatDeSi POS v22</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v21';",
+    "var CACHE='eatdesi-v22';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -12938,6 +12938,22 @@ function App() {
     LS.set("eatdesi_tableorders", tableOrders);
   }, [tableOrders]);
 
+  // Wenn andere Geraete Tische aendern (via Sync-Engine), State aktualisieren
+  useEffect(() => {
+    const onSynced = (e) => {
+      try {
+        const merged = (e && e.detail) ? e.detail : LS.get("eatdesi_tableorders", {});
+        setTableOrders(prev => {
+          // nur uebernehmen wenn wirklich anders, sonst Render-Loop
+          if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+          return merged;
+        });
+      } catch(err) {}
+    };
+    window.addEventListener('eatdesi_tables_synced', onSynced);
+    return () => window.removeEventListener('eatdesi_tables_synced', onSynced);
+  }, []);
+
   // takeaway - localStorage + Supabase sync
   useEffect(() => {
     LS.set("eatdesi_takeaway", takeaway);
@@ -15256,17 +15272,25 @@ async function pushPendingOrders() {
 // Tischbestellungen synchronisieren
 async function syncTableOrders() {
   try {
-    var local = JSON.parse(localStorage.getItem('eatdesi_tableOrders') || '{}');
+    // WICHTIG: App speichert Tische unter 'eatdesi_tableorders' (klein!) via LS.set
+    var local = JSON.parse(localStorage.getItem('eatdesi_tableorders') || '{}');
     var remote = await pullStateFromSupabase('tableOrders');
     if (remote && JSON.stringify(remote) !== JSON.stringify(local)) {
-      // Merge: remote gewinnt bei Konflikten
-      var merged = Object.assign({}, remote, local);
-      localStorage.setItem('eatdesi_tableOrders', JSON.stringify(merged));
-      window.dispatchEvent(new StorageEvent('storage', {
-        key: 'eatdesi_tableOrders',
-        newValue: JSON.stringify(merged),
-        storageArea: localStorage
-      }));
+      // Merge pro Tisch: Eintrag mit den MEISTEN items gewinnt (verhindert dass leeres Lokal Remote loescht)
+      var merged = {};
+      var allKeys = {};
+      Object.keys(remote).forEach(function(k){ allKeys[k]=1; });
+      Object.keys(local).forEach(function(k){ allKeys[k]=1; });
+      Object.keys(allKeys).forEach(function(k){
+        var r = remote[k], l = local[k];
+        var rN = (r && r.items) ? r.items.length : 0;
+        var lN = (l && l.items) ? l.items.length : 0;
+        merged[k] = (rN > lN) ? r : (l || r);
+        if (!merged[k] || !merged[k].items || merged[k].items.length === 0) delete merged[k];
+      });
+      localStorage.setItem('eatdesi_tableorders', JSON.stringify(merged));
+      // App benachrichtigen, damit React den State neu laedt
+      window.dispatchEvent(new CustomEvent('eatdesi_tables_synced', { detail: merged }));
     }
     // Push lokale Aenderungen
     await pushStateToSupabase('tableOrders', local);
@@ -15324,7 +15348,7 @@ LS.set = function(key, value) {
       setTimeout(runSync, 500);
     }
   }
-  if (key === 'eatdesi_tableOrders') {
+  if (key === 'eatdesi_tableorders') {
     setTimeout(function(){ pushStateToSupabase('tableOrders', value); }, 1000);
   }
 };
