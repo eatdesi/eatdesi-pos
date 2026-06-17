@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v23</title>
+<title>eatDeSi POS v26</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v23';",
+    "var CACHE='eatdesi-v26';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -10283,15 +10283,61 @@ function CustomersView({
   }, "\xD8 ", c.visits > 0 ? fmt(c.total / c.visits) : "—"))))));
 }
 
+// Alle zuweisbaren Bereiche fuer das Berechtigungssystem (ohne Dashboard - das ist immer erlaubt)
+var ALL_PERMISSION_VIEWS = [
+  { id:"tables", l:"Tische", i:"🪑" },
+  { id:"order", l:"Bestellung/Kasse", i:"🛒" },
+  { id:"kitchen", l:"Küche", i:"🍳" },
+  { id:"bar", l:"Bar", i:"🍺" },
+  { id:"reservations", l:"Reservierung", i:"📅" },
+  { id:"summary", l:"Tagesbericht", i:"📊" },
+  { id:"zeiterfassung", l:"Zeiterfassung", i:"⏱️" },
+  { id:"orders", l:"Bestellungen", i:"📋" },
+  { id:"reports", l:"Berichte", i:"📈" },
+  { id:"expenses", l:"Ausgaben", i:"💸" },
+  { id:"customers", l:"Kunden", i:"👥" },
+  { id:"menu_mgmt", l:"Menu Management", i:"🍽️" },
+  { id:"happyhour", l:"Happy Hour", i:"🔖" },
+  { id:"gutscheine", l:"Gutscheine", i:"🎟️" },
+  { id:"loyalty", l:"Treue", i:"⭐" },
+  { id:"inventory", l:"Lager", i:"📦" },
+  { id:"delivery", l:"Lieferung", i:"🚴" },
+  { id:"lieferfahrer", l:"Fahrer", i:"🚴" },
+  { id:"floors", l:"Bereiche", i:"🏢" },
+  { id:"rezeptkosten", l:"Rezeptkosten", i:"💰" },
+  { id:"personalplanung", l:"Personalplanung", i:"👥" },
+  { id:"printer", l:"Drucker", i:"🖨️" },
+  { id:"online_orders", l:"Online Bestellungen", i:"📱" },
+  { id:"webshop_orders", l:"Webshop", i:"🛒" },
+  { id:"kassenbuch", l:"Kassenbuch", i:"🧾" },
+  { id:"monatsreport", l:"Monatsstatistik", i:"📊" },
+  { id:"backup", l:"Backup", i:"💾" },
+  { id:"tse_setup", l:"TSE", i:"🔒" },
+  { id:"cloud_setup", l:"Cloud Sync", i:"☁️" },
+  { id:"datev_export", l:"DATEV", i:"🧾" },
+  { id:"firmendaten", l:"Firmendaten", i:"🏢" },
+  { id:"menu_import", l:"Menü Import", i:"📤" },
+  { id:"kds_pro", l:"KDS Pro", i:"🍳" },
+  { id:"kiosk", l:"Kiosk", i:"🖥️" },
+  { id:"users", l:"User Management", i:"🔑" },
+  { id:"ai_kellnerin", l:"AI Kellnerin", i:"🤖" },
+  { id:"ai_betriebsleiter", l:"AI Betriebsleiter", i:"📊" },
+  { id:"ai_whatsapp", l:"AI WhatsApp", i:"💬" },
+  { id:"ai_marketing", l:"AI Marketing", i:"📢" },
+  { id:"saas_dashboard", l:"SaaS", i:"🏢" }
+];
+
 function UserManagementView({
   users,
   onAdd,
-  onDelete
+  onDelete,
+  onUpdate
 }) {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [role, setRole] = useState("Kellner");
   const [pin, setPin] = useState("");
+  const [permEditIdx, setPermEditIdx] = useState(null); // welcher Nutzer wird gerade bearbeitet
   const ROLES = ["Kellner", "Küche", "Bar", "Manager", "Admin"];
   const roleColors = {
     "Kellner": C.blue,
@@ -10510,16 +10556,96 @@ function UserManagementView({
       fontWeight: 700,
       fontSize: 10
     }
-  }, u.role))), /*#__PURE__*/React.createElement("button", {
-    onClick: () => onDelete(idx),
-    style: {
-      background: "none",
-      border: "none",
-      color: "#ccc",
-      cursor: "pointer",
-      fontSize: 18
-    }
-  }, "\u2715"))));
+  }, u.role))), /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", alignItems: "center", gap: 6 }
+  },
+    // Berechtigungen-Button (nur fuer Nicht-Admins sinnvoll)
+    u.role !== "Admin" && /*#__PURE__*/React.createElement("button", {
+      onClick: () => setPermEditIdx(idx),
+      style: {
+        background: "#e8f5e9",
+        border: "none",
+        color: C.green,
+        borderRadius: 8,
+        padding: "6px 10px",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        fontWeight: 700,
+        fontSize: 11
+      }
+    }, "\uD83D\uDD13 Rechte (" + ((u.permissions && Array.isArray(u.permissions)) ? u.permissions.length : "alle") + ")"),
+    u.role === "Admin" && /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: 11, color: C.red, fontWeight: 700 }
+    }, "\u2713 Voller Zugriff"),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => onDelete(idx),
+      style: {
+        background: "none",
+        border: "none",
+        color: "#ccc",
+        cursor: "pointer",
+        fontSize: 18
+      }
+    }, "\u2715")
+  ))),
+  // === Berechtigungen-Editor (Modal) ===
+  permEditIdx !== null && users[permEditIdx] && /*#__PURE__*/React.createElement("div", {
+    style: { position:"fixed", inset:0, background:"#0009", zIndex:3000, display:"flex", alignItems:"flex-end", justifyContent:"center" }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { background:"#fff", borderRadius:"16px 16px 0 0", width:"100%", maxWidth:560, maxHeight:"85vh", display:"flex", flexDirection:"column" }
+  },
+    /*#__PURE__*/React.createElement("div", {
+      style: { padding:"18px 20px 12px", borderBottom:"1px solid #eee" }
+    },
+      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:16, color:C.green } }, "\uD83D\uDD13 Berechtigungen"),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:13, color:"#888", marginTop:2 } }, users[permEditIdx].name + " \xB7 " + users[permEditIdx].role),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#aaa", marginTop:6 } }, "W\xE4hle, welche Bereiche dieser Mitarbeiter sehen darf. Dashboard ist immer sichtbar.")
+    ),
+    // Schnell-Aktionen
+    /*#__PURE__*/React.createElement("div", {
+      style: { padding:"10px 20px", display:"flex", gap:8, borderBottom:"1px solid #f5f5f5" }
+    },
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => { const u={...users[permEditIdx], permissions: ALL_PERMISSION_VIEWS.map(v=>v.id)}; onUpdate(permEditIdx, u); },
+        style: { flex:1, padding:"8px", borderRadius:8, border:"2px solid "+C.green, background:"#e8f5e9", color:C.green, cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
+      }, "Alle ausw\xE4hlen"),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => { const u={...users[permEditIdx], permissions: []}; onUpdate(permEditIdx, u); },
+        style: { flex:1, padding:"8px", borderRadius:8, border:"2px solid #ddd", background:"#fff", color:"#666", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
+      }, "Alle abw\xE4hlen")
+    ),
+    // Checkbox-Liste
+    /*#__PURE__*/React.createElement("div", {
+      style: { flex:1, overflowY:"auto", padding:"8px 14px" }
+    }, ALL_PERMISSION_VIEWS.map(v => {
+      const cur = users[permEditIdx].permissions;
+      const isOn = Array.isArray(cur) ? cur.indexOf(v.id) >= 0 : true; // kein perms -> default alle an
+      return /*#__PURE__*/React.createElement("div", {
+        key: v.id,
+        onClick: () => {
+          const u = {...users[permEditIdx]};
+          let perms = Array.isArray(u.permissions) ? u.permissions.slice() : ALL_PERMISSION_VIEWS.map(x=>x.id);
+          if (perms.indexOf(v.id) >= 0) perms = perms.filter(x => x !== v.id);
+          else perms.push(v.id);
+          u.permissions = perms;
+          onUpdate(permEditIdx, u);
+        },
+        style: { display:"flex", alignItems:"center", gap:12, padding:"11px 8px", borderBottom:"1px solid #f7f7f7", cursor:"pointer" }
+      },
+        /*#__PURE__*/React.createElement("div", {
+          style: { width:24, height:24, borderRadius:6, border:"2px solid "+(isOn?C.green:"#ccc"), background:isOn?C.green:"#fff", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:14, flexShrink:0 }
+        }, isOn ? "\u2713" : ""),
+        /*#__PURE__*/React.createElement("span", { style:{ fontSize:18 } }, v.i),
+        /*#__PURE__*/React.createElement("span", { style:{ fontSize:14, fontWeight:600, color:"#333" } }, v.l)
+      );
+    })),
+    /*#__PURE__*/React.createElement("div", {
+      style: { padding:"12px 20px", borderTop:"1px solid #eee" }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => setPermEditIdx(null),
+      style: { width:"100%", padding:13, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:15 }
+    }, "\u2713 Fertig"))
+  )));
 }
 
 // --- Inventory / Lager ----------------------------------------------------
@@ -12733,7 +12859,14 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
           { icon:"📅", label:"Reservierung", id:"reservations" },
           { icon:"📊", label:"Tagesbericht", id:"summary" },
           { icon:"⏱️", label:"Zeiterfassung", id:"zeiterfassung" },
-        ].map(item => React.createElement("button", {
+        ].filter(item => {
+          // Schnellzugriff nach Berechtigung filtern
+          if (!loggedInUser || loggedInUser.role === "Admin") return true;
+          if (item.id === "takeaway_new") return true; // Takeaway immer
+          const perms = loggedInUser.permissions;
+          if (!perms || !Array.isArray(perms)) return true;
+          return perms.indexOf(item.id) >= 0;
+        }).map(item => React.createElement("button", {
           key: item.id,
           onClick: () => item.id === "takeaway_new" ? setShowTaCustomerSearch(true) : setView(item.id),
           style:{ padding:"14px 8px", borderRadius:12, border:"2px solid #f0f0f0", background:"#fafafa", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:600, color:"#333", display:"flex", flexDirection:"column", alignItems:"center", gap:6 }
@@ -12799,6 +12932,15 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
 
 function App() {
   const [view, setView] = useState("dashboard");
+  const [_syncTick, _setSyncTick] = React.useState(0);
+  // Bei jeder Remote-Synchronisation die ganze App neu rendern,
+  // damit auch Views die direkt aus LS lesen (Firma, Gutscheine, Inventar,
+  // Reservierungen, Kunden, Ausgaben, Happy Hours ...) sofort aktuell sind.
+  React.useEffect(() => {
+    const onAnySync = () => _setSyncTick(t => t + 1);
+    window.addEventListener('eatdesi_state_synced', onAnySync);
+    return () => window.removeEventListener('eatdesi_state_synced', onAnySync);
+  }, []);
   const [activeTable, setActiveTable] = useState(null);
   const [isTakeaway, setIsTakeaway] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState(() => LS.get("eatdesi_session", null));
@@ -12952,6 +13094,61 @@ function App() {
     };
     window.addEventListener('eatdesi_tables_synced', onSynced);
     return () => window.removeEventListener('eatdesi_tables_synced', onSynced);
+  }, []);
+
+  // Remote-Sync fuer Takeaway, Menu, Fahrer (live auf dem Bildschirm)
+  useEffect(() => {
+    const onTakeaway = (e) => {
+      try {
+        const v = (e && e.detail) ? e.detail : LS.get("eatdesi_takeaway", []);
+        const restored = (v || []).map(t => ({ ...t, time: t.time ? new Date(t.time) : new Date() }));
+        setTakeaway(prev => JSON.stringify(prev) === JSON.stringify(restored) ? prev : restored);
+      } catch(err) {}
+    };
+    const onMenu = (e) => {
+      try {
+        const v = (e && e.detail) ? e.detail : LS.get("eatdesi_menu", null);
+        if (v) setMenuData(prev => JSON.stringify(prev) === JSON.stringify(v) ? prev : v);
+      } catch(err) {}
+    };
+    const onDrivers = (e) => {
+      try {
+        const v = (e && e.detail) ? e.detail : LS.get("eatdesi_drivers", []);
+        setDrivers(prev => JSON.stringify(prev) === JSON.stringify(v) ? prev : v);
+      } catch(err) {}
+    };
+    const onReservations = (e) => {
+      try {
+        const v = (e && e.detail) ? e.detail : LS.get("eatdesi_reservations", []);
+        setReservations(prev => JSON.stringify(prev) === JSON.stringify(v) ? prev : v);
+      } catch(err) {}
+    };
+    const onUsers = (e) => {
+      try {
+        const v = (e && e.detail) ? e.detail : LS.get("eatdesi_users", []);
+        if (v) setUsers(prev => JSON.stringify(prev) === JSON.stringify(v) ? prev : v);
+      } catch(err) {}
+    };
+    const onOptionGroups = (e) => {
+      try {
+        const v = (e && e.detail) ? e.detail : LS.get("eatdesi_optiongroups", []);
+        if (v) setOptionGroups(prev => JSON.stringify(prev) === JSON.stringify(v) ? prev : v);
+      } catch(err) {}
+    };
+    window.addEventListener('eatdesi_takeaway_synced', onTakeaway);
+    window.addEventListener('eatdesi_menu_synced', onMenu);
+    window.addEventListener('eatdesi_drivers_synced', onDrivers);
+    window.addEventListener('eatdesi_reservations_synced', onReservations);
+    window.addEventListener('eatdesi_users_synced', onUsers);
+    window.addEventListener('eatdesi_optiongroups_synced', onOptionGroups);
+    return () => {
+      window.removeEventListener('eatdesi_takeaway_synced', onTakeaway);
+      window.removeEventListener('eatdesi_menu_synced', onMenu);
+      window.removeEventListener('eatdesi_drivers_synced', onDrivers);
+      window.removeEventListener('eatdesi_reservations_synced', onReservations);
+      window.removeEventListener('eatdesi_users_synced', onUsers);
+      window.removeEventListener('eatdesi_optiongroups_synced', onOptionGroups);
+    };
   }, []);
 
   // takeaway - localStorage + Supabase sync
@@ -13363,6 +13560,21 @@ function App() {
   }, {
     id: "saas_dashboard", l: "SaaS", i: "🏢"
   }];
+  // === Berechtigungspruefung ===
+  const canAccess = (viewId) => {
+    if (!loggedInUser) return true;
+    if (loggedInUser.role === "Admin") return true;
+    if (viewId === "dashboard" || viewId === "order") return true; // Start + Kassieren immer
+    const perms = loggedInUser.permissions;
+    if (!perms || !Array.isArray(perms)) return true; // alte Nutzer ohne perms -> alles
+    return perms.indexOf(viewId) >= 0;
+  };
+  // Wenn aktuelle Ansicht nicht erlaubt ist -> zurueck zum Dashboard
+  React.useEffect(() => {
+    if (loggedInUser && !canAccess(view)) {
+      setView("dashboard");
+    }
+  }, [view, loggedInUser]);
   const loginScreen = !loggedInUser ? /*#__PURE__*/React.createElement("div", { style:{ position:"fixed", inset:0, background:"linear-gradient(135deg, #C84B31 0%, #6B1200 100%)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center" } },
     /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:20, padding:28, width:300, boxShadow:"0 8px 40px #0006", textAlign:"center" } },
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:32 } }, "🔒"),
@@ -13562,7 +13774,17 @@ function App() {
     }
   }, "\u2715")), /*#__PURE__*/React.createElement("div", {
     style: { flex: 1, overflowY: "auto", overflowX: "hidden" }
-  }, MENU_ITEMS.map(item => /*#__PURE__*/React.createElement("div", {
+  }, MENU_ITEMS.filter(item => {
+    // Admin sieht alles. Andere nur erlaubte Views.
+    if (!loggedInUser) return true;
+    if (loggedInUser.role === "Admin") return true;
+    // Dashboard ist immer erlaubt (Startseite)
+    if (item.id === "dashboard") return true;
+    var perms = loggedInUser.permissions;
+    // Kein perms-Feld gesetzt (alte Nutzer) -> alles erlauben (abwaertskompatibel)
+    if (!perms || !Array.isArray(perms)) return true;
+    return perms.indexOf(item.id) >= 0;
+  }).map(item => /*#__PURE__*/React.createElement("div", {
     key: item.id,
     onClick: () => {
       setView(item.id);
@@ -13907,7 +14129,8 @@ function App() {
   }), view === "users" && /*#__PURE__*/React.createElement(UserManagementView, {
     users: users,
     onAdd: u => setUsers(p => [...p, u]),
-    onDelete: idx => setUsers(p => p.filter((_, i) => i !== idx))
+    onDelete: idx => setUsers(p => p.filter((_, i) => i !== idx)),
+    onUpdate: (idx, updatedUser) => setUsers(p => p.map((u, i) => i === idx ? updatedUser : u))
   }), view === "ai_kellnerin" && /*#__PURE__*/React.createElement(AiKellnerinView, {
     printerSettings: printerSettings,
     floors: floors,
@@ -15054,6 +15277,18 @@ function PersonalplanungView() {
   const [newStaff, setNewStaff] = React.useState({name:'', rolle:'Kueche'});
   const days = ['Mo','Di','Mi','Do','Fr','Sa','So'];
 
+  // Remote-Sync: wenn anderes Geraet Personal/Zeiterfassung aendert
+  React.useEffect(() => {
+    const onStaff = (e) => {
+      try {
+        const v = (e && e.detail) ? e.detail : LS.get('eatdesi_staff', []);
+        if (v) setStaff(prev => JSON.stringify(prev) === JSON.stringify(v) ? prev : v);
+      } catch(err) {}
+    };
+    window.addEventListener('eatdesi_staff_synced', onStaff);
+    return () => window.removeEventListener('eatdesi_staff_synced', onStaff);
+  }, []);
+
   const addStaff = () => { if (!newStaff.name) return; const s={id:Date.now(),...newStaff,stunden:0,schichten:[]}; const u=[...staff,s]; setStaff(u); LS.set('eatdesi_staff',u); setNewStaff({name:'',rolle:'Kueche'}); };
   const toggleSchicht = (staffId, day) => { const u=staff.map(s=>s.id===staffId?{...s,schichten:s.schichten.includes(day)?s.schichten.filter(d=>d!==day):[...s.schichten,day]}:s); setStaff(u); LS.set('eatdesi_staff',u); };
   const roleColors = { Kueche:'#C84B31', Service:'#1565c0', Bar:'#2e7d32', Lieferung:'#f57c00', Kasse:'#6a1b9a' };
@@ -15213,6 +15448,7 @@ async function pullOrdersFromSupabase() {
 // State zu Supabase pushen (UPSERT: INSERT oder UPDATE bei vorhandenem key)
 async function pushStateToSupabase(key, value) {
   try {
+    var stamp = new Date().toISOString();
     // on_conflict=key + merge-duplicates => bestehende Zeile wird UEBERSCHRIEBEN statt ignoriert
     await fetch(SUPA_URL + '/rest/v1/pos_state?on_conflict=key', {
       method: 'POST',
@@ -15225,9 +15461,11 @@ async function pushStateToSupabase(key, value) {
       body: JSON.stringify({
         key: LOCATION_ID + '_' + key,
         value: JSON.stringify(value),
-        updated_at: new Date().toISOString()
+        updated_at: stamp
       })
     });
+    // eigenen Zeitstempel mitfuehren, damit der eigene Push nicht zurueckgezogen wird
+    try { localStorage.setItem('eatdesi_stamp_' + key, String(new Date(stamp).getTime())); } catch(e2) {}
   } catch(e) { console.warn('pushState error:', e.message); }
 }
 
@@ -15307,6 +15545,93 @@ async function syncTableOrders() {
   } catch(e) {}
 }
 
+// === AUTOMATISCHE STATE-SYNCHRONISATION ===
+// Grundsatz: ALLE eatdesi_-Keys werden synchronisiert AUSSER die geraete-lokalen.
+// So muss kein Key einzeln eingetragen werden - neue Features syncen automatisch mit.
+var SYNC_BLACKLIST = [
+  'eatdesi_device_id',     // jede Geraete-ID ist eigen
+  'eatdesi_session',       // Login-Session lokal
+  'eatdesi_printer',       // Drucker pro Geraet
+  'eatdesi_mode',          // Betriebsmodus pro Geraet (POS/Kiosk)
+  'eatdesi_sb_url',        // Sync-interne Konfiguration
+  'eatdesi_sb_key',
+  'eatdesi_pending_push',  // Sync-Warteschlange lokal
+  'eatdesi_pushed_bonNrs', // lokale Push-Historie
+  'eatdesi_last_autoclose',// lokaler Timer
+  'eatdesi_orders',        // wird separat ueber eatdesi_orders-Logik gesynct
+  'eatdesi_tableorders',   // wird separat ueber syncTableOrders gesynct
+  'eatdesi_orders_updated' // nur ein Event-Flag
+];
+// TSE bleibt IMMER lokal (gesetzlich: eigener Zaehler/Schluessel pro Kasse)
+function _isLocalOnlyKey(k) {
+  if (SYNC_BLACKLIST.indexOf(k) >= 0) return true;
+  if (k.indexOf('eatdesi_tse') === 0) return true;   // alle TSE-Keys
+  if (k.indexOf('eatdesi_stamp_') === 0) return true; // Sync-Zeitstempel lokal
+  return false;
+}
+// Aus localStorage alle aktuell vorhandenen sync-faehigen eatdesi_-Keys ermitteln
+function _getSyncableKeys() {
+  var keys = [];
+  for (var i = 0; i < localStorage.length; i++) {
+    var k = localStorage.key(i);
+    if (k && k.indexOf('eatdesi_') === 0 && !_isLocalOnlyKey(k)) keys.push(k);
+  }
+  return keys;
+}
+// Remote-Key-Name (ohne eatdesi_ Praefix, Supabase-seitig)
+function _remoteName(lsKey) { return lsKey.replace(/^eatdesi_/, ''); }
+
+function _localStamp(remoteKey) {
+  return parseInt(localStorage.getItem('eatdesi_stamp_' + remoteKey) || '0', 10);
+}
+function _setLocalStamp(remoteKey, ts) {
+  localStorage.setItem('eatdesi_stamp_' + remoteKey, String(ts));
+}
+
+// Pull mit updated_at, damit wir wissen ob Remote neuer ist
+async function pullStateWithTime(remoteKey) {
+  try {
+    var resp = await supaFetch('/rest/v1/pos_state?key=eq.' + LOCATION_ID + '_' + remoteKey + '&select=value,updated_at');
+    if (!resp.ok) return null;
+    var data = await resp.json();
+    if (data && data[0] && data[0].value) {
+      return { value: JSON.parse(data[0].value), updated_at: new Date(data[0].updated_at).getTime() };
+    }
+    return null;
+  } catch(e) { return null; }
+}
+
+// Einen einzelnen localStorage-Key synchronisieren (Last-Write-Wins)
+async function syncOneStateKey(lsKey) {
+  try {
+    var remoteKey = _remoteName(lsKey);
+    var raw = localStorage.getItem(lsKey);
+    var local = raw ? JSON.parse(raw) : null;
+    var remote = await pullStateWithTime(remoteKey);
+    var localStamp = _localStamp(remoteKey);
+
+    if (remote && remote.updated_at > localStamp) {
+      // Remote ist neuer -> uebernehmen
+      var remoteStr = JSON.stringify(remote.value);
+      if (remoteStr !== JSON.stringify(local)) {
+        localStorage.setItem(lsKey, remoteStr);
+        // generisches Event + spezifisches Event (fuer React-Listener)
+        window.dispatchEvent(new CustomEvent('eatdesi_state_synced', { detail: { key: lsKey, value: remote.value } }));
+        window.dispatchEvent(new CustomEvent(lsKey + '_synced', { detail: remote.value }));
+      }
+      _setLocalStamp(remoteKey, remote.updated_at);
+    }
+  } catch(e) {}
+}
+
+// Alle sync-faehigen Keys durchgehen
+async function syncAllStateKeys() {
+  var keys = _getSyncableKeys();
+  for (var i = 0; i < keys.length; i++) {
+    await syncOneStateKey(keys[i]);
+  }
+}
+
 // Sync Badge aktualisieren
 function updateSyncBadge(status) {
   window._syncStatus = status;
@@ -15334,6 +15659,7 @@ async function runSync() {
     var remoteOrders = await pullOrdersFromSupabase();
     if (remoteOrders) mergeRemoteOrders(remoteOrders);
     await syncTableOrders();
+    await syncAllStateKeys();
     updateSyncBadge('ok');
   } catch(e) {
     updateSyncBadge('error');
@@ -15360,6 +15686,15 @@ LS.set = function(key, value) {
   }
   if (key === 'eatdesi_tableorders') {
     setTimeout(function(){ pushStateToSupabase('tableOrders', value); }, 1000);
+  }
+  // AUTOMATISCH: jeder sync-faehige eatdesi_-Key wird bei Aenderung hochgeladen
+  else if (key && key.indexOf('eatdesi_') === 0 && !_isLocalOnlyKey(key)) {
+    var _rk = _remoteName(key);
+    var _now = Date.now();
+    _setLocalStamp(_rk, _now); // eigene Aenderung kennen wir bereits
+    (function(remoteKey, val){
+      setTimeout(function(){ pushStateToSupabase(remoteKey, val); }, 300);
+    })(_rk, value);
   }
 };
 
