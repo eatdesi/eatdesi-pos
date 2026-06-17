@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v27</title>
+<title>eatDeSi POS v31</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v27';",
+    "var CACHE='eatdesi-v31';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -4329,7 +4329,9 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
   };
 
   const { from, to, label: periodLabel } = getDateRange();
-  const filtered = completedOrders.filter(o => { const d = new Date(o.time); return d >= from && d <= to; });
+  const filteredAll = completedOrders.filter(o => { const d = new Date(o.time); return d >= from && d <= to; });
+  const filtered = filteredAll.filter(o => !o.storniert);   // nur gueltige fuer Umsatz
+  const stornos = filteredAll.filter(o => o.storniert);     // stornierte separat
   const filtExp = (expenses||[]).filter(e => { const d = new Date(e.date||e.time||0); return d >= from && d <= to; });
 
   const rev = filtered.reduce((s,o)=>s+(o.total||0),0);
@@ -4337,6 +4339,7 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
   const bar = filtered.filter(o=>o.payMethod==="Bar").reduce((s,o)=>s+(o.total||0),0);
   const karte = filtered.filter(o=>o.payMethod==="Karte").reduce((s,o)=>s+(o.total||0),0);
   const rabattTotal = filtered.reduce((s,o)=>s+(o.rabatt||0),0);
+  const stornoSum = stornos.reduce((s,o)=>s+(o.total||0),0);
   const exp = filtExp.reduce((s,e)=>s+(e.amount||0),0);
   const tax7 = filtered.reduce((s,o)=>s+calcTax7(o.items||[]),0);
   const tax19 = filtered.reduce((s,o)=>s+calcTax19(o.items||[]),0);
@@ -4398,6 +4401,7 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
     ["\uD83D\uDCB3 Karte", fmt(karte)],
     tg > 0 ? ["\uD83C\uDF1F Trinkgeld", fmt(tg)] : null,
     rabattTotal > 0 ? ["\uD83C\uDF9F\uFE0F Rabatt", "-"+fmt(rabattTotal)] : null,
+    stornos.length > 0 ? ["\uD83D\uDEAB Stornos (" + stornos.length + ")", "-"+fmt(stornoSum)] : null,
     ["\uD83C\uDFDB MwSt 7%", fmt(tax7)],
     ["\uD83C\uDFDB MwSt 19%", fmt(tax19)],
     ["\uD83D\uDCB8 Ausgaben", "-"+fmt(exp)],
@@ -4493,7 +4497,7 @@ function MonatsreportView({ completedOrders }) {
   const [selYear, setSelYear] = React.useState(nowY);
   const monthNames = ["Jan","Feb","M\xE4r","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
   const data = Array.from({length:12},(_,m) => {
-    const ord = completedOrders.filter(o => { const d=new Date(o.time); return d.getFullYear()===selYear && d.getMonth()===m; });
+    const ord = completedOrders.filter(o => { const d=new Date(o.time); return d.getFullYear()===selYear && d.getMonth()===m && !o.storniert; });
     return { m, rev:ord.reduce((s,o)=>s+(o.total||0),0), count:ord.length,
       bar:ord.filter(o=>o.payMethod==="Bar").reduce((s,o)=>s+(o.total||0),0),
       karte:ord.filter(o=>o.payMethod==="Karte").reduce((s,o)=>s+(o.total||0),0) };
@@ -5979,7 +5983,7 @@ function SummaryView({
   completedOrders,
   expenses
 }) {
-  const today = completedOrders.filter(o => new Date(o.time).toDateString() === new Date().toDateString());
+  const today = completedOrders.filter(o => new Date(o.time).toDateString() === new Date().toDateString() && !o.storniert);
   const total = today.reduce((s, o) => s + o.total, 0);
   const tax = total / (1 + TAX_FOOD) * TAX_FOOD; // approx
   const bar = today.filter(o => o.payMethod === "Bar").reduce((s, o) => s + o.total, 0);
@@ -6260,7 +6264,7 @@ function DayEndView({
   } = getPeriodRange(period, customFrom, customTo);
   const filtered = completedOrders.filter(o => {
     const d = new Date(o.time);
-    return d >= from && d <= to;
+    return d >= from && d <= to && !o.storniert;
   });
   const filteredExp = expenses.filter(e => {
     const d = new Date(e.time);
@@ -6866,13 +6870,13 @@ function OrderListView({
       marginBottom: 8,
       color: "#c62828"
     }
-  }, "Bestellung bearbeiten / l\xF6schen?"), /*#__PURE__*/React.createElement("div", {
+  }, "Bestellung stornieren?"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13,
       color: "#555",
       marginBottom: 6
     }
-  }, "Bestellung #", confirmDelete + 1, " wird bearbeitet oder gel\xF6scht."), /*#__PURE__*/React.createElement("div", {
+  }, "Bestellung #", confirmDelete + 1, " wird storniert. Der Beleg bleibt erhalten, zählt aber nicht mehr zum Umsatz."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 10
@@ -6907,7 +6911,7 @@ function OrderListView({
       fontFamily: "inherit",
       fontWeight: 700
     }
-  }, "\uD83D\uDDD1 L\xF6schen")))), mergeTarget !== null && /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDEAB Stornieren")))), mergeTarget !== null && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
       inset: 0,
@@ -7156,7 +7160,7 @@ function OrderListView({
         fontWeight: 700,
         fontSize: 13
       }
-    }, "\uD83D\uDDD1 Endg\xFCltig l\xF6schen")),
+    }, "\uD83D\uDEAB Stornieren")),
 
     React.createElement("div", { style:{borderTop:"1px solid #f0f0f0",marginTop:8,paddingTop:10} },
       React.createElement("div", { style:{fontSize:11,color:"#aaa",marginBottom:8,fontWeight:700} }, "\u2015 Bon teilen \u2015"),
@@ -7286,15 +7290,18 @@ function OrderListView({
       key: realIdx,
       onClick: () => setSelected(realIdx),
       style: {
-        background: "#fff",
+        background: o.storniert ? "#fff5f5" : "#fff",
         borderRadius: 10,
         padding: "12px 14px",
         marginBottom: 8,
         boxShadow: "0 1px 4px #0001",
         cursor: "pointer",
-        borderLeft: `4px solid ${C.pink}`
+        opacity: o.storniert ? 0.7 : 1,
+        borderLeft: `4px solid ${o.storniert ? C.red : C.pink}`
       }
-    }, /*#__PURE__*/React.createElement("div", {
+    }, o.storniert && /*#__PURE__*/React.createElement("div", {
+      style: { background: C.red, color: "#fff", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontWeight: 800, display: "inline-block", marginBottom: 6, letterSpacing: 0.5 }
+    }, "\uD83D\uDEAB STORNIERT" + (o.stornoVon ? " \xB7 " + o.stornoVon : "")), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         justifyContent: "space-between",
@@ -7324,8 +7331,9 @@ function OrderListView({
     }, o.tableId ? `Tisch ${o.tableId}` : `Takeaway`)), /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 700,
-        color: C.green,
-        fontSize: 14
+        color: o.storniert ? "#aaa" : C.green,
+        fontSize: 14,
+        textDecoration: o.storniert ? "line-through" : "none"
       }
     }, fmt(o.total), o.trinkgeld > 0 ? ` +🌟${fmt(o.trinkgeld)}` : "")), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -12688,7 +12696,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
   const isAdmin = loggedInUser && (loggedInUser.role === "Admin" || loggedInUser.role === "Manager");
   const today = new Date();
   const todayStr = today.toLocaleDateString("de-DE");
-  const todayOrders = completedOrders.filter(o => new Date(o.time).toLocaleDateString("de-DE") === todayStr);
+  const todayOrders = completedOrders.filter(o => new Date(o.time).toLocaleDateString("de-DE") === todayStr && !o.storniert);
   const todayRevenue = todayOrders.reduce((s,o) => s + (o.total||0), 0);
   const todayTips = todayOrders.reduce((s,o) => s + (o.trinkgeld||0), 0);
   const todayExpenses = (expenses||[]).filter(e => new Date(e.date||e.time||0).toLocaleDateString("de-DE") === todayStr).reduce((s,e) => s+(parseFloat(e.amount)||0),0);
@@ -13135,12 +13143,20 @@ function App() {
         if (v) setOptionGroups(prev => JSON.stringify(prev) === JSON.stringify(v) ? prev : v);
       } catch(err) {}
     };
+    // Wenn neue Bestellungen von anderem Geraet ankommen (Kassenbuch/Z-Bon/Umsatz)
+    const onOrdersUpdated = () => {
+      try {
+        const v = LS.get("eatdesi_orders", []);
+        setCompletedOrders(prev => JSON.stringify(prev) === JSON.stringify(v) ? prev : v);
+      } catch(err) {}
+    };
     window.addEventListener('eatdesi_takeaway_synced', onTakeaway);
     window.addEventListener('eatdesi_menu_synced', onMenu);
     window.addEventListener('eatdesi_drivers_synced', onDrivers);
     window.addEventListener('eatdesi_reservations_synced', onReservations);
     window.addEventListener('eatdesi_users_synced', onUsers);
     window.addEventListener('eatdesi_optiongroups_synced', onOptionGroups);
+    window.addEventListener('eatdesi_orders_updated', onOrdersUpdated);
     return () => {
       window.removeEventListener('eatdesi_takeaway_synced', onTakeaway);
       window.removeEventListener('eatdesi_menu_synced', onMenu);
@@ -13148,6 +13164,7 @@ function App() {
       window.removeEventListener('eatdesi_reservations_synced', onReservations);
       window.removeEventListener('eatdesi_users_synced', onUsers);
       window.removeEventListener('eatdesi_optiongroups_synced', onOptionGroups);
+      window.removeEventListener('eatdesi_orders_updated', onOrdersUpdated);
     };
   }, []);
 
@@ -13389,8 +13406,18 @@ function App() {
 
   // L_sche Bestellung komplett - aus allen Systemen, Nummern neu vergeben
   const deleteOrder = idx => {
-    setCompletedOrders(p => p.filter((_, i) => i !== idx));
-    // No gaps - indices auto-update since we use array index as display number
+    // STORNIEREN statt loeschen (GoBD/KassenSichV-konform): Beleg bleibt erhalten,
+    // wird aber als storniert markiert und faellt aus dem Umsatz heraus.
+    if (!isAbschlussAllowed()) {
+      alert("Nur Admin oder Manager dürfen Bestellungen stornieren.");
+      return;
+    }
+    setCompletedOrders(p => p.map((o, i) => i === idx ? {
+      ...o,
+      storniert: true,
+      stornoZeit: new Date().toISOString(),
+      stornoVon: (loggedInUser && loggedInUser.name) || "?"
+    } : o));
   };
 
   // Verschiebe abgeschlossene Bestellung zu einem aktiven Tisch
@@ -13569,6 +13596,58 @@ function App() {
     if (!perms || !Array.isArray(perms)) return true; // alte Nutzer ohne perms -> alles
     return perms.indexOf(viewId) >= 0;
   };
+  // === Tagesabschluss: nur Admin/Manager, dann auf ALLEN Geraeten auf 0 ===
+  const isAbschlussAllowed = () => {
+    if (!loggedInUser) return false;
+    return loggedInUser.role === "Admin" || loggedInUser.role === "Manager";
+  };
+  const doAbschluss = () => {
+    // 1) lokal archivieren + leeren
+    const key = new Date().toLocaleDateString("de-DE");
+    const arch = LS.get("eatdesi_archive", []) || [];
+    arch.push({ date: key, orders: completedOrders, expenses: expenses });
+    LS.set("eatdesi_archive", arch);
+    setCompletedOrders([]);
+    setExpenses([]);
+    setTableOrders({});      // alle Tische ebenfalls leeren
+    setTakeaway([]);
+    LS.set("eatdesi_tableorders", {});
+    LS.set("eatdesi_takeaway", []);
+    // 2) Signal an alle Geraete senden (eindeutiger Zeitstempel)
+    const signal = { ts: Date.now(), by: (loggedInUser && loggedInUser.name) || "?", date: key };
+    LS.set("eatdesi_abschluss_signal", signal);
+    // sofort pushen, nicht erst beim naechsten Loop
+    setTimeout(function(){ pushStateToSupabase("abschluss_signal", signal); }, 100);
+  };
+  // Wenn ein anderes Geraet einen Abschluss durchgefuehrt hat -> hier auch alles auf 0
+  React.useEffect(() => {
+    const onAbschlussSignal = (e) => {
+      try {
+        const sig = (e && e.detail) ? e.detail : LS.get("eatdesi_abschluss_signal", null);
+        if (!sig || !sig.ts) return;
+        // schon verarbeitet? (verhindert Doppel-Reset)
+        const lastSeen = parseInt(LS.get("eatdesi_abschluss_seen", 0) || 0, 10);
+        if (sig.ts <= lastSeen) return;
+        LS.set("eatdesi_abschluss_seen", sig.ts);
+        // dieses Geraet hat den Abschluss NICHT selbst ausgeloest -> jetzt auch leeren
+        // (eigenes Geraet hat completedOrders schon geleert; hier nur sicherstellen)
+        const arch = LS.get("eatdesi_archive", []) || [];
+        const curOrders = LS.get("eatdesi_orders", []);
+        if (curOrders && curOrders.length > 0) {
+          arch.push({ date: sig.date || new Date().toLocaleDateString("de-DE"), orders: curOrders, expenses: LS.get("eatdesi_expenses", []) });
+          LS.set("eatdesi_archive", arch);
+        }
+        setCompletedOrders([]);
+        setExpenses([]);
+        setTableOrders({});
+        setTakeaway([]);
+        LS.set("eatdesi_tableorders", {});
+        LS.set("eatdesi_takeaway", []);
+      } catch(err) {}
+    };
+    window.addEventListener('eatdesi_abschluss_signal_synced', onAbschlussSignal);
+    return () => window.removeEventListener('eatdesi_abschluss_signal_synced', onAbschlussSignal);
+  }, []);
   // Wenn aktuelle Ansicht nicht erlaubt ist -> zurueck zum Dashboard
   React.useEffect(() => {
     if (loggedInUser && !canAccess(view)) {
@@ -13709,12 +13788,7 @@ function App() {
         /*#__PURE__*/React.createElement("button", {
           onClick: () => {
             setShowResetConfirm(false);
-            const key = new Date().toLocaleDateString("de-DE");
-            const arch = LS.get("eatdesi_archive",[])||[];
-            arch.push({date:key, orders:completedOrders, expenses});
-            LS.set("eatdesi_archive", arch);
-            setCompletedOrders([]);
-            setExpenses([]);
+            doAbschluss();
           },
           style:{ flex:2, padding:13, borderRadius:10, border:"none", background:C.red, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
         }, "✓ Abschluss durchführen")
@@ -14148,17 +14222,11 @@ function App() {
   }), view === "kassenbuch" && /*#__PURE__*/React.createElement(KassenbuchView, {
     completedOrders: completedOrders, expenses: expenses, printerSettings: printerSettings,
     onReset: () => {
-      if (!window._resetConfirmed) {
-        setShowResetConfirm(true);
-      } else {
-        window._resetConfirmed = false;
-        const key = new Date().toLocaleDateString("de-DE");
-        const arch = LS.get("eatdesi_archive",[])||[];
-        arch.push({date:key,orders:completedOrders,expenses});
-        LS.set("eatdesi_archive",arch);
-        setCompletedOrders([]);
-        setExpenses([]);
+      if (!isAbschlussAllowed()) {
+        alert("Nur Admin oder Manager dürfen den Tagesabschluss durchführen.");
+        return;
       }
+      setShowResetConfirm(true);
     }
   }), view === "monatsreport" && /*#__PURE__*/React.createElement(MonatsreportView, {
     completedOrders: completedOrders
@@ -15520,28 +15588,27 @@ async function pushPendingOrders() {
 // Tischbestellungen synchronisieren
 async function syncTableOrders() {
   try {
-    // WICHTIG: App speichert Tische unter 'eatdesi_tableorders' (klein!) via LS.set
+    // App speichert Tische unter 'eatdesi_tableorders' (klein!) via LS.set
     var local = JSON.parse(localStorage.getItem('eatdesi_tableorders') || '{}');
-    var remote = await pullStateFromSupabase('tableOrders');
-    if (remote && JSON.stringify(remote) !== JSON.stringify(local)) {
-      // Merge pro Tisch: Eintrag mit den MEISTEN items gewinnt (verhindert dass leeres Lokal Remote loescht)
-      var merged = {};
-      var allKeys = {};
-      Object.keys(remote).forEach(function(k){ allKeys[k]=1; });
-      Object.keys(local).forEach(function(k){ allKeys[k]=1; });
-      Object.keys(allKeys).forEach(function(k){
-        var r = remote[k], l = local[k];
-        var rN = (r && r.items) ? r.items.length : 0;
-        var lN = (l && l.items) ? l.items.length : 0;
-        merged[k] = (rN > lN) ? r : (l || r);
-        if (!merged[k] || !merged[k].items || merged[k].items.length === 0) delete merged[k];
-      });
-      localStorage.setItem('eatdesi_tableorders', JSON.stringify(merged));
-      // App benachrichtigen, damit React den State neu laedt
-      window.dispatchEvent(new CustomEvent('eatdesi_tables_synced', { detail: merged }));
+    var remote = await pullStateWithTime('tableOrders');
+    var localStamp = _localStamp('tableOrders');
+
+    // Remote ist NEUER als unser letzter bekannter Stand -> Remote uebernehmen.
+    // (Last-Write-Wins per Zeitstempel - NICHT mehr "mehr items gewinnt",
+    //  denn das liess bezahlte/geleerte Tische immer zurueckkommen.)
+    if (remote && remote.updated_at > localStamp) {
+      var remoteStr = JSON.stringify(remote.value);
+      if (remoteStr !== JSON.stringify(local)) {
+        window._syncWriting = true;
+        localStorage.setItem('eatdesi_tableorders', remoteStr);
+        window._syncWriting = false;
+        window.dispatchEvent(new CustomEvent('eatdesi_tables_synced', { detail: remote.value }));
+      }
+      _setLocalStamp('tableOrders', remote.updated_at);
     }
-    // Push lokale Aenderungen
-    await pushStateToSupabase('tableOrders', local);
+    // KEIN automatischer Push hier mehr - Push passiert nur bei echter lokaler
+    // Aenderung (ueber den LS.set / setItem-Hook). So ueberschreibt ein Geraet
+    // nicht staendig den frischen Stand des anderen.
   } catch(e) {}
 }
 
@@ -15560,7 +15627,8 @@ var SYNC_BLACKLIST = [
   'eatdesi_last_autoclose',// lokaler Timer
   'eatdesi_orders',        // wird separat ueber eatdesi_orders-Logik gesynct
   'eatdesi_tableorders',   // wird separat ueber syncTableOrders gesynct
-  'eatdesi_orders_updated' // nur ein Event-Flag
+  'eatdesi_orders_updated', // nur ein Event-Flag
+  'eatdesi_abschluss_seen' // welchen Abschluss dieses Geraet schon verarbeitet hat (lokal)
 ];
 // TSE bleibt IMMER lokal (gesetzlich: eigener Zaehler/Schluessel pro Kasse)
 function _isLocalOnlyKey(k) {
@@ -15687,7 +15755,11 @@ LS.set = function(key, value) {
     }
   }
   if (key === 'eatdesi_tableorders') {
-    setTimeout(function(){ pushStateToSupabase('tableOrders', value); }, 1000);
+    // eigenen Zeitstempel JETZT setzen, damit der eigene Push nicht zurueckgeholt wird
+    _setLocalStamp('tableOrders', Date.now());
+    (function(val){
+      setTimeout(function(){ pushStateToSupabase('tableOrders', val); }, 300);
+    })(value);
   }
   // AUTOMATISCH: jeder sync-faehige eatdesi_-Key wird bei Aenderung hochgeladen
   else if (key && key.indexOf('eatdesi_') === 0 && !_isLocalOnlyKey(key)) {
