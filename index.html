@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v22</title>
+<title>eatDeSi POS v23</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v22';",
+    "var CACHE='eatdesi-v23';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -15210,15 +15210,25 @@ async function pullOrdersFromSupabase() {
   } catch(e) { return null; }
 }
 
-// State zu Supabase pushen
+// State zu Supabase pushen (UPSERT: INSERT oder UPDATE bei vorhandenem key)
 async function pushStateToSupabase(key, value) {
   try {
-    await supaFetch('/rest/v1/pos_state', 'POST', {
-      key: LOCATION_ID + '_' + key,
-      value: JSON.stringify(value),
-      updated_at: new Date().toISOString()
+    // on_conflict=key + merge-duplicates => bestehende Zeile wird UEBERSCHRIEBEN statt ignoriert
+    await fetch(SUPA_URL + '/rest/v1/pos_state?on_conflict=key', {
+      method: 'POST',
+      headers: {
+        'apikey': SUPA_KEY,
+        'Authorization': 'Bearer ' + SUPA_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({
+        key: LOCATION_ID + '_' + key,
+        value: JSON.stringify(value),
+        updated_at: new Date().toISOString()
+      })
     });
-  } catch(e) {}
+  } catch(e) { console.warn('pushState error:', e.message); }
 }
 
 // State von Supabase laden
