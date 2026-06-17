@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v31</title>
+<title>eatDeSi POS v32</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v31';",
+    "var CACHE='eatdesi-v32';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -13412,12 +13412,20 @@ function App() {
       alert("Nur Admin oder Manager dürfen Bestellungen stornieren.");
       return;
     }
-    setCompletedOrders(p => p.map((o, i) => i === idx ? {
-      ...o,
-      storniert: true,
-      stornoZeit: new Date().toISOString(),
-      stornoVon: (loggedInUser && loggedInUser.name) || "?"
-    } : o));
+    setCompletedOrders(p => p.map((o, i) => {
+      if (i !== idx) return o;
+      const stornoOrder = {
+        ...o,
+        storniert: true,
+        stornoZeit: new Date().toISOString(),
+        stornoVon: (loggedInUser && loggedInUser.name) || "?"
+      };
+      // Stornierung sofort in der Cloud aktualisieren (alle Geraete bekommen es)
+      if (typeof updateOrderInSupabase === "function") {
+        setTimeout(function(){ updateOrderInSupabase(stornoOrder); }, 100);
+      }
+      return stornoOrder;
+    }));
   };
 
   // Verschiebe abgeschlossene Bestellung zu einem aktiven Tisch
@@ -15480,21 +15488,34 @@ function supaFetch(path, method, body) {
   });
 }
 
-// Push eine Bestellung zu Supabase
+// Push eine Bestellung zu Supabase (UPSERT auf location_id+bon_nr,
+// damit Stornierungen denselben Beleg aktualisieren statt zu duplizieren)
 async function pushOrderToSupabase(order) {
   try {
-    var resp = await supaFetch('/rest/v1/eatdesi_orders', 'POST', {
-      location_id: LOCATION_ID,
-      bon_nr: String(order.bonNr || ''),
-      table_id: String(order.tableId || order.id || ''),
-      items: JSON.stringify(order.items || []),
-      total: parseFloat(order.total) || 0,
-      payment: order.payMethod || order.payment || 'bar',
-      customer_name: order.customerName || null,
-      customer_phone: order.customerPhone || null,
-      source: order.source || 'POS',
-      created_at: order.time ? new Date(order.time).toISOString() : new Date().toISOString(),
-      device_id: window._deviceId
+    var resp = await fetch(SUPA_URL + '/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr', {
+      method: 'POST',
+      headers: {
+        'apikey': SUPA_KEY,
+        'Authorization': 'Bearer ' + SUPA_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({
+        location_id: LOCATION_ID,
+        bon_nr: String(order.bonNr || ''),
+        table_id: String(order.tableId || order.id || ''),
+        items: JSON.stringify(order.items || []),
+        total: parseFloat(order.total) || 0,
+        payment: order.payMethod || order.payment || 'bar',
+        customer_name: order.customerName || null,
+        customer_phone: order.customerPhone || null,
+        source: order.source || 'POS',
+        created_at: order.time ? new Date(order.time).toISOString() : new Date().toISOString(),
+        device_id: window._deviceId,
+        storniert: order.storniert || false,
+        storno_von: order.stornoVon || null,
+        storno_zeit: order.stornoZeit || null
+      })
     });
     return resp.ok || resp.status === 409;
   } catch(e) {
@@ -15503,11 +15524,33 @@ async function pushOrderToSupabase(order) {
   }
 }
 
+// Eine bereits gepushte Bestellung in der Cloud aktualisieren (z.B. Stornierung)
+async function updateOrderInSupabase(order) {
+  if (!order || !order.bonNr) return false;
+  try {
+    var resp = await fetch(SUPA_URL + '/rest/v1/eatdesi_orders?location_id=eq.' + LOCATION_ID + '&bon_nr=eq.' + encodeURIComponent(String(order.bonNr)), {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPA_KEY,
+        'Authorization': 'Bearer ' + SUPA_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        storniert: order.storniert || false,
+        storno_von: order.stornoVon || null,
+        storno_zeit: order.stornoZeit || null
+      })
+    });
+    return resp.ok;
+  } catch(e) { console.warn('updateOrder error:', e.message); return false; }
+}
+
 // Bestellungen von Supabase laden
 async function pullOrdersFromSupabase() {
   try {
-    var since = new Date(Date.now() - 24*60*60*1000).toISOString();
-    var resp = await supaFetch('/rest/v1/eatdesi_orders?location_id=eq.' + LOCATION_ID + '&created_at=gte.' + since + '&order=created_at.desc&limit=200');
+    var since = new Date(Date.now() - 7*24*60*60*1000).toISOString();
+    var resp = await supaFetch('/rest/v1/eatdesi_orders?location_id=eq.' + LOCATION_ID + '&created_at=gte.' + since + '&order=created_at.desc&limit=500');
     if (!resp.ok) return null;
     return await resp.json();
   } catch(e) { return null; }
@@ -15548,23 +15591,41 @@ async function pullStateFromSupabase(key) {
   } catch(e) { return null; }
 }
 
-// Neue Orders mergen
+// Orders aus Cloud uebernehmen - SUPABASE IST DER MASTER.
+// Alle Geraete zeigen denselben Stand. Lokale Orders die noch nicht gepusht
+// wurden (offline erstellt) bleiben erhalten bis sie hochgeladen sind.
 function mergeRemoteOrders(remoteOrders) {
-  if (!remoteOrders || !remoteOrders.length) return false;
+  if (!remoteOrders) return false;
   var local = JSON.parse(localStorage.getItem('eatdesi_orders') || '[]');
-  var localBonNrs = new Set(local.map(function(o){ return String(o.bonNr || ''); }));
-  var newOrders = remoteOrders.filter(function(ro) {
-    return ro.device_id !== window._deviceId && !localBonNrs.has(String(ro.bon_nr || ''));
-  });
-  if (!newOrders.length) return false;
-  var converted = newOrders.map(function(ro) {
+
+  // Remote (Cloud) -> in App-Format umwandeln, indiziert nach bonNr
+  var remoteByBon = {};
+  remoteOrders.forEach(function(ro) {
     var items = [];
     try { items = JSON.parse(ro.items || '[]'); } catch(e) {}
-    return { bonNr: ro.bon_nr, tableId: ro.table_id, items: items, total: ro.total,
+    remoteByBon[String(ro.bon_nr || '')] = {
+      bonNr: ro.bon_nr, tableId: ro.table_id, items: items, total: ro.total,
       payMethod: ro.payment, customerName: ro.customer_name, customerPhone: ro.customer_phone,
-      source: ro.source || 'Anderes Geraet', time: ro.created_at, synced: true };
+      source: ro.source || 'POS', time: ro.created_at, synced: true,
+      storniert: ro.storniert || false, stornoVon: ro.storno_von || null, stornoZeit: ro.storno_zeit || null
+    };
   });
-  localStorage.setItem('eatdesi_orders', JSON.stringify(local.concat(converted)));
+
+  // lokale Orders die NOCH NICHT in der Cloud sind (offline erstellt) behalten
+  var pendingLocal = local.filter(function(lo){
+    return lo.bonNr && !remoteByBon.hasOwnProperty(String(lo.bonNr)) && !lo.synced;
+  });
+
+  // Neue gemeinsame Liste = alle Cloud-Orders + lokale noch-nicht-gepushte
+  var mergedArr = Object.keys(remoteByBon).map(function(k){ return remoteByBon[k]; })
+    .concat(pendingLocal)
+    .sort(function(a,b){ return new Date(a.time) - new Date(b.time); });
+
+  // nur schreiben wenn wirklich anders (verhindert Render-Schleife)
+  if (JSON.stringify(mergedArr) === JSON.stringify(local)) return false;
+  window._syncWriting = true;
+  localStorage.setItem('eatdesi_orders', JSON.stringify(mergedArr));
+  window._syncWriting = false;
   window.dispatchEvent(new Event('eatdesi_orders_updated'));
   return true;
 }
