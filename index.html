@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v45</title>
+<title>eatDeSi POS v46</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v45';",
+    "var CACHE='eatdesi-v46';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6388,6 +6388,134 @@ const TAX_FOOD = 0.07;
 const TAX_DRINK = 0.19;
 const DRINK_CATS = ["Cocktails","Alkoholfrei","Softdrinks","Bier","Weine","Long & Shot Drinks","Digestive","Caffe"];
 
+// === NATIVE BLUETOOTH DRUCK (Capacitor BLE Plugin) =========================
+// Druckt direkt auf JEDEN Bluetooth-Thermodrucker (ESC/POS), ohne RawBT.
+// Funktioniert in der APK (nicht im normalen Browser).
+const BTPrint = {
+  // bekannte ESC/POS Service/Characteristic UUIDs verschiedener Drucker
+  SERVICE_UUIDS: [
+    "000018f0-0000-1000-8000-00805f9b34fb", // gängigster Thermodrucker-Service
+    "0000ff00-0000-1000-8000-00805f9b34fb",
+    "0000ffe0-0000-1000-8000-00805f9b34fb",
+    "49535343-fe7d-4ae5-8fa9-9fafd205e455"  // Microchip / viele China-Drucker
+  ],
+  WRITE_UUIDS: [
+    "00002af1-0000-1000-8000-00805f9b34fb",
+    "0000ff02-0000-1000-8000-00805f9b34fb",
+    "0000ffe1-0000-1000-8000-00805f9b34fb",
+    "49535343-8841-43f4-a8d4-ecbe34729bb3"
+  ],
+  _ble: function(){
+    // Plugin holen (Capacitor)
+    var cap = window.Capacitor;
+    if(cap && cap.Plugins && cap.Plugins.BluetoothLe) return cap.Plugins.BluetoothLe;
+    return null;
+  },
+  isNative: function(){
+    return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() && this._ble());
+  },
+  _initDone: false,
+  init: async function(){
+    var ble = this._ble();
+    if(!ble) throw new Error("Bluetooth-Plugin nicht verfügbar");
+    if(!this._initDone){ await ble.initialize({ androidNeverForLocation: true }); this._initDone = true; }
+  },
+  // Sucht Drucker und gibt {deviceId, name} zurück
+  scan: async function(timeoutMs){
+    await this.init();
+    var ble = this._ble();
+    var found = [];
+    await ble.requestLEScan({ allowDuplicates:false }, function(result){
+      if(result && result.device){
+        if(!found.find(function(d){return d.deviceId===result.device.deviceId;})){
+          found.push({ deviceId: result.device.deviceId, name: result.device.name || result.localName || "Drucker" });
+        }
+      }
+    });
+    await new Promise(function(r){ setTimeout(r, timeoutMs||5000); });
+    try{ await ble.stopLEScan(); }catch(e){}
+    return found;
+  },
+  // Verbindet + findet Schreib-Characteristic, merkt sie
+  _conn: null,
+  connect: async function(deviceId){
+    await this.init();
+    var ble = this._ble();
+    await ble.connect({ deviceId: deviceId });
+    var services = await ble.getServices({ deviceId: deviceId });
+    var svcUuid=null, chrUuid=null;
+    // passende Service+Write-Characteristic suchen
+    (services.services||services||[]).forEach(function(s){
+      var sid=(s.uuid||"").toLowerCase();
+      (s.characteristics||[]).forEach(function(c){
+        var cid=(c.uuid||"").toLowerCase();
+        var canWrite = c.properties && (c.properties.write || c.properties.writeWithoutResponse);
+        if(canWrite && !chrUuid){
+          // bevorzugt bekannte UUIDs, sonst erste schreibbare
+          if(BTPrint.WRITE_UUIDS.indexOf(cid)>=0 || BTPrint.SERVICE_UUIDS.indexOf(sid)>=0){ svcUuid=sid; chrUuid=cid; }
+        }
+      });
+    });
+    // Fallback: erste schreibbare Characteristic nehmen
+    if(!chrUuid){
+      (services.services||services||[]).forEach(function(s){
+        (s.characteristics||[]).forEach(function(c){
+          var canWrite = c.properties && (c.properties.write || c.properties.writeWithoutResponse);
+          if(canWrite && !chrUuid){ svcUuid=(s.uuid||"").toLowerCase(); chrUuid=(c.uuid||"").toLowerCase(); }
+        });
+      });
+    }
+    if(!chrUuid) throw new Error("Keine Druck-Schnittstelle gefunden");
+    this._conn = { deviceId: deviceId, service: svcUuid, characteristic: chrUuid };
+    return this._conn;
+  },
+  // DataView aus Byte-Array (Plugin braucht DataView)
+  _toDataView: function(bytes){
+    var buf = new ArrayBuffer(bytes.length);
+    var dv = new DataView(buf);
+    for(var i=0;i<bytes.length;i++) dv.setUint8(i, bytes[i]);
+    return dv;
+  },
+  // Sendet Byte-Array an verbundenen Drucker (in Stücken, BLE-MTU ~180)
+  writeBytes: async function(deviceId, bytes){
+    var ble = this._ble();
+    var conn = this._conn;
+    if(!conn || conn.deviceId !== deviceId){ conn = await this.connect(deviceId); }
+    var CHUNK = 180;
+    for(var i=0;i<bytes.length;i+=CHUNK){
+      var slice = bytes.slice(i, i+CHUNK);
+      var dv = this._toDataView(slice);
+      try{
+        await ble.writeWithoutResponse({ deviceId: conn.deviceId, service: conn.service, characteristic: conn.characteristic, value: dv });
+      }catch(e){
+        await ble.write({ deviceId: conn.deviceId, service: conn.service, characteristic: conn.characteristic, value: dv });
+      }
+    }
+  },
+  // HTML -> ESC/POS Text (gleiche Logik wie RawBT)
+  htmlToEscpos: function(html, fontCmd){
+    var tmp = document.createElement('div'); tmp.innerHTML = html;
+    tmp.querySelectorAll('.row').forEach(function(r){ var s=r.querySelectorAll('span'); if(s.length>=2){var l=s[0].textContent.trim(),ri=s[1].textContent.trim(),p=Math.max(1,32-l.length-ri.length);r.textContent=l+' '.repeat(p)+ri;} });
+    tmp.querySelectorAll('.line').forEach(function(l){l.textContent='--------------------------------';});
+    tmp.querySelectorAll('.center').forEach(function(c){var t=c.textContent.trim(),p=Math.max(0,Math.floor((32-t.length)/2));c.textContent=' '.repeat(p)+t;});
+    var text = tmp.innerText||tmp.textContent||'';
+    var ESC=0x1B, GS=0x1D;
+    var bytes = [ESC,0x40, GS,0x21,(fontCmd||0x00)];
+    // Text als UTF-8 Bytes (Umlaute: CP437 nicht perfekt, aber meiste Drucker ok mit Latin)
+    var enc = new TextEncoder();
+    var txtBytes = enc.encode(text);
+    for(var i=0;i<txtBytes.length;i++) bytes.push(txtBytes[i]);
+    bytes.push(0x0A,0x0A,0x0A);          // 3 Zeilen Vorschub
+    bytes.push(GS,0x56,0x41,0x03);       // Papier schneiden
+    return bytes;
+  },
+  // Komplett: HTML drucken auf gespeicherten Drucker
+  printHtml: async function(deviceId, html, fontCmd){
+    var bytes = this.htmlToEscpos(html, fontCmd);
+    await this.writeBytes(deviceId, bytes);
+  }
+};
+
 // --- Kernfunktionen (zentral definiert, damit sie überall verfügbar sind) ---
 // Getränk? -> 19% MwSt, sonst Speise -> 7%
 function isDrink(item){
@@ -7009,6 +7137,16 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     ${tseBlock}
     <div class="center" style="margin-top:8px;font-size:11px">${printerCfg?.footer||"Danke & bis bald! 🙏"}</div>
   </body></html>`;
+  if (printerCfg?.method === "bluetooth") {
+    const devId = printerCfg?.btDeviceId;
+    const szMap={klein:0x00,normal:0x01,gross:0x11,xl:0x33};
+    const fsz=szMap[printerCfg?.bonFontSize||'normal']??0x00;
+    if (devId && BTPrint.isNative()) {
+      BTPrint.printHtml(devId, html, fsz).catch(e => { printHtml(html); });
+      return;
+    }
+    printHtml(html); return;
+  }
   if (printerCfg?.method === "rawbt") {
     try {
       const tmp = document.createElement('div'); tmp.innerHTML = html;
@@ -7121,7 +7259,19 @@ function BonModal({
 
   const doPrint = html => {
     const method = printerSettings?.method || "browser";
-    if (method === "rawbt") {
+    if (method === "bluetooth") {
+      // Native Bluetooth (Capacitor BLE) — direkt an Thermodrucker
+      const devId = printerSettings?.btDeviceId;
+      if (devId && BTPrint.isNative()) {
+        BTPrint.printHtml(devId, html, getFontCmd()).catch(e => {
+          // bei Fehler: Browser-Druck als Notfall
+          printHtml(html);
+        });
+      } else {
+        // kein Gerät gespeichert ODER nicht in APK -> Browser-Druck
+        printHtml(html);
+      }
+    } else if (method === "rawbt") {
       // RawBT via deep link
       try {
         const text = htmlToRawText(html);
@@ -12856,6 +13006,7 @@ function PrinterSettingsView({
   const [btStatus, setBtStatus] = useState("");
   const [wifiStatus, setWifiStatus] = useState("");
   const [btDevice, setBtDevice] = useState(null);
+  const [btDevices, setBtDevices] = useState([]);
   const saveFirmaFields = [["firmaName","Firmenname"],["firmaZusatz","Betrieb/Zusatz"],["firmaStrasse","Straße"],["firmaPlzOrt","PLZ & Ort"],["firmaStNr","Steuernummer"],["firmaUst","USt-ID"],["firmaGericht","Amtsgericht"],["firmaEmail","E-Mail"],["firmaWeb","Website"]];
   const save = () => {
     onSave(form);
@@ -12863,74 +13014,86 @@ function PrinterSettingsView({
     setTimeout(() => setSaved(false), 2000);
   };
 
-  // -- Bluetooth Web API ------------------------------------------------------
+  // -- Bluetooth (Capacitor BLE Plugin — funktioniert in der APK) -------------
   const connectBluetooth = async () => {
     try {
+      // In der APK: natives Plugin nutzen
+      if (BTPrint.isNative()) {
+        setBtStatus("🔍 Suche Bluetooth Drucker... (ca. 5 Sek)");
+        const found = await BTPrint.scan(6000);
+        if (!found.length) {
+          setBtStatus("❌ Kein Drucker gefunden. Drucker einschalten & Bluetooth aktiv? Erneut suchen.");
+          setBtDevices([]);
+          return;
+        }
+        setBtDevices(found);
+        setBtStatus(`✅ ${found.length} Gerät(e) gefunden — bitte auswählen:`);
+        return;
+      }
+      // Fallback: Web Bluetooth (nur Chrome Browser)
       if (!navigator.bluetooth) {
-        setBtStatus("❌ Bluetooth wird von diesem Browser nicht unterstützt. Bitte Chrome auf Android/Desktop verwenden.");
+        setBtStatus("❌ Bluetooth braucht die installierte App (APK) oder Chrome. Im normalen Browser nicht möglich.");
         return;
       }
       setBtStatus("🔍 Suche Bluetooth Drucker...");
       const device = await navigator.bluetooth.requestDevice({
-        filters: [{
-          services: ["000018f0-0000-1000-8000-00805f9b34fb"]
-        },
-        // BT printer service
-        {
-          namePrefix: "Epson"
-        }, {
-          namePrefix: "EPSON"
-        }, {
-          namePrefix: "Star"
-        }, {
-          namePrefix: "POS"
-        }, {
-          namePrefix: "Bixolon"
-        }, {
-          namePrefix: "Citizen"
-        }, {
-          namePrefix: "RP"
-        }],
+        filters: [{ services: ["000018f0-0000-1000-8000-00805f9b34fb"] },
+          { namePrefix: "Epson" }, { namePrefix: "EPSON" }, { namePrefix: "Star" },
+          { namePrefix: "POS" }, { namePrefix: "Bixolon" }, { namePrefix: "Citizen" }, { namePrefix: "RP" }],
         optionalServices: ["000018f0-0000-1000-8000-00805f9b34fb", "00001101-0000-1000-8000-00805f9b34fb"]
       });
       setBtDevice(device);
-      setForm(f => ({
-        ...f,
-        btName: device.name,
-        method: "bluetooth"
-      }));
+      setForm(f => ({ ...f, btName: device.name, method: "bluetooth" }));
       setBtStatus(`✅ Verbunden: ${device.name}`);
     } catch (e) {
-      if (e.name === "NotFoundError") setBtStatus("❌ Kein Gerät ausgewählt.");else if (e.name === "SecurityError") setBtStatus("❌ Bluetooth-Zugriff verweigert. Seite muss über HTTPS geöffnet sein.");else setBtStatus(`❌ Fehler: ${e.message}`);
+      setBtStatus(`❌ Fehler: ${e.message || e}`);
+    }
+  };
+  // Gerät aus der Liste auswählen + verbinden (nur APK)
+  const selectBtDevice = async (dev) => {
+    try {
+      setBtStatus(`🔗 Verbinde mit ${dev.name}...`);
+      await BTPrint.connect(dev.deviceId);
+      setForm(f => ({ ...f, btName: dev.name, btDeviceId: dev.deviceId, method: "bluetooth" }));
+      setBtDevice(dev);
+      setBtStatus(`✅ Verbunden & gespeichert: ${dev.name}`);
+    } catch (e) {
+      setBtStatus(`❌ Verbindung fehlgeschlagen: ${e.message || e}`);
     }
   };
   const testPrintBT = async () => {
-    if (!btDevice) {
-      setBtStatus("⚠️ Bitte erst Bluetooth Drucker verbinden.");
-      return;
-    }
+    const devId = form.btDeviceId;
     try {
       setBtStatus("📤 Sende Testdruck...");
+      const testHtml = `<html><body>
+        <div class="center bold">${form.name||"eatDeSi"}</div>
+        <div class="center">${form.address||""}</div>
+        <div class="line"></div>
+        <div class="center bold">*** DRUCKTEST ***</div>
+        <div class="center">${new Date().toLocaleString("de-DE")}</div>
+        <div class="line"></div>
+        <div class="center">${form.footer||"Danke!"}</div>
+      </body></html>`;
+      if (BTPrint.isNative() && devId) {
+        const szMap={klein:0x00,normal:0x01,gross:0x11,xl:0x33};
+        const fsz=szMap[form.bonFontSize||'normal']??0x00;
+        await BTPrint.printHtml(devId, testHtml, fsz);
+        setBtStatus("✅ Testdruck gesendet!");
+        return;
+      }
+      // Fallback Web Bluetooth
+      if (!btDevice) { setBtStatus("⚠️ Bitte erst Drucker verbinden."); return; }
       const server = await btDevice.gatt.connect();
       const service = await server.getPrimaryService("000018f0-0000-1000-8000-00805f9b34fb");
       const char = await service.getCharacteristic("00002af1-0000-1000-8000-00805f9b34fb");
       const enc = new TextEncoder();
-      // ESC/POS commands
-      const ESC = 0x1B,
-        GS = 0x1D;
-      const init = [ESC, 0x40]; // Initialize
-      const center = [ESC, 0x61, 0x01]; // Center align
-      const left = [ESC, 0x61, 0x00]; // Left align
-      const bold = [ESC, 0x45, 0x01]; // Bold on
-      const boldOff = [ESC, 0x45, 0x00]; // Bold off
-      const cut = [GS, 0x56, 0x41, 0x00]; // Cut paper
-      const nl = [0x0A]; // Newline
+      const ESC = 0x1B, GS = 0x1D;
       const text = t => [...enc.encode(t)];
-      const data = new Uint8Array([...init, ...center, ...bold, ...text(`${form.name}\n`), ...boldOff, ...text(`${form.address}\n`), ...left, ...text("--------------------------------\n"), ...center, ...bold, ...text("*** DRUCKTEST ***\n"), ...boldOff, ...text(`${new Date().toLocaleString("de-DE")}\n`), ...left, ...text("--------------------------------\n"), ...center, ...text(`${form.footer}\n`), ...nl, ...nl, ...cut]);
+      const data = new Uint8Array([ESC,0x40, ESC,0x61,0x01, ESC,0x45,0x01, ...text(`${form.name}\n`), ESC,0x45,0x00, ...text("*** DRUCKTEST ***\n"), ...text(`${new Date().toLocaleString("de-DE")}\n`), 0x0A,0x0A, GS,0x56,0x41,0x00]);
       await char.writeValue(data);
       setBtStatus("✅ Testdruck erfolgreich gesendet!");
     } catch (e) {
-      setBtStatus(`❌ Druckfehler: ${e.message}`);
+      setBtStatus(`❌ Druckfehler: ${e.message || e}`);
     }
   };
 
@@ -13166,7 +13329,7 @@ function PrinterSettingsView({
       fontWeight: 700,
       fontSize: 12
     }
-  }, "\uD83D\uDD0D BT Drucker suchen"), btDevice && /*#__PURE__*/React.createElement("button", {
+  }, "\uD83D\uDD0D BT Drucker suchen"), (btDevice || form.btDeviceId) && /*#__PURE__*/React.createElement("button", {
     onClick: testPrintBT,
     style: {
       flex: 1,
@@ -13180,7 +13343,22 @@ function PrinterSettingsView({
       fontWeight: 700,
       fontSize: 12
     }
-  }, "\uD83D\uDDA8\uFE0F Test")), btStatus && /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDDA8\uFE0F Test")),
+  // Liste gefundener Drucker (APK) — zum Auswählen
+  btDevices.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ marginBottom:8 } },
+    btDevices.map(function(dev){
+      return /*#__PURE__*/React.createElement("button", {
+        key: dev.deviceId,
+        onClick: function(){ selectBtDevice(dev); },
+        style: {
+          display:"block", width:"100%", textAlign:"left", padding:"10px 12px", marginBottom:6,
+          borderRadius:8, border:"2px solid "+(form.btDeviceId===dev.deviceId?C.green:"#ddd"),
+          background: form.btDeviceId===dev.deviceId?"#e8f5e9":"#fff",
+          color:"#333", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12
+        }
+      }, (form.btDeviceId===dev.deviceId?"✅ ":"🖨️ ") + dev.name);
+    })
+  ), btStatus && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       padding: "8px 10px",
@@ -13197,7 +13375,7 @@ function PrinterSettingsView({
       background: "#ede7f6",
       borderRadius: 8
     }
-  }, "\uD83D\uDCA1 Ben\xF6tigt: Chrome auf Android/Desktop (HTTPS). Unterst\xFCtzte Drucker: Epson TM-T20III Bluetooth, Star Micronics, Bixolon.")), form.method === "wifi" && /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCA1 In der App: 'BT Drucker suchen' tippen, Drucker ausw\xE4hlen, dann 'Test'. Funktioniert mit jedem Bluetooth-Thermodrucker (ESC/POS) — kein RawBT n\xF6tig.")), form.method === "wifi" && /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#e3f2fd",
       borderRadius: 10,
