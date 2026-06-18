@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v42</title>
+<title>eatDeSi POS v44</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v42';",
+    "var CACHE='eatdesi-v44';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -4176,7 +4176,96 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "description": "Tomatensauce & Mozzarella"
+      "description": "Tomatensauce & Mozzarella",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 131,
@@ -4185,7 +4274,96 @@ const MENU = {
       "price": 11.9,
       "veg": true,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 132,
@@ -4195,7 +4373,96 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Schinken, Salami, Champignons, Peperoni"
+      "description": "Schinken, Salami, Champignons, Peperoni",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 133,
@@ -4205,7 +4472,96 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Schinken, Champignons, Artischocken, Ei"
+      "description": "Schinken, Champignons, Artischocken, Ei",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 134,
@@ -4215,7 +4571,96 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Garnelen & Knoblauch"
+      "description": "Garnelen & Knoblauch",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 135,
@@ -4225,7 +4670,96 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Hackfleisch, Salami, Champignons, Zwiebeln, Jalapenos, BBQ-Sauce"
+      "description": "Hackfleisch, Salami, Champignons, Zwiebeln, Jalapenos, BBQ-Sauce",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 136,
@@ -4235,7 +4769,96 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Smoky Chicken, Zwiebeln, Paprika, Salat, Cheesy-Garlic-Sauce"
+      "description": "Smoky Chicken, Zwiebeln, Paprika, Salat, Cheesy-Garlic-Sauce",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 137,
@@ -4244,7 +4867,96 @@ const MENU = {
       "price": 15.9,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 138,
@@ -4253,7 +4965,96 @@ const MENU = {
       "price": 15.9,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 139,
@@ -4262,7 +5063,96 @@ const MENU = {
       "price": 10.5,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 140,
@@ -4271,7 +5161,96 @@ const MENU = {
       "price": 10.5,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 141,
@@ -4280,7 +5259,96 @@ const MENU = {
       "price": 11.9,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 142,
@@ -4289,7 +5357,96 @@ const MENU = {
       "price": 11.9,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 143,
@@ -4299,7 +5456,96 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Salami, Paprika, Chili, Olivenoel"
+      "description": "Salami, Paprika, Chili, Olivenoel",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 145,
@@ -4309,7 +5555,96 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Thunfisch & Zwiebeln"
+      "description": "Thunfisch & Zwiebeln",
+      "options": [
+        {
+          "label": "Toppings",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Salami",
+              "price": 1.5
+            },
+            {
+              "name": "Schinken",
+              "price": 1.5
+            },
+            {
+              "name": "Champignons",
+              "price": 1.5
+            },
+            {
+              "name": "Artischocken",
+              "price": 1.5
+            },
+            {
+              "name": "Oliven",
+              "price": 1.5
+            },
+            {
+              "name": "Zwiebeln",
+              "price": 1.5
+            },
+            {
+              "name": "Ei",
+              "price": 1.5
+            },
+            {
+              "name": "Ananas",
+              "price": 1.5
+            },
+            {
+              "name": "Peperoni",
+              "price": 1.5
+            },
+            {
+              "name": "Paprika",
+              "price": 1.5
+            },
+            {
+              "name": "Mais",
+              "price": 1.5
+            },
+            {
+              "name": "Erbsen",
+              "price": 1.5
+            },
+            {
+              "name": "Spinat",
+              "price": 1.5
+            },
+            {
+              "name": "Mozzarella",
+              "price": 2.5
+            },
+            {
+              "name": "Meeresfrüchte",
+              "price": 2.5
+            },
+            {
+              "name": "Thunfisch",
+              "price": 2.5
+            },
+            {
+              "name": "Grilled Beef",
+              "price": 4.9
+            },
+            {
+              "name": "Smoky Chicken",
+              "price": 4.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 4.9
+            },
+            {
+              "name": "Lachs",
+              "price": 4.9
+            }
+          ]
+        }
+      ]
     }
   ],
   "Paccheri": [
@@ -15800,7 +17135,48 @@ function App() {
     LS.set("eatdesi_menu", saved);
     return saved;
   });
-  const [optionGroups, setOptionGroups] = useState(() => LS.get("eatdesi_optiongroups", []));
+  const [optionGroups, setOptionGroups] = useState(() => {
+    const saved = LS.get("eatdesi_optiongroups", null);
+    if (saved && saved.length > 0) return saved;
+    // Standard-Gruppen (wiederverwendbar) - werden beim ersten Mal angelegt
+    return [
+      { id: 90001, name: "Extra Dip", required: false, multiple: true, choices: [
+        {name:"Sour Cream", price:"1.70"}, {name:"Ranch", price:"1.70"}, {name:"Cheesy Garlic", price:"1.70"},
+        {name:"Sweet Chili", price:"1.70"}, {name:"Hot BBQ", price:"1.70"}, {name:"Sweet BBQ", price:"1.70"},
+        {name:"Aioli", price:"1.70"}, {name:"Tamarinden", price:"1.70"}, {name:"Minze", price:"1.70"}, {name:"Guacamole", price:"2.90"}
+      ]},
+      { id: 90002, name: "Beilage", required: true, multiple: false, choices: [
+        {name:"Pommes", price:""}, {name:"Salat", price:""}
+      ]},
+      { id: 90003, name: "Patty", required: true, multiple: false, choices: [
+        {name:"Beef", price:""}, {name:"Chicken", price:""}, {name:"Vegan", price:""}, {name:"Veggie", price:""}
+      ]},
+      { id: 90004, name: "Fleisch", required: true, multiple: false, choices: [
+        {name:"Beef", price:""}, {name:"Smoky Chicken", price:""}
+      ]},
+      { id: 90005, name: "Zutat (Indisch)", required: true, multiple: false, choices: [
+        {name:"Hähnchen", price:"15.90"}, {name:"Lachs", price:"19.90"}, {name:"Garnelen", price:"19.90"},
+        {name:"Gemüse Mix", price:"13.90"}, {name:"Paneer", price:"15.90"}, {name:"Lammkotelett", price:"25.90"}
+      ]},
+      { id: 90006, name: "Portion", required: false, multiple: false, choices: [
+        {name:"Als Vorspeise", price:""}, {name:"Als Hauptspeise", price:""}
+      ]},
+      { id: 90007, name: "Extra Salat", required: false, multiple: true, choices: [
+        {name:"Extra Salat", price:"2.90"}
+      ]},
+      { id: 90008, name: "Süß-Pommes Aufpreis", required: false, multiple: true, choices: [
+        {name:"Süß-Pommes statt Pommes", price:"1.90"}
+      ]},
+      { id: 90009, name: "Pizza Toppings", required: false, multiple: true, choices: [
+        {name:"Salami", price:"1.50"}, {name:"Schinken", price:"1.50"}, {name:"Champignons", price:"1.50"},
+        {name:"Artischocken", price:"1.50"}, {name:"Oliven", price:"1.50"}, {name:"Zwiebeln", price:"1.50"},
+        {name:"Ei", price:"1.50"}, {name:"Ananas", price:"1.50"}, {name:"Peperoni", price:"1.50"},
+        {name:"Paprika", price:"1.50"}, {name:"Mais", price:"1.50"}, {name:"Erbsen", price:"1.50"}, {name:"Spinat", price:"1.50"},
+        {name:"Mozzarella", price:"2.50"}, {name:"Meeresfrüchte", price:"2.50"}, {name:"Thunfisch", price:"2.50"},
+        {name:"Grilled Beef", price:"4.90"}, {name:"Smoky Chicken", price:"4.90"}, {name:"Garnelen", price:"4.90"}, {name:"Lachs", price:"4.90"}
+      ]}
+    ];
+  });
   const [zeiterfassung, setZeiterfassung] = useState(() => LS.get("eatdesi_zeiterfassung", []));
   // Wenn die Zeiterfassung per Sync gemerged wurde (Stempel von anderen Geraeten),
   // den React-State aktualisieren damit der Chef alle Mitarbeiter sofort sieht.
