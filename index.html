@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v40</title>
+<title>eatDeSi POS v42</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v40';",
+    "var CACHE='eatdesi-v42';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -1118,6 +1118,53 @@ const MENU = {
             "Als Vorspeise",
             "Als Hauptspeise"
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -1138,6 +1185,53 @@ const MENU = {
           "choices": [
             "Als Vorspeise",
             "Als Hauptspeise"
+          ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
           ]
         }
       ]
@@ -1160,6 +1254,53 @@ const MENU = {
             "Als Vorspeise",
             "Als Hauptspeise"
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -1180,6 +1321,53 @@ const MENU = {
           "choices": [
             "Als Vorspeise",
             "Als Hauptspeise"
+          ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
           ]
         }
       ]
@@ -1202,6 +1390,53 @@ const MENU = {
             "Als Vorspeise",
             "Als Hauptspeise"
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -1222,6 +1457,53 @@ const MENU = {
           "choices": [
             "Als Vorspeise",
             "Als Hauptspeise"
+          ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
           ]
         }
       ]
@@ -1244,6 +1526,53 @@ const MENU = {
             "Als Vorspeise",
             "Als Hauptspeise"
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -1264,6 +1593,53 @@ const MENU = {
           "choices": [
             "Als Vorspeise",
             "Als Hauptspeise"
+          ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
           ]
         }
       ]
@@ -1286,6 +1662,53 @@ const MENU = {
             "Als Vorspeise",
             "Als Hauptspeise"
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -1306,6 +1729,53 @@ const MENU = {
           "choices": [
             "Als Vorspeise",
             "Als Hauptspeise"
+          ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
           ]
         }
       ]
@@ -1328,6 +1798,53 @@ const MENU = {
             "Als Vorspeise",
             "Als Hauptspeise"
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -1348,6 +1865,53 @@ const MENU = {
           "choices": [
             "Als Vorspeise",
             "Als Hauptspeise"
+          ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
           ]
         }
       ]
@@ -1370,6 +1934,53 @@ const MENU = {
             "Als Vorspeise",
             "Als Hauptspeise"
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -1391,6 +2002,53 @@ const MENU = {
             "Als Vorspeise",
             "Als Hauptspeise"
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -1402,7 +2060,56 @@ const MENU = {
       "veg": false,
       "vegan": true,
       "taxRate": "food",
-      "description": "Klassisch, knusprig, leicht gesalzen"
+      "description": "Klassisch, knusprig, leicht gesalzen",
+      "options": [
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 16,
@@ -1412,7 +2119,56 @@ const MENU = {
       "veg": false,
       "vegan": true,
       "taxRate": "food",
-      "description": "Suesskartoffelpommes mit feiner Gewuerznote"
+      "description": "Suesskartoffelpommes mit feiner Gewuerznote",
+      "options": [
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
+        }
+      ]
     }
   ],
   "Salat": [
@@ -1984,6 +2740,53 @@ const MENU = {
             "Beef",
             "Smoky Chicken"
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -2002,6 +2805,53 @@ const MENU = {
           "choices": [
             "Beef",
             "Smoky Chicken"
+          ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
           ]
         }
       ]
@@ -2022,6 +2872,53 @@ const MENU = {
             "Beef",
             "Smoky Chicken"
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -2041,6 +2938,53 @@ const MENU = {
             "Beef",
             "Smoky Chicken"
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -2051,7 +2995,55 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "76",
@@ -2060,7 +3052,55 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "77",
@@ -2069,7 +3109,55 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
+        }
+      ]
     }
   ],
   "Burger": [
@@ -2109,6 +3197,53 @@ const MENU = {
             {
               "name": "Süß-Pommes statt Pommes",
               "price": 1.9
+            }
+          ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
             }
           ]
         }
@@ -2152,6 +3287,53 @@ const MENU = {
               "price": 1.9
             }
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -2191,6 +3373,53 @@ const MENU = {
             {
               "name": "Süß-Pommes statt Pommes",
               "price": 1.9
+            }
+          ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
             }
           ]
         }
@@ -2234,6 +3463,53 @@ const MENU = {
               "price": 1.9
             }
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -2273,6 +3549,53 @@ const MENU = {
             {
               "name": "Süß-Pommes statt Pommes",
               "price": 1.9
+            }
+          ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
             }
           ]
         }
@@ -2316,6 +3639,53 @@ const MENU = {
               "price": 1.9
             }
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -2355,6 +3725,53 @@ const MENU = {
             {
               "name": "Süß-Pommes statt Pommes",
               "price": 1.9
+            }
+          ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
             }
           ]
         }
@@ -2398,6 +3815,53 @@ const MENU = {
               "price": 1.9
             }
           ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
+            }
+          ]
         }
       ]
     },
@@ -2426,6 +3890,53 @@ const MENU = {
             {
               "name": "Süß-Pommes statt Pommes",
               "price": 1.9
+            }
+          ]
+        },
+        {
+          "label": "Extra Dip",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Sour Cream",
+              "price": 1.7
+            },
+            {
+              "name": "Ranch",
+              "price": 1.7
+            },
+            {
+              "name": "Cheesy Garlic",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet Chili",
+              "price": 1.7
+            },
+            {
+              "name": "Hot BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Sweet BBQ",
+              "price": 1.7
+            },
+            {
+              "name": "Aioli",
+              "price": 1.7
+            },
+            {
+              "name": "Tamarinden",
+              "price": 1.7
+            },
+            {
+              "name": "Minze",
+              "price": 1.7
+            },
+            {
+              "name": "Guacamole",
+              "price": 2.9
             }
           ]
         }
@@ -3941,12 +5452,27 @@ function BonModal({
       gast: true
     }));
   };
+  // Items nach Kategorie gruppieren (fuer Kueche/Bar Bon) - erleichtert Vorbereitung
+  const groupByCat = (list) => {
+    const groups = {};
+    list.forEach(i => {
+      const c = i.cat || "Sonstige";
+      if (!groups[c]) groups[c] = [];
+      groups[c].push(i);
+    });
+    return groups;
+  };
   const printKuche = () => {
     if (!foodItems.length) {
       return;
-      return;
     }
-    const lines = foodItems.map(i => `<div class="bold" style="font-size:16px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:12px">→ ${i.note}</div>` : ""}${i.kitchenNote ? `<div style="color:blue;font-size:12px">📝 ${i.kitchenNote}</div>` : ""}<div class="line"></div>`).join("");
+    const groups = groupByCat(foodItems);
+    const lines = Object.keys(groups).map(cat =>
+      `<div class="bold center" style="font-size:13px;background:#eee;padding:3px 0;margin:4px 0">— ${cat} —</div>` +
+      groups[cat].map(i =>
+        `<div class="bold" style="font-size:16px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:12px">→ ${i.note}</div>` : ""}${i.kitchenNote ? `<div style="color:blue;font-size:12px">📝 ${i.kitchenNote}</div>` : ""}<div class="line"></div>`
+      ).join("")
+    ).join("");
     doPrint(bonHtml("🍳 KÜCHE — SPEISEN", lines));
     setPrinted(p => ({
       ...p,
@@ -3956,9 +5482,14 @@ function BonModal({
   const printBar = () => {
     if (!drinkItems.length) {
       return;
-      return;
     }
-    const lines = drinkItems.map(i => `<div class="bold" style="font-size:16px">${i.qty}× ${i.nr}. ${i.name}</div><div class="line"></div>`).join("");
+    const groups = groupByCat(drinkItems);
+    const lines = Object.keys(groups).map(cat =>
+      `<div class="bold center" style="font-size:13px;background:#eee;padding:3px 0;margin:4px 0">— ${cat} —</div>` +
+      groups[cat].map(i =>
+        `<div class="bold" style="font-size:16px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:12px">→ ${i.note}</div>` : ""}<div class="line"></div>`
+      ).join("")
+    ).join("");
     doPrint(bonHtml("🍺 BAR — GETRÄNKE", lines));
     setPrinted(p => ({
       ...p,
@@ -6347,6 +7878,14 @@ function OrderView({
   const lieferFee = isTakeaway && liefergebührOn ? (parseFloat(liefergebührAmt)||0) : 0;
   const total = itemsTotal + lieferFee;
   const cats = Object.keys(MENU_LIVE);
+  // Findet die Kategorie eines Artikels (fuer Bon-Gruppierung nach Kategorie)
+  const findCat = (item) => {
+    if (item.cat) return item.cat;
+    for (const c of cats) {
+      if ((MENU_LIVE[c]||[]).some(x => x.id === item.id)) return c;
+    }
+    return "";
+  };
   const handleClick = item => {
     // Resolve option groups for this item
     const groups = (item.selectedGroups||[])
@@ -6355,10 +7894,10 @@ function OrderView({
     // Also keep legacy item.options
     const hasOpts = (item.options?.length > 0) || groups.length > 0;
     if (hasOpts) {
-      // Build enriched item with resolved groups
-      setOptItem({ ...item, _resolvedGroups: groups });
+      // Build enriched item with resolved groups + Kategorie
+      setOptItem({ ...item, cat: findCat(item), _resolvedGroups: groups });
     } else {
-      addItem(item, item.price, "");
+      addItem({ ...item, cat: findCat(item) }, item.price, "");
     }
   };
   const addItem = (item, finalPrice, note) => {
