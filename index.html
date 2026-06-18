@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v32</title>
+<title>eatDeSi POS v35</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v32';",
+    "var CACHE='eatdesi-v35';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -388,830 +388,6 @@ const C = {
   purple: "#7b1fa2"
 };
 const MENU = {
-  "Bier": [
-    {
-      "id": 240,
-      "nr": "251a",
-      "name": "Bitburger Pils 0,3l",
-      "price": 3.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 241,
-      "nr": "251b",
-      "name": "Bitburger Pils 0,5l",
-      "price": 4.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 242,
-      "nr": "252",
-      "name": "Radler 0,3l",
-      "price": 3.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 243,
-      "nr": "253",
-      "name": "Diesel Bier & Cola",
-      "price": 3.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 244,
-      "nr": "254",
-      "name": "Bitburger alkoholfrei",
-      "price": 3.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 245,
-      "nr": "255",
-      "name": "Benediktiner Weizen 0,5l",
-      "price": 4.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 246,
-      "nr": "256",
-      "name": "Banana Weizen 0,5l",
-      "price": 5.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 247,
-      "nr": "257",
-      "name": "Licher Pilsner",
-      "price": 3.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 248,
-      "nr": "258",
-      "name": "Köstritzer Schwarzbier",
-      "price": 3.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    }
-  ],
-  "Dips": [
-    {
-      "id": 30,
-      "nr": "D1",
-      "name": "Sour Cream",
-      "price": 1.7,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 31,
-      "nr": "D2",
-      "name": "Ranch",
-      "price": 1.7,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 32,
-      "nr": "D3",
-      "name": "Cheesy Garlic",
-      "price": 1.7,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 33,
-      "nr": "D4",
-      "name": "Sweet Chili",
-      "price": 1.7,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 34,
-      "nr": "D5",
-      "name": "Hot BBQ",
-      "price": 1.7,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 35,
-      "nr": "D6",
-      "name": "Sweet BBQ",
-      "price": 1.7,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 36,
-      "nr": "D7",
-      "name": "Aioli",
-      "price": 1.7,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 37,
-      "nr": "D8",
-      "name": "Tamarinden",
-      "price": 1.7,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 38,
-      "nr": "D9",
-      "name": "Minze Sauce",
-      "price": 1.7,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 39,
-      "nr": "D10",
-      "name": "Guacamole",
-      "price": 2.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    }
-  ],
-  "Caffe": [
-    {
-      "id": 290,
-      "nr": "321",
-      "name": "Tasse Caffè",
-      "price": 2.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 291,
-      "nr": "322",
-      "name": "Espresso",
-      "price": 2.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 292,
-      "nr": "323",
-      "name": "Espresso Doppel",
-      "price": 3.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 293,
-      "nr": "324",
-      "name": "Cappuccino",
-      "price": 3.0,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 294,
-      "nr": "325",
-      "name": "Latte Macchiato",
-      "price": 3.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 295,
-      "nr": "326",
-      "name": "Espresso Macchiato",
-      "price": 2.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 296,
-      "nr": "327",
-      "name": "Heiße Schokolade",
-      "price": 3.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 297,
-      "nr": "328",
-      "name": "Masala Chai",
-      "price": 4.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 298,
-      "nr": "329",
-      "name": "Chai Latte",
-      "price": 4.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 299,
-      "nr": "330",
-      "name": "Kurkuma Latte",
-      "price": 4.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 300,
-      "nr": "331",
-      "name": "Matcha Latte",
-      "price": 4.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 301,
-      "nr": "332",
-      "name": "Tasse Tee",
-      "price": 2.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    }
-  ],
-  "Pizza": [
-    {
-      "id": 130,
-      "nr": "131",
-      "name": "Margherita",
-      "price": 7.9,
-      "veg": true,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Tomatensauce & Mozzarella"
-    },
-    {
-      "id": 131,
-      "nr": "133",
-      "name": "Veggie",
-      "price": 11.9,
-      "veg": true,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 132,
-      "nr": "134",
-      "name": "Capricciosa",
-      "price": 13.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Schinken, Salami, Champignons, Peperoni"
-    },
-    {
-      "id": 133,
-      "nr": "135",
-      "name": "4 Stagioni",
-      "price": 13.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Schinken, Champignons, Artischocken, Ei"
-    },
-    {
-      "id": 134,
-      "nr": "136",
-      "name": "Scampi",
-      "price": 14.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Garnelen & Knoblauch"
-    },
-    {
-      "id": 135,
-      "nr": "137",
-      "name": "Bull BBQ",
-      "price": 15.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Hackfleisch, Salami, Champignons, Zwiebeln, Jalapenos, BBQ-Sauce"
-    },
-    {
-      "id": 136,
-      "nr": "138",
-      "name": "Fantasia",
-      "price": 13.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Smoky Chicken, Zwiebeln, Paprika, Salat, Cheesy-Garlic-Sauce"
-    },
-    {
-      "id": 137,
-      "nr": "140",
-      "name": "Avocado Pizza",
-      "price": 15.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 138,
-      "nr": "141",
-      "name": "Salmon Pizza",
-      "price": 15.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 139,
-      "nr": "142",
-      "name": "Salami",
-      "price": 10.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 140,
-      "nr": "143",
-      "name": "Schinken",
-      "price": 10.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 141,
-      "nr": "144",
-      "name": "Rustica",
-      "price": 11.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 142,
-      "nr": "145",
-      "name": "Hawaii",
-      "price": 11.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 143,
-      "nr": "146",
-      "name": "Diavola",
-      "price": 11.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Salami, Paprika, Chili, Olivenoel"
-    },
-    {
-      "id": 145,
-      "nr": "148",
-      "name": "Tonno",
-      "price": 12.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Thunfisch & Zwiebeln"
-    }
-  ],
-  "Salat": [
-    {
-      "id": 20,
-      "nr": "21S",
-      "name": "Salat Mix Klein",
-      "price": 5.9,
-      "veg": true,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Gurke, Tomaten, rote Zwiebeln, Lauchzwiebeln, Ranch-Dressing"
-    },
-    {
-      "id": 21,
-      "nr": "21G",
-      "name": "Salat Mix Groß",
-      "price": 8.9,
-      "veg": true,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 22,
-      "nr": "22",
-      "name": "Tonno Salat",
-      "price": 12.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Thunfisch, Oliven, Ei, Ranch-Dressing"
-    },
-    {
-      "id": 23,
-      "nr": "23",
-      "name": "Salat Italia",
-      "price": 12.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Schinken, Artischocken, Mais, Oliven, Mozzarella, Cheesy-Garlic"
-    },
-    {
-      "id": 24,
-      "nr": "24",
-      "name": "Feta Deluxe Salat",
-      "price": 14.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Pfeffer-Feta, Feigen, Walnuesse, Honig, Limette, Olivenoel"
-    },
-    {
-      "id": 25,
-      "nr": "25",
-      "name": "Feta Salat",
-      "price": 12.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Cremiger Feta, Oliven, Limette, Olivenoel"
-    }
-  ],
-  "Tacos": [],
-  "Weine": [
-    {
-      "id": 260,
-      "nr": "261",
-      "name": "Weißer Burgunder 0,2l",
-      "price": 4.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 261,
-      "nr": "262",
-      "name": "Pinot Grigio 0,2l",
-      "price": 4.0,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 262,
-      "nr": "263",
-      "name": "Lugana trocken 0,2l",
-      "price": 6.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 263,
-      "nr": "264",
-      "name": "Lugana Flasche 0,75l",
-      "price": 19.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 264,
-      "nr": "265",
-      "name": "Merlot halbtrocken 0,2l",
-      "price": 4.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 265,
-      "nr": "266",
-      "name": "Bardolino 0,2l",
-      "price": 4.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 266,
-      "nr": "267",
-      "name": "Chianti Flasche 0,75l",
-      "price": 16.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 267,
-      "nr": "268",
-      "name": "Portugieser Rosé 0,2l",
-      "price": 4.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    }
-  ],
-  "Burger": [],
-  "Dessert": [
-    {
-      "id": 160,
-      "nr": "130",
-      "name": "Tiramisu",
-      "price": 6.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 161,
-      "nr": "131",
-      "name": "Soufflé",
-      "price": 6.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 162,
-      "nr": "132",
-      "name": "Tartufo Nero",
-      "price": 6.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 163,
-      "nr": "133",
-      "name": "Cheesecake",
-      "price": 6.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    }
-  ],
-  "Paccheri": [],
-  "Cocktails": [
-    {
-      "id": 170,
-      "nr": "C1",
-      "name": "Mojito",
-      "price": 6.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 171,
-      "nr": "C2",
-      "name": "Pina Colada",
-      "price": 6.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 172,
-      "nr": "C3",
-      "name": "Long Island Iced Tea",
-      "price": 6.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 173,
-      "nr": "C4",
-      "name": "Swimming Pool",
-      "price": 6.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 174,
-      "nr": "C5",
-      "name": "Red Bull Thunder",
-      "price": 6.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 175,
-      "nr": "A1",
-      "name": "Aperol Spritz",
-      "price": 6.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 176,
-      "nr": "A2",
-      "name": "Hugo",
-      "price": 6.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 177,
-      "nr": "A3",
-      "name": "Lillet Rosé",
-      "price": 6.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 178,
-      "nr": "A4",
-      "name": "Prosecco",
-      "price": 2.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    }
-  ],
-  "Digestive": [
-    {
-      "id": 280,
-      "nr": "281",
-      "name": "Obstler 2cl",
-      "price": 2.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 281,
-      "nr": "282",
-      "name": "Ramazzotti 4cl",
-      "price": 3.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 282,
-      "nr": "283",
-      "name": "Sambuca 2cl",
-      "price": 2.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 283,
-      "nr": "284",
-      "name": "Grappa 2cl",
-      "price": 2.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 284,
-      "nr": "285",
-      "name": "Limoncello 2cl",
-      "price": 2.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 285,
-      "nr": "286",
-      "name": "Amaretto 2cl",
-      "price": 2.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 286,
-      "nr": "287",
-      "name": "Baileys 4cl",
-      "price": 3.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    }
-  ],
-  "Schnitzel": [
-    {
-      "id": 110,
-      "nr": "101",
-      "name": "Schnitzel Wiener Art",
-      "price": 10.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Klassisch paniertes Putenschnitzel, knusprig gebacken"
-    },
-    {
-      "id": 111,
-      "nr": "103",
-      "name": "Schnitzel Hawaii",
-      "price": 13.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Schinken, Ananas, Sahnesauce, Mozzarella ueberbacken"
-    },
-    {
-      "id": 112,
-      "nr": "104",
-      "name": "Schnitzel Al Forno",
-      "price": 13.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    },
-    {
-      "id": 113,
-      "nr": "105",
-      "name": "Rahm Schnitzel",
-      "price": 13.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Champignons, Zwiebeln, cremige Rahmsauce"
-    },
-    {
-      "id": 114,
-      "nr": "106",
-      "name": "Schnitzel Chef",
-      "price": 14.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Paprika, Zwiebeln, Knoblauch, Curry-Tomatensahnesauce, Mozzarella ueberbacken"
-    },
-    {
-      "id": 115,
-      "nr": "107",
-      "name": "Schnitzel Erbe",
-      "price": 13.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Brokkoli, Spinat, Cheese-Sauce, Parmesan, Roestzwiebeln"
-    },
-    {
-      "id": 116,
-      "nr": "108",
-      "name": "Schnitzel Trüffel",
-      "price": 13.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food"
-    }
-  ],
   "Softdrinks": [
     {
       "id": 200,
@@ -1293,74 +469,6 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "drinks"
-    }
-  ],
-  "Alkoholfrei": [
-    {
-      "id": 180,
-      "nr": "AF1",
-      "name": "Red Bull Classic",
-      "price": 4.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 181,
-      "nr": "AF2",
-      "name": "Havana Juicer",
-      "price": 6.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 182,
-      "nr": "AF3",
-      "name": "Virgin Colada",
-      "price": 6.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 183,
-      "nr": "AF4",
-      "name": "Virgin Hugo",
-      "price": 6.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 184,
-      "nr": "AF5",
-      "name": "Virgin Mojito",
-      "price": 4.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    },
-    {
-      "id": 185,
-      "nr": "AF6",
-      "name": "Nimbu Pani",
-      "price": 4.5,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "drinks"
-    }
-  ],
-  "Potato Bombs": [
-    {
-      "id": 80,
-      "nr": "61",
-      "name": "Veggie Potato Bomb",
-      "price": 11.9,
-      "veg": true,
-      "vegan": false,
-      "taxRate": "food",
-      "description": "Gemuese, Spinat, Parmesan, Sahne, Mozzarella ueberbacken"
     }
   ],
   "Säfte & Lassi": [
@@ -1455,53 +563,300 @@ const MENU = {
       "taxRate": "drinks"
     }
   ],
-  "Tandoori & Grill": [
+  "Alkoholfrei": [
     {
-      "id": 60,
-      "nr": "41",
-      "name": "Indien Mix Grill",
-      "price": 26.9,
+      "id": 180,
+      "nr": "AF1",
+      "name": "Red Bull Classic",
+      "price": 4.5,
       "veg": false,
       "vegan": false,
-      "taxRate": "food",
-      "description": "Haehnchen, Garnelen, Lachs mit Salat & Basmatireis"
+      "taxRate": "drinks"
     },
     {
-      "id": 61,
-      "nr": "42",
-      "name": "Tandoori Mix Grill",
-      "price": 26.9,
+      "id": 181,
+      "nr": "AF2",
+      "name": "Havana Juicer",
+      "price": 6.5,
       "veg": false,
       "vegan": false,
-      "taxRate": "food",
-      "description": "Lammkoteletts, Garnelen, Haehnchen mit Basmatireis & Salat"
+      "taxRate": "drinks"
     },
     {
-      "id": 62,
-      "nr": "43",
-      "name": "Lammkotelett Grill",
-      "price": 28.9,
+      "id": 182,
+      "nr": "AF3",
+      "name": "Virgin Colada",
+      "price": 6.5,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "drinks"
     },
     {
-      "id": 63,
-      "nr": "46",
-      "name": "Premium Rumpsteak 250g",
-      "price": 27.9,
+      "id": 183,
+      "nr": "AF4",
+      "name": "Virgin Hugo",
+      "price": 6.5,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "drinks"
     },
     {
-      "id": 64,
-      "nr": "47",
-      "name": "Premium Lachssteak 250g",
-      "price": 26.9,
+      "id": 184,
+      "nr": "AF5",
+      "name": "Virgin Mojito",
+      "price": 4.5,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "drinks"
+    },
+    {
+      "id": 185,
+      "nr": "AF6",
+      "name": "Nimbu Pani",
+      "price": 4.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    }
+  ],
+  "Bier": [
+    {
+      "id": 240,
+      "nr": "251a",
+      "name": "Bitburger Pils 0,3l",
+      "price": 3.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 241,
+      "nr": "251b",
+      "name": "Bitburger Pils 0,5l",
+      "price": 4.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 242,
+      "nr": "252",
+      "name": "Radler 0,3l",
+      "price": 3.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 243,
+      "nr": "253",
+      "name": "Diesel Bier & Cola",
+      "price": 3.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 244,
+      "nr": "254",
+      "name": "Bitburger alkoholfrei",
+      "price": 3.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 245,
+      "nr": "255",
+      "name": "Benediktiner Weizen 0,5l",
+      "price": 4.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 246,
+      "nr": "256",
+      "name": "Banana Weizen 0,5l",
+      "price": 5.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 247,
+      "nr": "257",
+      "name": "Licher Pilsner",
+      "price": 3.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 248,
+      "nr": "258",
+      "name": "Köstritzer Schwarzbier",
+      "price": 3.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    }
+  ],
+  "Weine": [
+    {
+      "id": 260,
+      "nr": "261",
+      "name": "Weißer Burgunder 0,2l",
+      "price": 4.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 261,
+      "nr": "262",
+      "name": "Pinot Grigio 0,2l",
+      "price": 4,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 262,
+      "nr": "263",
+      "name": "Lugana trocken 0,2l",
+      "price": 6.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 263,
+      "nr": "264",
+      "name": "Lugana Flasche 0,75l",
+      "price": 19.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 264,
+      "nr": "265",
+      "name": "Merlot halbtrocken 0,2l",
+      "price": 4.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 265,
+      "nr": "266",
+      "name": "Bardolino 0,2l",
+      "price": 4.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 266,
+      "nr": "267",
+      "name": "Chianti Flasche 0,75l",
+      "price": 16.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 267,
+      "nr": "268",
+      "name": "Portugieser Rosé 0,2l",
+      "price": 4.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    }
+  ],
+  "Cocktails": [
+    {
+      "id": 170,
+      "nr": "C1",
+      "name": "Mojito",
+      "price": 6.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 171,
+      "nr": "C2",
+      "name": "Pina Colada",
+      "price": 6.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 172,
+      "nr": "C3",
+      "name": "Long Island Iced Tea",
+      "price": 6.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 173,
+      "nr": "C4",
+      "name": "Swimming Pool",
+      "price": 6.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 174,
+      "nr": "C5",
+      "name": "Red Bull Thunder",
+      "price": 6.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 175,
+      "nr": "A1",
+      "name": "Aperol Spritz",
+      "price": 6.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 176,
+      "nr": "A2",
+      "name": "Hugo",
+      "price": 6.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 177,
+      "nr": "A3",
+      "name": "Lillet Rosé",
+      "price": 6.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 178,
+      "nr": "A4",
+      "name": "Prosecco",
+      "price": 2.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
     }
   ],
   "Long & Shot Drinks": [
@@ -1563,6 +918,181 @@ const MENU = {
       "id": 276,
       "nr": "313",
       "name": "Ouzo Shot 2cl",
+      "price": 2.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    }
+  ],
+  "Digestive": [
+    {
+      "id": 280,
+      "nr": "281",
+      "name": "Obstler 2cl",
+      "price": 2.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 281,
+      "nr": "282",
+      "name": "Ramazzotti 4cl",
+      "price": 3.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 282,
+      "nr": "283",
+      "name": "Sambuca 2cl",
+      "price": 2.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 283,
+      "nr": "284",
+      "name": "Grappa 2cl",
+      "price": 2.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 284,
+      "nr": "285",
+      "name": "Limoncello 2cl",
+      "price": 2.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 285,
+      "nr": "286",
+      "name": "Amaretto 2cl",
+      "price": 2.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 286,
+      "nr": "287",
+      "name": "Baileys 4cl",
+      "price": 3.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    }
+  ],
+  "Caffe": [
+    {
+      "id": 290,
+      "nr": "321",
+      "name": "Tasse Caffè",
+      "price": 2.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 291,
+      "nr": "322",
+      "name": "Espresso",
+      "price": 2.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 292,
+      "nr": "323",
+      "name": "Espresso Doppel",
+      "price": 3.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 293,
+      "nr": "324",
+      "name": "Cappuccino",
+      "price": 3,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 294,
+      "nr": "325",
+      "name": "Latte Macchiato",
+      "price": 3.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 295,
+      "nr": "326",
+      "name": "Espresso Macchiato",
+      "price": 2.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 296,
+      "nr": "327",
+      "name": "Heiße Schokolade",
+      "price": 3.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 297,
+      "nr": "328",
+      "name": "Masala Chai",
+      "price": 4.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 298,
+      "nr": "329",
+      "name": "Chai Latte",
+      "price": 4.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 299,
+      "nr": "330",
+      "name": "Kurkuma Latte",
+      "price": 4.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 300,
+      "nr": "331",
+      "name": "Matcha Latte",
+      "price": 4.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "drinks"
+    },
+    {
+      "id": 301,
+      "nr": "332",
+      "name": "Tasse Tee",
       "price": 2.5,
       "veg": false,
       "vegan": false,
@@ -1731,253 +1261,876 @@ const MENU = {
       "description": "Suesskartoffelpommes mit feiner Gewuerznote"
     }
   ],
-  "Indisch Curry & Naan": [
+  "Salat": [
     {
-      "name": "Hähnchen",
+      "id": 20,
+      "nr": "21S",
+      "name": "Salat Mix Klein",
+      "price": 5.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Gurke, Tomaten, rote Zwiebeln, Lauchzwiebeln, Ranch-Dressing"
+    },
+    {
+      "id": 21,
+      "nr": "21G",
+      "name": "Salat Mix Groß",
+      "price": 8.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 22,
+      "nr": "22",
+      "name": "Tonno Salat",
+      "price": 12.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Thunfisch, Oliven, Ei, Ranch-Dressing"
+    },
+    {
+      "id": 23,
+      "nr": "23",
+      "name": "Salat Italia",
+      "price": 12.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Schinken, Artischocken, Mais, Oliven, Mozzarella, Cheesy-Garlic"
+    },
+    {
+      "id": 24,
+      "nr": "24",
+      "name": "Feta Deluxe Salat",
       "price": 14.9,
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": [
-        {
-          "name": "Butter Curry",
-          "price": 0
-        },
-        {
-          "name": "Korma",
-          "price": 0
-        },
-        {
-          "name": "Biryani",
-          "price": 0
-        },
-        {
-          "name": "Curry",
-          "price": 0
-        },
-        {
-          "name": "Mango Curry",
-          "price": 0
-        },
-        {
-          "name": "Vindaloo",
-          "price": 0
-        },
-        {
-          "name": "Tikka Masala",
-          "price": 0
-        },
-        {
-          "name": "Palak",
-          "price": 0
-        }
-      ]
+      "description": "Pfeffer-Feta, Feigen, Walnuesse, Honig, Limette, Olivenoel"
     },
     {
-      "name": "Lachs",
-      "price": 19.9,
+      "id": 25,
+      "nr": "25",
+      "name": "Feta Salat",
+      "price": 12.9,
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": [
-        {
-          "name": "Butter Curry",
-          "price": 0
-        },
-        {
-          "name": "Korma",
-          "price": 0
-        },
-        {
-          "name": "Biryani",
-          "price": 0
-        },
-        {
-          "name": "Curry",
-          "price": 0
-        },
-        {
-          "name": "Mango Curry",
-          "price": 0
-        },
-        {
-          "name": "Vindaloo",
-          "price": 0
-        },
-        {
-          "name": "Tikka Masala",
-          "price": 0
-        },
-        {
-          "name": "Palak",
-          "price": 0
-        }
-      ]
-    },
+      "description": "Cremiger Feta, Oliven, Limette, Olivenoel"
+    }
+  ],
+  "Indisch Curry & Naan": [
     {
-      "name": "Garnelen",
-      "price": 19.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "options": [
-        {
-          "name": "Butter Curry",
-          "price": 0
-        },
-        {
-          "name": "Korma",
-          "price": 0
-        },
-        {
-          "name": "Biryani",
-          "price": 0
-        },
-        {
-          "name": "Curry",
-          "price": 0
-        },
-        {
-          "name": "Mango Curry",
-          "price": 0
-        },
-        {
-          "name": "Vindaloo",
-          "price": 0
-        },
-        {
-          "name": "Tikka Masala",
-          "price": 0
-        },
-        {
-          "name": "Palak",
-          "price": 0
-        }
-      ]
-    },
-    {
-      "name": "Gemüse Mix",
-      "price": 13.9,
-      "veg": false,
-      "vegan": false,
-      "taxRate": "food",
-      "options": [
-        {
-          "name": "Butter Curry",
-          "price": 0
-        },
-        {
-          "name": "Korma",
-          "price": 0
-        },
-        {
-          "name": "Biryani",
-          "price": 0
-        },
-        {
-          "name": "Curry",
-          "price": 0
-        },
-        {
-          "name": "Mango Curry",
-          "price": 0
-        },
-        {
-          "name": "Vindaloo",
-          "price": 0
-        },
-        {
-          "name": "Tikka Masala",
-          "price": 0
-        },
-        {
-          "name": "Palak",
-          "price": 0
-        }
-      ]
-    },
-    {
-      "name": "Paneer",
+      "nr": "31",
+      "name": "Butter Curry",
       "price": 15.9,
       "veg": false,
       "vegan": false,
       "taxRate": "food",
       "options": [
         {
-          "name": "Butter Curry",
-          "price": 0
-        },
-        {
-          "name": "Korma",
-          "price": 0
-        },
-        {
-          "name": "Biryani",
-          "price": 0
-        },
-        {
-          "name": "Curry",
-          "price": 0
-        },
-        {
-          "name": "Mango Curry",
-          "price": 0
-        },
-        {
-          "name": "Vindaloo",
-          "price": 0
-        },
-        {
-          "name": "Tikka Masala",
-          "price": 0
-        },
-        {
-          "name": "Palak",
-          "price": 0
+          "label": "Zutat",
+          "required": true,
+          "priced": true,
+          "choices": [
+            {
+              "name": "Hähnchen",
+              "price": 15.9
+            },
+            {
+              "name": "Lachs",
+              "price": 19.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 19.9
+            },
+            {
+              "name": "Gemüse Mix",
+              "price": 13.9
+            },
+            {
+              "name": "Paneer",
+              "price": 15.9
+            },
+            {
+              "name": "Lammkotelett",
+              "price": 25.9
+            }
+          ]
         }
       ]
     },
     {
-      "name": "Lammkotelett",
-      "price": 25.9,
+      "nr": "32",
+      "name": "Korma",
+      "price": 15.9,
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Saftige gegrillte Lammkoteletts",
       "options": [
         {
-          "name": "Butter Curry",
-          "price": 0
-        },
-        {
-          "name": "Korma",
-          "price": 0
-        },
-        {
-          "name": "Biryani",
-          "price": 0
-        },
-        {
-          "name": "Curry",
-          "price": 0
-        },
-        {
-          "name": "Mango Curry",
-          "price": 0
-        },
-        {
-          "name": "Vindaloo",
-          "price": 0
-        },
-        {
-          "name": "Tikka Masala",
-          "price": 0
-        },
-        {
-          "name": "Palak",
-          "price": 0
+          "label": "Zutat",
+          "required": true,
+          "priced": true,
+          "choices": [
+            {
+              "name": "Hähnchen",
+              "price": 15.9
+            },
+            {
+              "name": "Lachs",
+              "price": 19.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 19.9
+            },
+            {
+              "name": "Gemüse Mix",
+              "price": 13.9
+            },
+            {
+              "name": "Paneer",
+              "price": 15.9
+            },
+            {
+              "name": "Lammkotelett",
+              "price": 25.9
+            }
+          ]
         }
       ]
+    },
+    {
+      "nr": "33",
+      "name": "Biryani",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Zutat",
+          "required": true,
+          "priced": true,
+          "choices": [
+            {
+              "name": "Hähnchen",
+              "price": 15.9
+            },
+            {
+              "name": "Lachs",
+              "price": 19.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 19.9
+            },
+            {
+              "name": "Gemüse Mix",
+              "price": 13.9
+            },
+            {
+              "name": "Paneer",
+              "price": 15.9
+            },
+            {
+              "name": "Lammkotelett",
+              "price": 25.9
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "34",
+      "name": "Curry",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Zutat",
+          "required": true,
+          "priced": true,
+          "choices": [
+            {
+              "name": "Hähnchen",
+              "price": 15.9
+            },
+            {
+              "name": "Lachs",
+              "price": 19.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 19.9
+            },
+            {
+              "name": "Gemüse Mix",
+              "price": 13.9
+            },
+            {
+              "name": "Paneer",
+              "price": 15.9
+            },
+            {
+              "name": "Lammkotelett",
+              "price": 25.9
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "35",
+      "name": "Mango Curry",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Zutat",
+          "required": true,
+          "priced": true,
+          "choices": [
+            {
+              "name": "Hähnchen",
+              "price": 15.9
+            },
+            {
+              "name": "Lachs",
+              "price": 19.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 19.9
+            },
+            {
+              "name": "Gemüse Mix",
+              "price": 13.9
+            },
+            {
+              "name": "Paneer",
+              "price": 15.9
+            },
+            {
+              "name": "Lammkotelett",
+              "price": 25.9
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "36",
+      "name": "Vindaloo",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Zutat",
+          "required": true,
+          "priced": true,
+          "choices": [
+            {
+              "name": "Hähnchen",
+              "price": 15.9
+            },
+            {
+              "name": "Lachs",
+              "price": 19.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 19.9
+            },
+            {
+              "name": "Gemüse Mix",
+              "price": 13.9
+            },
+            {
+              "name": "Paneer",
+              "price": 15.9
+            },
+            {
+              "name": "Lammkotelett",
+              "price": 25.9
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "38",
+      "name": "Tikka Masala",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Zutat",
+          "required": true,
+          "priced": true,
+          "choices": [
+            {
+              "name": "Hähnchen",
+              "price": 15.9
+            },
+            {
+              "name": "Lachs",
+              "price": 19.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 19.9
+            },
+            {
+              "name": "Gemüse Mix",
+              "price": 13.9
+            },
+            {
+              "name": "Paneer",
+              "price": 15.9
+            },
+            {
+              "name": "Lammkotelett",
+              "price": 25.9
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "39",
+      "name": "Palak",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Zutat",
+          "required": true,
+          "priced": true,
+          "choices": [
+            {
+              "name": "Hähnchen",
+              "price": 15.9
+            },
+            {
+              "name": "Lachs",
+              "price": 19.9
+            },
+            {
+              "name": "Garnelen",
+              "price": 19.9
+            },
+            {
+              "name": "Gemüse Mix",
+              "price": 13.9
+            },
+            {
+              "name": "Paneer",
+              "price": 15.9
+            },
+            {
+              "name": "Lammkotelett",
+              "price": 25.9
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "40",
+      "name": "Chilli Chicken",
+      "price": 14.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "51",
+      "name": "Chana Masala",
+      "price": 12.9,
+      "veg": false,
+      "vegan": true,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "52",
+      "name": "Dal Makhni",
+      "price": 12.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "53",
+      "name": "Raj Mah",
+      "price": 12.9,
+      "veg": false,
+      "vegan": true,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "60A",
+      "name": "Garlic Naan",
+      "price": 3.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "60B",
+      "name": "Butter Naan",
+      "price": 3.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "60C",
+      "name": "Kasoori Naan",
+      "price": 4.5,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "60D",
+      "name": "Papadam",
+      "price": 3.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    }
+  ],
+  "Tandoori & Grill": [
+    {
+      "id": 60,
+      "nr": "41",
+      "name": "Indien Mix Grill",
+      "price": 26.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Haehnchen, Garnelen, Lachs mit Salat & Basmatireis"
+    },
+    {
+      "id": 61,
+      "nr": "42",
+      "name": "Tandoori Mix Grill",
+      "price": 26.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Lammkoteletts, Garnelen, Haehnchen mit Basmatireis & Salat"
+    },
+    {
+      "id": 62,
+      "nr": "43",
+      "name": "Lammkotelett Grill",
+      "price": 28.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 63,
+      "nr": "46",
+      "name": "Premium Rumpsteak 250g",
+      "price": 27.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 64,
+      "nr": "47",
+      "name": "Premium Lachssteak 250g",
+      "price": 26.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    }
+  ],
+  "Tacos": [],
+  "Burger": [],
+  "Schnitzel": [
+    {
+      "id": 110,
+      "nr": "101",
+      "name": "Schnitzel Wiener Art",
+      "price": 10.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Klassisch paniertes Putenschnitzel, knusprig gebacken"
+    },
+    {
+      "id": 111,
+      "nr": "103",
+      "name": "Schnitzel Hawaii",
+      "price": 13.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Schinken, Ananas, Sahnesauce, Mozzarella ueberbacken"
+    },
+    {
+      "id": 112,
+      "nr": "104",
+      "name": "Schnitzel Al Forno",
+      "price": 13.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 113,
+      "nr": "105",
+      "name": "Rahm Schnitzel",
+      "price": 13.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Champignons, Zwiebeln, cremige Rahmsauce"
+    },
+    {
+      "id": 114,
+      "nr": "106",
+      "name": "Schnitzel Chef",
+      "price": 14.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Paprika, Zwiebeln, Knoblauch, Curry-Tomatensahnesauce, Mozzarella ueberbacken"
+    },
+    {
+      "id": 115,
+      "nr": "107",
+      "name": "Schnitzel Erbe",
+      "price": 13.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Brokkoli, Spinat, Cheese-Sauce, Parmesan, Roestzwiebeln"
+    },
+    {
+      "id": 116,
+      "nr": "108",
+      "name": "Schnitzel Trüffel",
+      "price": 13.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    }
+  ],
+  "Pizza": [
+    {
+      "id": 130,
+      "nr": "131",
+      "name": "Margherita",
+      "price": 7.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Tomatensauce & Mozzarella"
+    },
+    {
+      "id": 131,
+      "nr": "133",
+      "name": "Veggie",
+      "price": 11.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 132,
+      "nr": "134",
+      "name": "Capricciosa",
+      "price": 13.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Schinken, Salami, Champignons, Peperoni"
+    },
+    {
+      "id": 133,
+      "nr": "135",
+      "name": "4 Stagioni",
+      "price": 13.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Schinken, Champignons, Artischocken, Ei"
+    },
+    {
+      "id": 134,
+      "nr": "136",
+      "name": "Scampi",
+      "price": 14.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Garnelen & Knoblauch"
+    },
+    {
+      "id": 135,
+      "nr": "137",
+      "name": "Bull BBQ",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Hackfleisch, Salami, Champignons, Zwiebeln, Jalapenos, BBQ-Sauce"
+    },
+    {
+      "id": 136,
+      "nr": "138",
+      "name": "Fantasia",
+      "price": 13.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Smoky Chicken, Zwiebeln, Paprika, Salat, Cheesy-Garlic-Sauce"
+    },
+    {
+      "id": 137,
+      "nr": "140",
+      "name": "Avocado Pizza",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 138,
+      "nr": "141",
+      "name": "Salmon Pizza",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 139,
+      "nr": "142",
+      "name": "Salami",
+      "price": 10.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 140,
+      "nr": "143",
+      "name": "Schinken",
+      "price": 10.5,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 141,
+      "nr": "144",
+      "name": "Rustica",
+      "price": 11.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 142,
+      "nr": "145",
+      "name": "Hawaii",
+      "price": 11.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 143,
+      "nr": "146",
+      "name": "Diavola",
+      "price": 11.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Salami, Paprika, Chili, Olivenoel"
+    },
+    {
+      "id": 145,
+      "nr": "148",
+      "name": "Tonno",
+      "price": 12.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Thunfisch & Zwiebeln"
+    }
+  ],
+  "Paccheri": [],
+  "Potato Bombs": [
+    {
+      "id": 80,
+      "nr": "61",
+      "name": "Veggie Potato Bomb",
+      "price": 11.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "description": "Gemuese, Spinat, Parmesan, Sahne, Mozzarella ueberbacken"
+    }
+  ],
+  "Dips": [
+    {
+      "id": 30,
+      "nr": "D1",
+      "name": "Sour Cream",
+      "price": 1.7,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 31,
+      "nr": "D2",
+      "name": "Ranch",
+      "price": 1.7,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 32,
+      "nr": "D3",
+      "name": "Cheesy Garlic",
+      "price": 1.7,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 33,
+      "nr": "D4",
+      "name": "Sweet Chili",
+      "price": 1.7,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 34,
+      "nr": "D5",
+      "name": "Hot BBQ",
+      "price": 1.7,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 35,
+      "nr": "D6",
+      "name": "Sweet BBQ",
+      "price": 1.7,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 36,
+      "nr": "D7",
+      "name": "Aioli",
+      "price": 1.7,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 37,
+      "nr": "D8",
+      "name": "Tamarinden",
+      "price": 1.7,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 38,
+      "nr": "D9",
+      "name": "Minze Sauce",
+      "price": 1.7,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 39,
+      "nr": "D10",
+      "name": "Guacamole",
+      "price": 2.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    }
+  ],
+  "Dessert": [
+    {
+      "id": 160,
+      "nr": "130",
+      "name": "Tiramisu",
+      "price": 6.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 161,
+      "nr": "131",
+      "name": "Soufflé",
+      "price": 6.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 162,
+      "nr": "132",
+      "name": "Tartufo Nero",
+      "price": 6.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
+    },
+    {
+      "id": 163,
+      "nr": "133",
+      "name": "Cheesecake",
+      "price": 6.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food"
     }
   ]
 };
@@ -7931,12 +8084,33 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
     toast('Gespeichert!');
   };
 
+  var resetMenu = function(){
+    if(!window.confirm('Speisekarte auf die Standard-Version zuruecksetzen? Alle eigenen Aenderungen am Menue gehen verloren (Bestellungen bleiben).')) return;
+    // frische Kopie des Standard-MENU aus dem Code
+    var fresh = JSON.parse(JSON.stringify(MENU));
+    onUpdate(fresh);                              // setzt menuData + speichert + sync
+    try{localStorage.setItem('eatdesi_cat_order', JSON.stringify(Object.keys(fresh)));}catch(e){}
+    setActiveCat(Object.keys(fresh)[0]||'');
+    toast('Speisekarte zurueckgesetzt!');
+  };
+
   var saveItem = function(){
     if(!form.name||!form.price) return;
+    var cleanOpts=(form.options||[]).filter(function(o){
+      if(typeof o==='string') return o.trim();
+      // Gruppen-Option (label/choices) immer behalten
+      if(o && o.label && o.choices) return true;
+      return o && o.name && o.name.trim();
+    }).map(function(o){
+      if(typeof o==='string') return {name:o.trim(),price:0};
+      // Gruppen-Option unveraendert lassen
+      if(o && o.label && o.choices) return o;
+      return {name:o.name.trim(),price:parseFloat(o.price)||0};
+    });
     var item={id:(editing!==null&&menuData[activeCat]&&menuData[activeCat][editing])?menuData[activeCat][editing].id:Date.now(),
       nr:form.nr,name:form.name,price:parseFloat(form.price)||0,
       veg:form.veg,vegan:form.vegan,taxRate:form.taxRate||'food',
-      options:(form.options||[]).filter(function(o){return o.trim();}),
+      options:cleanOpts,
       selectedGroups:form.selectedGroups||[]};
     var u=Object.assign({},menuData);
     if(editing!==null){u[activeCat]=u[activeCat].map(function(x,i){return i===editing?Object.assign({},x,item,{id:x.id}):x;});}
@@ -8085,7 +8259,79 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                 R.createElement('option',{value:'takeaway'},'7% Takeaway')
               )
             ),
-            R.createElement('div',{style:{display:'flex',gap:8}},
+            // --- Artikel-Optionen ---
+            R.createElement('div',{style:{marginTop:12,borderTop:'1px dashed #ddd',paddingTop:10}},
+              R.createElement('div',{style:{fontSize:12,fontWeight:700,color:'#555',marginBottom:6}},'Optionen / Varianten'),
+              (form.options||[]).map(function(opt,oi){
+                // Gruppen-Option (z.B. "Zutat" mit choices Hähnchen/Lachs ...)
+                if(opt && opt.label && opt.choices){
+                  return R.createElement('div',{key:oi,style:{marginBottom:10,padding:8,background:'#f9f9f9',borderRadius:8,border:'1px solid #eee'}},
+                    R.createElement('div',{style:{display:'flex',gap:6,marginBottom:6,alignItems:'center'}},
+                      R.createElement('span',{style:{fontSize:11,color:'#888',fontWeight:700}},'Gruppe:'),
+                      R.createElement('input',{
+                        value:opt.label||'',
+                        onChange:function(e){var ops=(form.options||[]).slice();ops[oi]=Object.assign({},ops[oi],{label:e.target.value});setForm(Object.assign({},form,{options:ops}));},
+                        style:{flex:1,padding:'5px 8px',borderRadius:6,border:'1.5px solid #ddd',fontSize:12,fontFamily:'inherit',fontWeight:700}
+                      }),
+                      R.createElement('button',{
+                        onClick:function(){var ops=(form.options||[]).filter(function(_,j){return j!==oi;});setForm(Object.assign({},form,{options:ops}));},
+                        style:{padding:'5px 8px',borderRadius:6,border:'none',background:'#ffebee',color:C.red,cursor:'pointer',fontSize:12,fontWeight:700}
+                      },'Gruppe ✕')
+                    ),
+                    (opt.choices||[]).map(function(ch,ci){
+                      return R.createElement('div',{key:ci,style:{display:'flex',gap:6,marginBottom:4,alignItems:'center',paddingLeft:10}},
+                        R.createElement('input',{
+                          value:ch.name||'',placeholder:'Zutat-Name',
+                          onChange:function(e){var ops=(form.options||[]).slice();var chs=ops[oi].choices.slice();chs[ci]=Object.assign({},chs[ci],{name:e.target.value});ops[oi]=Object.assign({},ops[oi],{choices:chs});setForm(Object.assign({},form,{options:ops}));},
+                          style:{flex:2,padding:'6px 8px',borderRadius:6,border:'1.5px solid #ddd',fontSize:12,fontFamily:'inherit'}
+                        }),
+                        R.createElement('input',{
+                          value:(ch.price!=null)?String(ch.price):'',placeholder:'0.00',type:'number',step:'0.10',
+                          onChange:function(e){var ops=(form.options||[]).slice();var chs=ops[oi].choices.slice();chs[ci]=Object.assign({},chs[ci],{price:parseFloat(e.target.value)||0});ops[oi]=Object.assign({},ops[oi],{choices:chs});setForm(Object.assign({},form,{options:ops}));},
+                          style:{width:64,padding:'6px 8px',borderRadius:6,border:'1.5px solid #ddd',fontSize:12,fontFamily:'inherit'}
+                        }),
+                        R.createElement('button',{
+                          onClick:function(){var ops=(form.options||[]).slice();var chs=ops[oi].choices.filter(function(_,j){return j!==ci;});ops[oi]=Object.assign({},ops[oi],{choices:chs});setForm(Object.assign({},form,{options:ops}));},
+                          style:{padding:'5px 7px',borderRadius:6,border:'none',background:'#ffebee',color:C.red,cursor:'pointer',fontSize:12,fontWeight:700}
+                        },'✕')
+                      );
+                    }),
+                    R.createElement('button',{
+                      onClick:function(){var ops=(form.options||[]).slice();var chs=(ops[oi].choices||[]).slice();chs.push({name:'',price:0});ops[oi]=Object.assign({},ops[oi],{choices:chs});setForm(Object.assign({},form,{options:ops}));},
+                      style:{marginTop:4,marginLeft:10,padding:'5px 10px',borderRadius:6,border:'1.5px dashed '+C.green,background:'#e8f5e9',color:C.green,cursor:'pointer',fontSize:11,fontWeight:700,fontFamily:'inherit'}
+                    },'+ Zutat')
+                  );
+                }
+                // Einfache Option {name, price}
+                return R.createElement('div',{key:oi,style:{display:'flex',gap:6,marginBottom:6,alignItems:'center'}},
+                  R.createElement('input',{
+                    value:opt.name||'',placeholder:'Options-Name',
+                    onChange:function(e){var ops=(form.options||[]).slice();ops[oi]=Object.assign({},ops[oi],{name:e.target.value});setForm(Object.assign({},form,{options:ops}));},
+                    style:{flex:2,padding:'7px 9px',borderRadius:6,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit'}
+                  }),
+                  R.createElement('input',{
+                    value:(opt.price!=null)?String(opt.price):'',placeholder:'+0.00',type:'number',step:'0.10',
+                    onChange:function(e){var ops=(form.options||[]).slice();ops[oi]=Object.assign({},ops[oi],{price:parseFloat(e.target.value)||0});setForm(Object.assign({},form,{options:ops}));},
+                    style:{width:70,padding:'7px 9px',borderRadius:6,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit'}
+                  }),
+                  R.createElement('button',{
+                    onClick:function(){var ops=(form.options||[]).filter(function(_,j){return j!==oi;});setForm(Object.assign({},form,{options:ops}));},
+                    style:{padding:'6px 9px',borderRadius:6,border:'none',background:'#ffebee',color:C.red,cursor:'pointer',fontSize:13,fontWeight:700}
+                  },'✕')
+                );
+              }),
+              R.createElement('div',{style:{display:'flex',gap:6,marginTop:4,flexWrap:'wrap'}},
+                R.createElement('button',{
+                  onClick:function(){var ops=(form.options||[]).slice();ops.push({name:'',price:0});setForm(Object.assign({},form,{options:ops}));},
+                  style:{padding:'7px 12px',borderRadius:7,border:'1.5px dashed '+C.green,background:'#e8f5e9',color:C.green,cursor:'pointer',fontSize:12,fontWeight:700,fontFamily:'inherit'}
+                },'+ Einfache Option'),
+                R.createElement('button',{
+                  onClick:function(){var ops=(form.options||[]).slice();ops.push({label:'Zutat',required:true,priced:true,choices:[{name:'',price:0}]});setForm(Object.assign({},form,{options:ops}));},
+                  style:{padding:'7px 12px',borderRadius:7,border:'1.5px dashed '+C.blue,background:'#e3f2fd',color:C.blue,cursor:'pointer',fontSize:12,fontWeight:700,fontFamily:'inherit'}
+                },'+ Zutat-Gruppe (Preis-Wahl)')
+              )
+            ),
+            R.createElement('div',{style:{display:'flex',gap:8,marginTop:12}},
               R.createElement('button',{onClick:saveItem,style:Object.assign({},bS(C.green),{flex:1})},editing!==null?'Speichern':'Hinzufuegen'),
               R.createElement('button',{onClick:function(){setShowForm(false);setEditing(null);},style:bS('#ddd','#555')},'Abbrechen')
             )
@@ -8118,9 +8364,10 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                         item.vegan&&R.createElement('span',{style:{marginLeft:4,fontSize:11,color:'#4caf50'}},'(V)'),
                         item.veg&&!item.vegan&&R.createElement('span',{style:{marginLeft:4,fontSize:11,color:'#8bc34a'}},'(Veg)')
                       ),
-                      R.createElement('div',{style:{display:'flex',gap:8,marginTop:2}},
+                      R.createElement('div',{style:{display:'flex',gap:8,marginTop:2,alignItems:'center',flexWrap:'wrap'}},
                         R.createElement('span',{style:{fontWeight:700,fontSize:13,color:C.green}},(item.price||0).toFixed(2)+' EUR'),
-                        R.createElement('span',{style:{fontSize:10,background:'#f3f4f6',padding:'1px 6px',borderRadius:6,color:'#666'}},item.taxRate==='drinks'?'19%':'7%')
+                        R.createElement('span',{style:{fontSize:10,background:'#f3f4f6',padding:'1px 6px',borderRadius:6,color:'#666'}},item.taxRate==='drinks'?'19%':'7%'),
+                        (item.options&&item.options.length>0)&&R.createElement('span',{style:{fontSize:10,background:'#e8f5e9',padding:'1px 6px',borderRadius:6,color:C.green,fontWeight:700}},item.options.length+' Optionen')
                       )
                     ),
                     R.createElement('div',{style:{display:'flex',gap:4,flexShrink:0}},
@@ -8133,10 +8380,13 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
         )
       ),
 
-      R.createElement('div',{style:{flexShrink:0,padding:'10px 12px',background:'#fff',borderTop:'2px solid #e0e0e0'}},
+      R.createElement('div',{style:{flexShrink:0,padding:'10px 12px',background:'#fff',borderTop:'2px solid #e0e0e0',display:'flex',gap:8}},
         R.createElement('button',{onClick:saveMenu,
-          style:{width:'100%',padding:13,borderRadius:10,border:'none',background:C.green,color:'#fff',fontWeight:800,fontSize:15,cursor:'pointer',fontFamily:'inherit'}
-        },'Speisekarte & Reihenfolge speichern')
+          style:{flex:2,padding:13,borderRadius:10,border:'none',background:C.green,color:'#fff',fontWeight:800,fontSize:15,cursor:'pointer',fontFamily:'inherit'}
+        },'Speisekarte speichern'),
+        R.createElement('button',{onClick:resetMenu,
+          style:{flex:1,padding:13,borderRadius:10,border:'1.5px solid '+C.red,background:'#fff',color:C.red,fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}
+        },'↺ Standard')
       )
     ),
 
@@ -12991,6 +13241,16 @@ function App() {
   }]));
   const [menuData, setMenuData] = useState(function() {
     var saved = LS.get("eatdesi_menu", MENU);
+    // Kategorie-Reihenfolge an die feste Reihenfolge aus MENU angleichen
+    // (Getraenke oben, Speisen unten). Artikel bleiben erhalten - nur sortiert.
+    var ordered = {};
+    Object.keys(MENU).forEach(function(cat){
+      if (saved[cat]) ordered[cat] = saved[cat];        // bekannte Kategorie in MENU-Reihenfolge
+    });
+    Object.keys(saved).forEach(function(cat){
+      if (!ordered[cat]) ordered[cat] = saved[cat];     // evtl. neue Kategorien hinten anhaengen
+    });
+    saved = ordered;
     var drinkCats = {"Bier":1,"Weine":1,"Cocktails":1,"Digestive":1,"Softdrinks":1,
       "Alkoholfrei":1,"Safte & Lassi":1,"Long & Shot Drinks":1,"Caffe":1};
     drinkCats["Säfte & Lassi"] = 1;
@@ -14154,7 +14414,7 @@ function App() {
     onDelete: idx => setExpenses(p => p.filter((_, i) => i !== idx))
   }), view === "menu_mgmt" && /*#__PURE__*/React.createElement(MenuManagementView, {
     menuData: menuData,
-    onUpdate: updated => { setMenuData(updated); },
+    onUpdate: updated => { setMenuData(updated); LS.set("eatdesi_menu", updated); },
     optionGroups: optionGroups,
     onUpdateOptionGroups: setOptionGroups
   }), view === "printer" && /*#__PURE__*/React.createElement(PrinterSettingsView, {
