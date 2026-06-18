@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v47</title>
+<title>eatDeSi POS v48</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v47';",
+    "var CACHE='eatdesi-v48';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6412,7 +6412,7 @@ const BTPrint = {
     return new Promise(function(resolve){
       // alten Listener entfernen
       try{ if(self._scanListener && self._scanListener.remove) self._scanListener.remove(); }catch(e){}
-      P.addListener('discoverDevices', function(data){
+      var lh = P.addListener('discoverDevices', function(data){
         var list = (data && data.devices) ? data.devices : (Array.isArray(data)?data:[]);
         list.forEach(function(d){
           var addr=d.address||d.deviceId||d.id;
@@ -6420,7 +6420,13 @@ const BTPrint = {
             self._found.push({ name: d.name||d.localName||'Drucker', address: addr });
           }
         });
-      }).then(function(listener){ self._scanListener=listener; });
+      });
+      // addListener kann Promise ODER direkt das Handle zurueckgeben
+      if(lh && typeof lh.then === 'function'){
+        lh.then(function(listener){ self._scanListener=listener; });
+      } else {
+        self._scanListener = lh;
+      }
       P.startScan().catch(function(){});
       setTimeout(function(){
         try{ P.stopScan && P.stopScan(); }catch(e){}
