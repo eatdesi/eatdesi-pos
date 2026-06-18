@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v39</title>
+<title>eatDeSi POS v40</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v39';",
+    "var CACHE='eatdesi-v40';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -1108,7 +1108,18 @@ const MENU = {
       "veg": false,
       "vegan": true,
       "taxRate": "food",
-      "description": "Frische Avocado, Tempura-Panko, Sweet-Chili-Sauce"
+      "description": "Frische Avocado, Tempura-Panko, Sweet-Chili-Sauce",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 2,
@@ -1118,7 +1129,18 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "description": "Kartoffel-Patty, Tomaten, Zwiebeln, Gurke, Kichererbsen, Sweet-Chili & Ranch-Dip"
+      "description": "Kartoffel-Patty, Tomaten, Zwiebeln, Gurke, Kichererbsen, Sweet-Chili & Ranch-Dip",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 3,
@@ -1128,7 +1150,18 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Avocado Fries, Mozzarella Sticks, Blumenkohl, Onion Rings & Calamari mit Aioli & Sweet-Chili"
+      "description": "Avocado Fries, Mozzarella Sticks, Blumenkohl, Onion Rings & Calamari mit Aioli & Sweet-Chili",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 4,
@@ -1138,7 +1171,18 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "description": "Goldbraun gebacken mit Cheesy-Garlic-Sauce"
+      "description": "Goldbraun gebacken mit Cheesy-Garlic-Sauce",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 5,
@@ -1148,7 +1192,18 @@ const MENU = {
       "veg": false,
       "vegan": true,
       "taxRate": "food",
-      "description": "Blumenkohlroeschen, Tempura-Panko, Ranch-Dip"
+      "description": "Blumenkohlroeschen, Tempura-Panko, Ranch-Dip",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 6,
@@ -1158,7 +1213,18 @@ const MENU = {
       "veg": false,
       "vegan": true,
       "taxRate": "food",
-      "description": "Goldene Zwiebel Ringe mit Guacamole-Dip"
+      "description": "Goldene Zwiebel Ringe mit Guacamole-Dip",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 7,
@@ -1168,7 +1234,18 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Gegrillte Garnelen, Knoblauch, Guacamole"
+      "description": "Gegrillte Garnelen, Knoblauch, Guacamole",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 8,
@@ -1178,7 +1255,18 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "description": "Ofengeroesteter Pfeffer-Feta, Feigen, Walnuesse, Honig"
+      "description": "Ofengeroesteter Pfeffer-Feta, Feigen, Walnuesse, Honig",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 9,
@@ -1188,7 +1276,18 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Gefuellte Teigtaschen: Kartoffeln, Erbsen, Gewuerze, Tamarinden-Chutney"
+      "description": "Gefuellte Teigtaschen: Kartoffeln, Erbsen, Gewuerze, Tamarinden-Chutney",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 10,
@@ -1198,7 +1297,18 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Knusprig gebacken mit Limette & Aioli"
+      "description": "Knusprig gebacken mit Limette & Aioli",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 11,
@@ -1208,7 +1318,18 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Haehnchensticks, Tempura-Panko, hausgemacht"
+      "description": "Haehnchensticks, Tempura-Panko, hausgemacht",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 12,
@@ -1218,7 +1339,18 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Haehnchensticks, Tempura-Panko, hausgemacht"
+      "description": "Haehnchensticks, Tempura-Panko, hausgemacht",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 13,
@@ -1228,7 +1360,18 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Garnelen mit Knoblauch gegrillt, Aioli & Limette"
+      "description": "Garnelen mit Knoblauch gegrillt, Aioli & Limette",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 14,
@@ -1238,7 +1381,18 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Garnelen mit Knoblauch gegrillt, Aioli & Limette"
+      "description": "Garnelen mit Knoblauch gegrillt, Aioli & Limette",
+      "options": [
+        {
+          "label": "Portion",
+          "required": false,
+          "priced": false,
+          "choices": [
+            "Als Vorspeise",
+            "Als Hauptspeise"
+          ]
+        }
+      ]
     },
     {
       "id": 15,
@@ -1926,7 +2080,39 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Patty",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Chicken",
+            "Vegan",
+            "Veggie"
+          ]
+        },
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Süß-Pommes statt Pommes",
+              "price": 1.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "82",
@@ -1935,7 +2121,39 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Patty",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Chicken",
+            "Vegan",
+            "Veggie"
+          ]
+        },
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Süß-Pommes statt Pommes",
+              "price": 1.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "84",
@@ -1944,7 +2162,39 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Patty",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Chicken",
+            "Vegan",
+            "Veggie"
+          ]
+        },
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Süß-Pommes statt Pommes",
+              "price": 1.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "85",
@@ -1953,7 +2203,39 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Patty",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Chicken",
+            "Vegan",
+            "Veggie"
+          ]
+        },
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Süß-Pommes statt Pommes",
+              "price": 1.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "86",
@@ -1962,7 +2244,39 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Patty",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Chicken",
+            "Vegan",
+            "Veggie"
+          ]
+        },
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Süß-Pommes statt Pommes",
+              "price": 1.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "87",
@@ -1971,7 +2285,39 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Patty",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Chicken",
+            "Vegan",
+            "Veggie"
+          ]
+        },
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Süß-Pommes statt Pommes",
+              "price": 1.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "88",
@@ -1980,7 +2326,39 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Patty",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Chicken",
+            "Vegan",
+            "Veggie"
+          ]
+        },
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Süß-Pommes statt Pommes",
+              "price": 1.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "89",
@@ -1989,7 +2367,39 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Patty",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Chicken",
+            "Vegan",
+            "Veggie"
+          ]
+        },
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Süß-Pommes statt Pommes",
+              "price": 1.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "90",
@@ -1998,7 +2408,28 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Süß-Pommes statt Pommes",
+              "price": 1.9
+            }
+          ]
+        }
+      ]
     }
   ],
   "Schnitzel": [
@@ -2010,7 +2441,29 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Klassisch paniertes Putenschnitzel, knusprig gebacken"
+      "description": "Klassisch paniertes Putenschnitzel, knusprig gebacken",
+      "options": [
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Extra Salat",
+              "price": 2.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 111,
@@ -2020,7 +2473,29 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Schinken, Ananas, Sahnesauce, Mozzarella ueberbacken"
+      "description": "Schinken, Ananas, Sahnesauce, Mozzarella ueberbacken",
+      "options": [
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Extra Salat",
+              "price": 2.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 112,
@@ -2029,7 +2504,29 @@ const MENU = {
       "price": 13.9,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Extra Salat",
+              "price": 2.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 113,
@@ -2039,7 +2536,29 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Champignons, Zwiebeln, cremige Rahmsauce"
+      "description": "Champignons, Zwiebeln, cremige Rahmsauce",
+      "options": [
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Extra Salat",
+              "price": 2.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 114,
@@ -2049,7 +2568,29 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Paprika, Zwiebeln, Knoblauch, Curry-Tomatensahnesauce, Mozzarella ueberbacken"
+      "description": "Paprika, Zwiebeln, Knoblauch, Curry-Tomatensahnesauce, Mozzarella ueberbacken",
+      "options": [
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Extra Salat",
+              "price": 2.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 115,
@@ -2059,7 +2600,29 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Brokkoli, Spinat, Cheese-Sauce, Parmesan, Roestzwiebeln"
+      "description": "Brokkoli, Spinat, Cheese-Sauce, Parmesan, Roestzwiebeln",
+      "options": [
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Extra Salat",
+              "price": 2.9
+            }
+          ]
+        }
+      ]
     },
     {
       "id": 116,
@@ -2068,7 +2631,29 @@ const MENU = {
       "price": 13.9,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Beilage",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Pommes",
+            "Salat"
+          ]
+        },
+        {
+          "label": "Extra",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Extra Salat",
+              "price": 2.9
+            }
+          ]
+        }
+      ]
     }
   ],
   "Pizza": [
