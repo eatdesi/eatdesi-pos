@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v35</title>
+<title>eatDeSi POS v36</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v35';",
+    "var CACHE='eatdesi-v36';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -1263,63 +1263,105 @@ const MENU = {
   ],
   "Salat": [
     {
-      "id": 20,
       "nr": "21S",
       "name": "Salat Mix Klein",
       "price": 5.9,
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "description": "Gurke, Tomaten, rote Zwiebeln, Lauchzwiebeln, Ranch-Dressing"
+      "options": []
     },
     {
-      "id": 21,
       "nr": "21G",
       "name": "Salat Mix Groß",
       "price": 8.9,
       "veg": true,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": []
     },
     {
-      "id": 22,
       "nr": "22",
       "name": "Tonno Salat",
       "price": 12.9,
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Thunfisch, Oliven, Ei, Ranch-Dressing"
+      "options": []
     },
     {
-      "id": 23,
       "nr": "23",
       "name": "Salat Italia",
       "price": 12.9,
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Schinken, Artischocken, Mais, Oliven, Mozzarella, Cheesy-Garlic"
+      "options": []
     },
     {
-      "id": 24,
       "nr": "24",
       "name": "Feta Deluxe Salat",
       "price": 14.9,
-      "veg": false,
+      "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "description": "Pfeffer-Feta, Feigen, Walnuesse, Honig, Limette, Olivenoel"
+      "options": []
     },
     {
-      "id": 25,
       "nr": "25",
       "name": "Feta Salat",
       "price": 12.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "26",
+      "name": "Avocado-Ranch-Salat",
+      "price": 15.9,
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Cremiger Feta, Oliven, Limette, Olivenoel"
+      "options": [
+        {
+          "label": "Fleisch",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Smoky Chicken"
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "27",
+      "name": "Surf & Turf Salat",
+      "price": 16.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Fleisch",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Smoky Chicken"
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "28",
+      "name": "Lachs-Salat",
+      "price": 16.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
     }
   ],
   "Indisch Curry & Naan": [
@@ -1726,55 +1768,239 @@ const MENU = {
   ],
   "Tandoori & Grill": [
     {
-      "id": 60,
       "nr": "41",
       "name": "Indien Mix Grill",
       "price": 26.9,
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Haehnchen, Garnelen, Lachs mit Salat & Basmatireis"
+      "options": []
     },
     {
-      "id": 61,
       "nr": "42",
       "name": "Tandoori Mix Grill",
       "price": 26.9,
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "description": "Lammkoteletts, Garnelen, Haehnchen mit Basmatireis & Salat"
+      "options": []
     },
     {
-      "id": 62,
       "nr": "43",
-      "name": "Lammkotelett Grill",
+      "name": "eatDeSi Lammkotelett Grill",
       "price": 28.9,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": []
     },
     {
-      "id": 63,
       "nr": "46",
-      "name": "Premium Rumpsteak 250g",
+      "name": "Premium Rumpsteak (250g)",
       "price": 27.9,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": []
     },
     {
-      "id": 64,
       "nr": "47",
-      "name": "Premium Lachssteak 250g",
+      "name": "Premium Lachssteak (250g)",
       "price": 26.9,
       "veg": false,
       "vegan": false,
-      "taxRate": "food"
+      "taxRate": "food",
+      "options": []
     }
   ],
-  "Tacos": [],
-  "Burger": [],
+  "Tacos": [
+    {
+      "nr": "71",
+      "name": "Garlic Tacos",
+      "price": 12.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Fleisch",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Smoky Chicken"
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "72",
+      "name": "Avocado Tacos",
+      "price": 13.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Fleisch",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Smoky Chicken"
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "73",
+      "name": "Capsicum Cheese Tacos",
+      "price": 12.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Fleisch",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Smoky Chicken"
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "74",
+      "name": "Surf & Turf Tacos",
+      "price": 16.4,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Fleisch",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Smoky Chicken"
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "75",
+      "name": "Salmon Tacos",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "76",
+      "name": "Blumenkohl Tinga Tacos",
+      "price": 11.4,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "77",
+      "name": "Tandoori Tacos",
+      "price": 12.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    }
+  ],
+  "Burger": [
+    {
+      "nr": "81",
+      "name": "Der Klassiker",
+      "price": 11.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "82",
+      "name": "Smashed Bacontor Burger",
+      "price": 14.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "84",
+      "name": "Smashed Cheesy Burger",
+      "price": 9.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "85",
+      "name": "Trüffel Burger",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "86",
+      "name": "Biella Italia",
+      "price": 18.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "87",
+      "name": "Born Bacon",
+      "price": 16.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "88",
+      "name": "Smashed Aioli Burger",
+      "price": 14.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "89",
+      "name": "Avocado Burger",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "90",
+      "name": "Veggie Burger",
+      "price": 9.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    }
+  ],
   "Schnitzel": [
     {
       "id": 110,
@@ -1990,17 +2216,203 @@ const MENU = {
       "description": "Thunfisch & Zwiebeln"
     }
   ],
-  "Paccheri": [],
+  "Paccheri": [
+    {
+      "nr": "111",
+      "name": "Paccheri Bacon",
+      "price": 14.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Fleisch",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Smoky Chicken"
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "112",
+      "name": "Paccheri Roast Pfeffer Feta",
+      "price": 14.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "113",
+      "name": "Paccheri Roasty Garlic",
+      "price": 14.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Fleisch",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Smoky Chicken"
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "114",
+      "name": "Paccheri Trüffel",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Fleisch",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Smoky Chicken"
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "115",
+      "name": "Paccheri Avocado",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Fleisch",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Smoky Chicken"
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "116",
+      "name": "Paccheri Salmon",
+      "price": 16.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "117",
+      "name": "Paccheri Veggie",
+      "price": 12.9,
+      "veg": true,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "118",
+      "name": "Paccheri Erbe",
+      "price": 13.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "119",
+      "name": "Paccheri eatDeSi Premium",
+      "price": 14.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "120",
+      "name": "Paccheri Napoli",
+      "price": 9.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "121",
+      "name": "Paccheri Chef",
+      "price": 14.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    }
+  ],
   "Potato Bombs": [
     {
-      "id": 80,
       "nr": "61",
-      "name": "Veggie Potato Bomb",
+      "name": "Smashed Veggie Bomb",
       "price": 11.9,
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "description": "Gemuese, Spinat, Parmesan, Sahne, Mozzarella ueberbacken"
+      "options": []
+    },
+    {
+      "nr": "62",
+      "name": "Smashed Bacon Bomb",
+      "price": 13.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Fleisch",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Smoky Chicken"
+          ]
+        }
+      ]
+    },
+    {
+      "nr": "63",
+      "name": "Smashed Lachs Bomb",
+      "price": 15.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": []
+    },
+    {
+      "nr": "64",
+      "name": "Cheese Fries",
+      "price": 12.9,
+      "veg": false,
+      "vegan": false,
+      "taxRate": "food",
+      "options": [
+        {
+          "label": "Fleisch",
+          "required": true,
+          "priced": false,
+          "choices": [
+            "Beef",
+            "Smoky Chicken"
+          ]
+        }
+      ]
     }
   ],
   "Dips": [
