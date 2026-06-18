@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v44</title>
+<title>eatDeSi POS v45</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v44';",
+    "var CACHE='eatdesi-v45';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -2313,6 +2313,29 @@ const MENU = {
               "price": 25.9
             }
           ]
+        },
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
         }
       ]
     },
@@ -2352,6 +2375,29 @@ const MENU = {
             {
               "name": "Lammkotelett",
               "price": 25.9
+            }
+          ]
+        },
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
             }
           ]
         }
@@ -2395,6 +2441,29 @@ const MENU = {
               "price": 25.9
             }
           ]
+        },
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
         }
       ]
     },
@@ -2434,6 +2503,29 @@ const MENU = {
             {
               "name": "Lammkotelett",
               "price": 25.9
+            }
+          ]
+        },
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
             }
           ]
         }
@@ -2477,6 +2569,29 @@ const MENU = {
               "price": 25.9
             }
           ]
+        },
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
         }
       ]
     },
@@ -2516,6 +2631,29 @@ const MENU = {
             {
               "name": "Lammkotelett",
               "price": 25.9
+            }
+          ]
+        },
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
             }
           ]
         }
@@ -2559,6 +2697,29 @@ const MENU = {
               "price": 25.9
             }
           ]
+        },
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
         }
       ]
     },
@@ -2600,6 +2761,29 @@ const MENU = {
               "price": 25.9
             }
           ]
+        },
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
         }
       ]
     },
@@ -2610,7 +2794,31 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "51",
@@ -2619,7 +2827,31 @@ const MENU = {
       "veg": false,
       "vegan": true,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "52",
@@ -2628,7 +2860,31 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "53",
@@ -2637,7 +2893,31 @@ const MENU = {
       "veg": false,
       "vegan": true,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "60A",
@@ -2684,7 +2964,31 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "42",
@@ -2693,7 +2997,31 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "43",
@@ -2702,7 +3030,31 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "46",
@@ -2711,7 +3063,31 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
+        }
+      ]
     },
     {
       "nr": "47",
@@ -2720,7 +3096,31 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [
+        {
+          "label": "Naan dazu",
+          "multi": true,
+          "required": false,
+          "choices": [
+            {
+              "name": "Garlic Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Butter Naan",
+              "price": 3.9
+            },
+            {
+              "name": "Kasoori Naan",
+              "price": 4.5
+            },
+            {
+              "name": "Papadam",
+              "price": 3.9
+            }
+          ]
+        }
+      ]
     }
   ],
   "Tacos": [
@@ -12191,6 +12591,25 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                   },'✕')
                 );
               }),
+              // Bestehende Option-Gruppen waehlen (Dip, Beilage, Patty ...)
+              (optionGroups||[]).length > 0 && R.createElement('div',{style:{marginTop:10,marginBottom:6}},
+                R.createElement('div',{style:{fontSize:11,fontWeight:700,color:'#888',marginBottom:6}},'Bestehende Gruppen antippen zum Hinzufügen:'),
+                R.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:6}},
+                  (optionGroups||[]).map(function(g){
+                    var sel=(form.selectedGroups||[]).indexOf(g.id)>=0;
+                    return R.createElement('button',{
+                      key:g.id,
+                      onClick:function(){
+                        var sg=(form.selectedGroups||[]).slice();
+                        var idx=sg.indexOf(g.id);
+                        if(idx>=0) sg.splice(idx,1); else sg.push(g.id);
+                        setForm(Object.assign({},form,{selectedGroups:sg}));
+                      },
+                      style:{padding:'6px 11px',borderRadius:16,border:'2px solid '+(sel?C.green:'#ccc'),background:sel?'#e8f5e9':'#fff',color:sel?C.green:'#666',cursor:'pointer',fontSize:12,fontWeight:700,fontFamily:'inherit'}
+                    }, (sel?'✓ ':'')+g.name);
+                  })
+                )
+              ),
               R.createElement('div',{style:{display:'flex',gap:6,marginTop:4,flexWrap:'wrap'}},
                 R.createElement('button',{
                   onClick:function(){var ops=(form.options||[]).slice();ops.push({name:'',price:0});setForm(Object.assign({},form,{options:ops}));},
@@ -17174,6 +17593,9 @@ function App() {
         {name:"Paprika", price:"1.50"}, {name:"Mais", price:"1.50"}, {name:"Erbsen", price:"1.50"}, {name:"Spinat", price:"1.50"},
         {name:"Mozzarella", price:"2.50"}, {name:"Meeresfrüchte", price:"2.50"}, {name:"Thunfisch", price:"2.50"},
         {name:"Grilled Beef", price:"4.90"}, {name:"Smoky Chicken", price:"4.90"}, {name:"Garnelen", price:"4.90"}, {name:"Lachs", price:"4.90"}
+      ]},
+      { id: 90010, name: "Naan dazu", required: false, multiple: true, choices: [
+        {name:"Garlic Naan", price:"3.90"}, {name:"Butter Naan", price:"3.90"}, {name:"Kasoori Naan", price:"4.50"}, {name:"Papadam", price:"3.90"}
       ]}
     ];
   });
