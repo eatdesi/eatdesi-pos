@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v54</title>
+<title>eatDeSi POS v56</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v54';",
+    "var CACHE='eatdesi-v56';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6511,9 +6511,10 @@ const BTPrint = {
     var map = {
       'ä':'ae','ö':'oe','ü':'ue','Ä':'Ae','Ö':'Oe','Ü':'Ue','ß':'ss',
       '€':'EUR','°':' Grad','’':"'",'‘':"'",'“':'"','”':'"','–':'-','—':'-','…':'...',
+      '×':'x','·':'-','•':'-',
       'á':'a','à':'a','â':'a','é':'e','è':'e','ê':'e','í':'i','ì':'i','ó':'o','ò':'o','ô':'o','ú':'u','ù':'u','ñ':'n','ç':'c'
     };
-    str = str.replace(/[äöüÄÖÜß€°’‘“”–—…áàâéèêíìóòôúùñç]/g, function(c){ return map[c]||c; });
+    str = str.replace(/[äöüÄÖÜß€°’‘“”–—…×·•áàâéèêíìóòôúùñç]/g, function(c){ return map[c]||c; });
     // Emojis und uebrige Nicht-ASCII-Zeichen entfernen
     str = str.replace(/[^\x00-\x7F]/g, '');
     return str;
@@ -6525,7 +6526,7 @@ const BTPrint = {
     // style + script Tags entfernen (sonst wird CSS mitgedruckt!)
     tmp.querySelectorAll('style,script').forEach(function(el){ el.parentNode && el.parentNode.removeChild(el); });
     tmp.querySelectorAll('.row').forEach(function(r){ var s=r.querySelectorAll('span'); if(s.length>=2){var l=s[0].textContent.trim(),ri=s[1].textContent.trim(),p=Math.max(1,W-l.length-ri.length);r.textContent=l+' '.repeat(p)+ri;} });
-    tmp.querySelectorAll('.line').forEach(function(l){l.textContent=Array(W+1).join('-');});
+    tmp.querySelectorAll('.line').forEach(function(l){ var n=Math.max(8,Math.floor(W/2)); var dash=Array(n+1).join('-'); var pad=Math.floor((W-n)/2); l.textContent=' '.repeat(pad)+dash; });
     tmp.querySelectorAll('.center').forEach(function(c){var t=c.textContent.trim(),p=Math.max(0,Math.floor((W-t.length)/2));c.textContent=' '.repeat(p)+t;});
     // Block-Elemente mit Zeilenumbruch trennen (nicht auf innerText verlassen)
     var out='';
@@ -7188,7 +7189,7 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     ${(deliveryInfo.plz || deliveryInfo.city) ? `<div>${[deliveryInfo.plz, deliveryInfo.city].filter(Boolean).join(" ")}</div>` : ""}
     ${deliveryInfo.phone ? `<div>📞 ${deliveryInfo.phone}</div>` : ""}
   ` : "";
-  const html = `<html><head><style>body{font-family:monospace;font-size:13px;width:280px;margin:0 auto;padding:8px}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:700}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}</style></head><body>
+  const html = `<html><head><style>body{font-family:monospace;font-size:13px;width:${printerCfg?.width||280}px;margin:0 auto;padding:8px}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:700}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}</style></head><body>
     <div class="center bold" style="font-size:15px">${printerCfg?.name||"eatDeSi"}</div>
     <div class="center">${printerCfg?.firmaZusatz||"Fusion Kitchen & Grill"}</div>
     <div class="center" style="font-size:11px">${printerCfg?.address||"Brunnenallee 30 · 34537 Bad Wildungen"} · ${printerCfg?.phone||"05621 9449087"}</div>
@@ -7204,8 +7205,8 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   </body></html>`;
   if (printerCfg?.method === "bluetooth") {
     const devId = printerCfg?.btAddress;
-    const szMap={klein:0x00,normal:0x00,gross:0x01,xl:0x11};
-    const fsz=szMap[printerCfg?.bonFontSize||'gross']??0x01;
+    // Zahlungs-Beleg = Kunden-Beleg: 12pt (normal), damit alles sauber & komplett passt
+    const fsz = 0x00;
     if (devId && BTPrint.isNative()) {
       BTPrint.printHtml(devId, html, fsz).catch(e => { printHtml(html); });
       return;
@@ -7220,8 +7221,7 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
       tmp.querySelectorAll('.center').forEach(c=>{const t=c.textContent.trim(),p=Math.max(0,Math.floor((32-t.length)/2));c.textContent=' '.repeat(p)+t;});
       const text = tmp.innerText||tmp.textContent||'';
       const ESC='\x1B',GS='\x1D';
-      const szMap={klein:0x00,normal:0x00,gross:0x01,xl:0x11};
-      const fsz=szMap[printerCfg?.bonFontSize||'gross']??0x01;
+      const fsz=0x00; // Zahlungs-Beleg 12pt
       const raw=ESC+'@'+GS+'!'+String.fromCharCode(fsz)+text+'\n\n\n'+GS+'V\x41\x03';
       const a=document.createElement('a'); a.href='rawbt://'+encodeURIComponent(raw); a.target='_blank';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -7431,10 +7431,11 @@ function BonModal({
       return;
     }
     const groups = groupByCat(foodItems);
-    const lines = Object.keys(groups).map(cat =>
-      `<div class="bold center" style="font-size:17px;background:#eee;padding:4px 0;margin:6px 0">— ${cat} —</div>` +
+    const cats = Object.keys(groups);
+    const lines = cats.map((cat, ci) =>
+      `<div class="bold center" style="font-size:16px;margin:6px 0 4px">- ${cat} -</div>` +
       groups[cat].map(i =>
-        `<div class="bold" style="font-size:22px;margin:4px 0">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px">→ ${i.note}</div>` : ""}${i.kitchenNote ? `<div style="color:blue;font-size:16px">📝 ${i.kitchenNote}</div>` : ""}<div class="line"></div>`
+        `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px;margin-bottom:2px">→ ${i.note}</div>` : ""}${i.kitchenNote ? `<div style="color:blue;font-size:16px;margin-bottom:2px">📝 ${i.kitchenNote}</div>` : ""}`
       ).join("")
     ).join("");
     doPrint(kvBonHtml("🍳 KÜCHE — SPEISEN", lines));
@@ -7448,10 +7449,11 @@ function BonModal({
       return;
     }
     const groups = groupByCat(drinkItems);
-    const lines = Object.keys(groups).map(cat =>
-      `<div class="bold center" style="font-size:17px;background:#eee;padding:4px 0;margin:6px 0">— ${cat} —</div>` +
+    const cats = Object.keys(groups);
+    const lines = cats.map((cat, ci) =>
+      `<div class="bold center" style="font-size:16px;margin:6px 0 4px">- ${cat} -</div>` +
       groups[cat].map(i =>
-        `<div class="bold" style="font-size:22px;margin:4px 0">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px">→ ${i.note}</div>` : ""}<div class="line"></div>`
+        `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px;margin-bottom:2px">→ ${i.note}</div>` : ""}`
       ).join("")
     ).join("");
     doPrint(kvBonHtml("🍺 BAR — GETRÄNKE", lines));
@@ -11824,15 +11826,23 @@ function OrderListView({
         React.createElement("button", {
           onClick: () => {
             const o = completedOrders[selected]; if(!o) return;
+            const t7 = calcTax7(o.items||[]);
+            const t19 = calcTax19(o.items||[]);
             let bonLines = (o.items||[]).map(i => {
-              const price = (i.finalPrice*i.qty).toFixed(2);
+              const price = fmt(i.finalPrice*i.qty);
               const note = i.note ? " ("+i.note+")" : "";
-              return "<div class=\"row\"><span>"+i.qty+"x "+i.name+note+"</span><span>"+price+" €</span></div>";
+              return "<div class=\"row\"><span>"+i.qty+"× "+(i.nr?i.nr+". ":"")+i.name+note+"</span><span>"+price+"</span></div>";
             }).join("");
-            if(o.trinkgeld>0) bonLines += "<div class=\"row\"><span>⭐ Trinkgeld</span><span>"+o.trinkgeld.toFixed(2)+" €</span></div>";
-            const title = (o.tableId ? "Tisch "+o.tableId : "Takeaway")+" \u00b7 Bon #"+(o.bonNr||"?");
+            bonLines += "<div class=\"line\"></div>";
+            if(t7>0)  bonLines += "<div class=\"row\"><span>MwSt. 7% (Speisen)</span><span>"+fmt(t7)+"</span></div>";
+            if(t19>0) bonLines += "<div class=\"row\"><span>MwSt. 19% (Getränke)</span><span>"+fmt(t19)+"</span></div>";
+            bonLines += "<div class=\"line\"></div>";
+            bonLines += "<div class=\"row bold\" style=\"font-size:15px\"><span>GESAMT</span><span>"+fmt(o.total||0)+"</span></div>";
+            if(o.trinkgeld>0) bonLines += "<div class=\"row\"><span>Trinkgeld</span><span>"+fmt(o.trinkgeld)+"</span></div>";
+            if(o.payMethod) bonLines += "<div class=\"row\"><span>Zahlung:</span><span>"+o.payMethod+"</span></div>";
+            const title = "💳 ZAHLUNG — " + (o.tableId ? "Tisch "+o.tableId : "Takeaway");
             const delivery = o.customerName ? {name:o.customerName,phone:o.customerPhone,street:o.customerStreet,city:o.customerCity} : null;
-            printBon(title, bonLines, o.label||"", o.bonNr||"?", new Date(o.time), delivery, printerSettings, o.tse);
+            printBon(title, bonLines, o.label||(o.tableId?"Tisch "+o.tableId:"Takeaway"), o.bonNr||"?", new Date(o.time), delivery, printerSettings, o.tse);
           },
           style:{padding:"10px 4px",borderRadius:10,border:"2px solid #C84B31",background:"#fff5f0",color:"#C84B31",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12}
         }, "\uD83D\uDDA8\uFE0F Drucken"),
@@ -11856,7 +11866,13 @@ function OrderListView({
           },
           style:{padding:"10px 4px",borderRadius:10,border:"2px solid #25d366",background:"#f0fdf4",color:"#128C7E",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12}
         }, "\uD83D\uDCF1 WhatsApp")
-      )
+      ),
+      // Bewirtungsbeleg direkt aus Order-Liste
+      (() => { const o = completedOrders[selected]; if(!o) return null;
+        return React.createElement("div", { style:{marginTop:10} },
+          React.createElement(BewirtungButtons, { items:o.items||[], total:o.total||0, label:(o.tableId?"Tisch "+o.tableId:(o.label||"Takeaway")), firma:printerSettings })
+        );
+      })()
     )
   ));  
   })(), /*#__PURE__*/React.createElement("div", {
@@ -18176,6 +18192,23 @@ function App() {
     });
     setBonModal(null);
   };
+  // Baut die Bon-Zeilen fuer Zahlungs-Beleg (wie in der App-Ansicht: Artikel + MwSt + GESAMT)
+  const buildZahlungLines = (bitems, btotal, btrinkgeld, bpayMethod) => {
+    const t7 = calcTax7(bitems);
+    const t19 = calcTax19(bitems);
+    let L = (bitems||[]).map(i => {
+      const nm = `${i.qty}× ${i.nr?i.nr+'. ':''}${i.name}${i.note?' ('+i.note+')':''}`;
+      return `<div class="row"><span>${nm}</span><span>${fmt(i.finalPrice*i.qty)}</span></div>`;
+    }).join("");
+    L += `<div class="line"></div>`;
+    if(t7>0)  L += `<div class="row"><span>MwSt. 7% (Speisen)</span><span>${fmt(t7)}</span></div>`;
+    if(t19>0) L += `<div class="row"><span>MwSt. 19% (Getränke)</span><span>${fmt(t19)}</span></div>`;
+    L += `<div class="line"></div>`;
+    L += `<div class="row bold" style="font-size:15px"><span>GESAMT</span><span>${fmt(btotal)}</span></div>`;
+    if(btrinkgeld>0) L += `<div class="row"><span>Trinkgeld</span><span>${fmt(btrinkgeld)}</span></div>`;
+    L += `<div class="row"><span>Zahlung:</span><span>${bpayMethod}</span></div>`;
+    return L;
+  };
   const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0) => {
     const isTA = String(tid).startsWith("ta_");
     // Auto-deduct inventory: match item names to inventory articles
@@ -18204,12 +18237,9 @@ function App() {
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: ta.items, tableId: null }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
         setCompletedOrders(p => [...p, { ...ta, time: new Date(), tableId: null, label: "Takeaway #"+taId, isTakeaway: true, payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse }]);
-        // Zahlungs-Beleg automatisch drucken (mit Firma + TSE)
+        // Zahlungs-Beleg automatisch drucken (mit Firma + MwSt + TSE)
         try {
-          let bonLines = (ta.items||[]).map(i => `<div class="row"><span>${i.qty}× ${i.nr?i.nr+'. ':''}${i.name}</span><span>${fmt(i.finalPrice*i.qty)}</span></div>`).join("");
-          bonLines += `<div class="line"></div><div class="row bold" style="font-size:15px"><span>GESAMT</span><span>${fmt(orderTotal)}</span></div>`;
-          if(trinkgeld>0) bonLines += `<div class="row"><span>Trinkgeld</span><span>${fmt(trinkgeld)}</span></div>`;
-          bonLines += `<div class="row"><span>Zahlung:</span><span>${payMethod}</span></div>`;
+          const bonLines = buildZahlungLines(ta.items||[], orderTotal, trinkgeld, payMethod);
           const delivery = ta.customerName ? {name:ta.customerName,phone:ta.customerPhone,street:ta.customerStreet,city:ta.customerCity} : null;
           printBon("💳 ZAHLUNG — Takeaway", bonLines, ta.label||"Takeaway", _bonNr, new Date(), delivery, printerSettings, _tse);
         } catch(e){ console.warn("Bondruck:", e); }
@@ -18229,12 +18259,9 @@ function App() {
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: o.items, tableId: tid }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
         setCompletedOrders(p => [...p, { ...o, time: new Date(), tableId: tid, payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse }]);
-        // Zahlungs-Beleg automatisch drucken (mit Firma + TSE)
+        // Zahlungs-Beleg automatisch drucken (mit Firma + MwSt + TSE)
         try {
-          let bonLines = (o.items||[]).map(i => `<div class="row"><span>${i.qty}× ${i.nr?i.nr+'. ':''}${i.name}</span><span>${fmt(i.finalPrice*i.qty)}</span></div>`).join("");
-          bonLines += `<div class="line"></div><div class="row bold" style="font-size:15px"><span>GESAMT</span><span>${fmt(orderTotal)}</span></div>`;
-          if(trinkgeld>0) bonLines += `<div class="row"><span>Trinkgeld</span><span>${fmt(trinkgeld)}</span></div>`;
-          bonLines += `<div class="row"><span>Zahlung:</span><span>${payMethod}</span></div>`;
+          const bonLines = buildZahlungLines(o.items||[], orderTotal, trinkgeld, payMethod);
           const delivery = o.customerName ? {name:o.customerName,phone:o.customerPhone,street:o.customerStreet,city:o.customerCity} : null;
           printBon("💳 ZAHLUNG — Tisch " + tid, bonLines, o.label||("Tisch "+tid), _bonNr, new Date(), delivery, printerSettings, _tse);
         } catch(e){ console.warn("Bondruck:", e); }
