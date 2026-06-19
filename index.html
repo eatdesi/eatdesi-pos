@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v56</title>
+<title>eatDeSi POS v58</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v56';",
+    "var CACHE='eatdesi-v58';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6525,7 +6525,7 @@ const BTPrint = {
     var tmp = document.createElement('div'); tmp.innerHTML = html;
     // style + script Tags entfernen (sonst wird CSS mitgedruckt!)
     tmp.querySelectorAll('style,script').forEach(function(el){ el.parentNode && el.parentNode.removeChild(el); });
-    tmp.querySelectorAll('.row').forEach(function(r){ var s=r.querySelectorAll('span'); if(s.length>=2){var l=s[0].textContent.trim(),ri=s[1].textContent.trim(),p=Math.max(1,W-l.length-ri.length);r.textContent=l+' '.repeat(p)+ri;} });
+    tmp.querySelectorAll('.row').forEach(function(r){ var s=r.querySelectorAll('span'); if(s.length>=2){var l=s[0].textContent.trim(),ri=s[1].textContent.trim(); var avail=W-ri.length-1; if(l.length>avail){ l=l.slice(0,avail); } var p=Math.max(1,W-l.length-ri.length); r.textContent=l+' '.repeat(p)+ri;} });
     tmp.querySelectorAll('.line').forEach(function(l){ var n=Math.max(8,Math.floor(W/2)); var dash=Array(n+1).join('-'); var pad=Math.floor((W-n)/2); l.textContent=' '.repeat(pad)+dash; });
     tmp.querySelectorAll('.center').forEach(function(c){var t=c.textContent.trim(),p=Math.max(0,Math.floor((W-t.length)/2));c.textContent=' '.repeat(p)+t;});
     // Block-Elemente mit Zeilenumbruch trennen (nicht auf innerText verlassen)
@@ -7190,9 +7190,11 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     ${deliveryInfo.phone ? `<div>📞 ${deliveryInfo.phone}</div>` : ""}
   ` : "";
   const html = `<html><head><style>body{font-family:monospace;font-size:13px;width:${printerCfg?.width||280}px;margin:0 auto;padding:8px}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:700}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}</style></head><body>
-    <div class="center bold" style="font-size:15px">${printerCfg?.name||"eatDeSi"}</div>
-    <div class="center">${printerCfg?.firmaZusatz||"Fusion Kitchen & Grill"}</div>
-    <div class="center" style="font-size:11px">${printerCfg?.address||"Brunnenallee 30 · 34537 Bad Wildungen"} · ${printerCfg?.phone||"05621 9449087"}</div>
+    <div class="center bold" style="font-size:16px">${printerCfg?.name||"eatDeSi"}</div>
+    <div class="center bold">${printerCfg?.firmaZusatz||"Fusion Kitchen & Grill"}</div>
+    <div class="center bold">${printerCfg?.street||"Brunnenallee 30"}</div>
+    <div class="center bold">${printerCfg?.cityLine||"34537 Bad Wildungen"}</div>
+    <div class="center bold">${printerCfg?.phone||"05621 9449087"}</div>
     <div class="line"></div>
     <div class="center bold" style="font-size:14px;margin:4px 0">${title}</div>
     <div class="row"><span>Bon-Nr:</span><span>${bonNr}</span></div>
@@ -7202,6 +7204,7 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     <div class="line"></div>${lines}
     ${tseBlock}
     <div class="center" style="margin-top:8px;font-size:11px">${printerCfg?.footer||"Danke & bis bald! 🙏"}</div>
+    <div>&nbsp;</div><div>&nbsp;</div><div>&nbsp;</div>
   </body></html>`;
   if (printerCfg?.method === "bluetooth") {
     const devId = printerCfg?.btAddress;
@@ -11709,7 +11712,7 @@ function OrderListView({
         justifyContent: "space-between",
         marginBottom: 3
       }
-    }, /*#__PURE__*/React.createElement("span", null, "Tisch:"), /*#__PURE__*/React.createElement("span", null, o.tableId ? `Tisch ${o.tableId}` : "Takeaway")), /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("span", null, o.tableId ? "Tisch:" : "Typ:"), /*#__PURE__*/React.createElement("span", null, o.tableId ? `Tisch ${o.tableId}` : (o.orderType === "Lieferung" ? "🛵 Lieferung" : "🥡 Abholung"))), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         justifyContent: "space-between",
@@ -11830,16 +11833,17 @@ function OrderListView({
             const t19 = calcTax19(o.items||[]);
             let bonLines = (o.items||[]).map(i => {
               const price = fmt(i.finalPrice*i.qty);
-              const note = i.note ? " ("+i.note+")" : "";
-              return "<div class=\"row\"><span>"+i.qty+"× "+(i.nr?i.nr+". ":"")+i.name+note+"</span><span>"+price+"</span></div>";
+              const head = i.qty+"× "+(i.nr?i.nr+". ":"")+i.name;
+              const noteLine = i.note ? "<div style=\"font-size:12px;padding-left:14px\">("+i.note+")</div>" : "";
+              return "<div class=\"row\"><span>"+head+"</span><span>"+price+"</span></div>"+noteLine;
             }).join("");
             bonLines += "<div class=\"line\"></div>";
             if(t7>0)  bonLines += "<div class=\"row\"><span>MwSt. 7% (Speisen)</span><span>"+fmt(t7)+"</span></div>";
             if(t19>0) bonLines += "<div class=\"row\"><span>MwSt. 19% (Getränke)</span><span>"+fmt(t19)+"</span></div>";
             bonLines += "<div class=\"line\"></div>";
-            bonLines += "<div class=\"row bold\" style=\"font-size:15px\"><span>GESAMT</span><span>"+fmt(o.total||0)+"</span></div>";
+            bonLines += "<div class=\"row bold\" style=\"font-size:16px\"><span>GESAMT</span><span>"+fmt(o.total||0)+"</span></div>";
             if(o.trinkgeld>0) bonLines += "<div class=\"row\"><span>Trinkgeld</span><span>"+fmt(o.trinkgeld)+"</span></div>";
-            if(o.payMethod) bonLines += "<div class=\"row\"><span>Zahlung:</span><span>"+o.payMethod+"</span></div>";
+            if(o.payMethod) bonLines += "<div class=\"row bold\"><span>Zahlung:</span><span>"+o.payMethod+"</span></div>";
             const title = "💳 ZAHLUNG — " + (o.tableId ? "Tisch "+o.tableId : "Takeaway");
             const delivery = o.customerName ? {name:o.customerName,phone:o.customerPhone,street:o.customerStreet,city:o.customerCity} : null;
             printBon(title, bonLines, o.label||(o.tableId?"Tisch "+o.tableId:"Takeaway"), o.bonNr||"?", new Date(o.time), delivery, printerSettings, o.tse);
@@ -11999,7 +12003,7 @@ function OrderListView({
         color: C.pink,
         fontSize: 13
       }
-    }, o.tableId ? `Tisch ${o.tableId}` : `Takeaway`)), /*#__PURE__*/React.createElement("span", {
+    }, o.tableId ? `Tisch ${o.tableId}` : (o.orderType === "Lieferung" ? `🛵 Lieferung` : `🥡 Abholung`))), /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 700,
         color: o.storniert ? "#aaa" : C.green,
@@ -16423,7 +16427,7 @@ function BewirtungButtons(props) {
   var openPrint = function(fmt80) {
     var html = _bewHtml(items, total, label, fmt80, F);
     try {
-      printAny(html);
+      printAny(html, 0x00);
       setPrintStatus('🖨️ Wird gedruckt...');
       setTimeout(function() { setPrintStatus(''); }, 4000);
       if (false) {
@@ -18197,16 +18201,19 @@ function App() {
     const t7 = calcTax7(bitems);
     const t19 = calcTax19(bitems);
     let L = (bitems||[]).map(i => {
-      const nm = `${i.qty}× ${i.nr?i.nr+'. ':''}${i.name}${i.note?' ('+i.note+')':''}`;
-      return `<div class="row"><span>${nm}</span><span>${fmt(i.finalPrice*i.qty)}</span></div>`;
+      const head = `${i.qty}× ${i.nr?i.nr+'. ':''}${i.name}`;
+      const price = fmt(i.finalPrice*i.qty);
+      // Option/Note auf eigene Zeile, damit Preis immer in einer Reihe mit dem Namen bleibt
+      const noteLine = i.note ? `<div style="font-size:12px;padding-left:14px">(${i.note})</div>` : "";
+      return `<div class="row"><span>${head}</span><span>${price}</span></div>${noteLine}`;
     }).join("");
     L += `<div class="line"></div>`;
     if(t7>0)  L += `<div class="row"><span>MwSt. 7% (Speisen)</span><span>${fmt(t7)}</span></div>`;
     if(t19>0) L += `<div class="row"><span>MwSt. 19% (Getränke)</span><span>${fmt(t19)}</span></div>`;
     L += `<div class="line"></div>`;
-    L += `<div class="row bold" style="font-size:15px"><span>GESAMT</span><span>${fmt(btotal)}</span></div>`;
+    L += `<div class="row bold" style="font-size:16px"><span>GESAMT</span><span>${fmt(btotal)}</span></div>`;
     if(btrinkgeld>0) L += `<div class="row"><span>Trinkgeld</span><span>${fmt(btrinkgeld)}</span></div>`;
-    L += `<div class="row"><span>Zahlung:</span><span>${bpayMethod}</span></div>`;
+    L += `<div class="row bold"><span>Zahlung:</span><span>${bpayMethod}</span></div>`;
     return L;
   };
   const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0) => {
@@ -18236,7 +18243,7 @@ function App() {
         const _bonNr = ta.bonNr || genNr();
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: ta.items, tableId: null }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
-        setCompletedOrders(p => [...p, { ...ta, time: new Date(), tableId: null, label: "Takeaway #"+taId, isTakeaway: true, payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse }]);
+        setCompletedOrders(p => [...p, { ...ta, time: new Date(), tableId: null, label: "Takeaway #"+taId, isTakeaway: true, orderType: (ta.customerStreet ? "Lieferung" : "Abholung"), payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse }]);
         // Zahlungs-Beleg automatisch drucken (mit Firma + MwSt + TSE)
         try {
           const bonLines = buildZahlungLines(ta.items||[], orderTotal, trinkgeld, payMethod);
@@ -20897,12 +20904,12 @@ console.log('Sync Engine gestartet - Geraet: ' + window._deviceId);
 // APK-kompatibler Druck (iframe statt window.open — funktioniert in Android WebView)
 // Universeller Druck: routet zu Bluetooth / RawBT / Browser je nach gespeicherter Einstellung.
 // Wird von Bewirtungsbeleg & Zahlungs-Beleg genutzt (ausserhalb von BonModal).
-function printAny(htmlContent) {
+function printAny(htmlContent, forceFontCmd) {
   var cfg = {};
   try { cfg = JSON.parse(localStorage.getItem('eatdesi_printer')||'{}') || {}; } catch(e) {}
   var method = cfg.method || 'browser';
   var szMap={klein:0x00,normal:0x00,gross:0x01,xl:0x11};
-  var fsz=szMap[cfg.bonFontSize||'gross']??0x01;
+  var fsz = (typeof forceFontCmd==='number') ? forceFontCmd : (szMap[cfg.bonFontSize||'gross']??0x01);
   if (method === 'bluetooth' && cfg.btAddress && typeof BTPrint!=='undefined' && BTPrint.isNative()) {
     BTPrint.printHtml(cfg.btAddress, htmlContent, fsz).catch(function(e){ printHtml(htmlContent); });
     return;
