@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v49</title>
+<title>eatDeSi POS v52</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v49';",
+    "var CACHE='eatdesi-v52';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6444,26 +6444,70 @@ const BTPrint = {
       return dev;
     });
   },
+  // Umlaute/Sonderzeichen -> ASCII (Drucker kann kein UTF-8)
+  _toAscii: function(str){
+    if(!str) return '';
+    var map = {
+      'ä':'ae','ö':'oe','ü':'ue','Ä':'Ae','Ö':'Oe','Ü':'Ue','ß':'ss',
+      '€':'EUR','°':' Grad','’':"'",'‘':"'",'“':'"','”':'"','–':'-','—':'-','…':'...',
+      'á':'a','à':'a','â':'a','é':'e','è':'e','ê':'e','í':'i','ì':'i','ó':'o','ò':'o','ô':'o','ú':'u','ù':'u','ñ':'n','ç':'c'
+    };
+    str = str.replace(/[äöüÄÖÜß€°’‘“”–—…áàâéèêíìóòôúùñç]/g, function(c){ return map[c]||c; });
+    // Emojis und uebrige Nicht-ASCII-Zeichen entfernen
+    str = str.replace(/[^\x00-\x7F]/g, '');
+    return str;
+  },
   // HTML -> Plain Text Zeilen (fuer plugin .text())
-  htmlToText: function(html){
+  htmlToText: function(html, width){
+    var W = width || 32;
     var tmp = document.createElement('div'); tmp.innerHTML = html;
-    tmp.querySelectorAll('.row').forEach(function(r){ var s=r.querySelectorAll('span'); if(s.length>=2){var l=s[0].textContent.trim(),ri=s[1].textContent.trim(),p=Math.max(1,32-l.length-ri.length);r.textContent=l+' '.repeat(p)+ri;} });
-    tmp.querySelectorAll('.line').forEach(function(l){l.textContent='--------------------------------';});
-    tmp.querySelectorAll('.center').forEach(function(c){var t=c.textContent.trim(),p=Math.max(0,Math.floor((32-t.length)/2));c.textContent=' '.repeat(p)+t;});
-    return tmp.innerText||tmp.textContent||'';
+    // style + script Tags entfernen (sonst wird CSS mitgedruckt!)
+    tmp.querySelectorAll('style,script').forEach(function(el){ el.parentNode && el.parentNode.removeChild(el); });
+    tmp.querySelectorAll('.row').forEach(function(r){ var s=r.querySelectorAll('span'); if(s.length>=2){var l=s[0].textContent.trim(),ri=s[1].textContent.trim(),p=Math.max(1,W-l.length-ri.length);r.textContent=l+' '.repeat(p)+ri;} });
+    tmp.querySelectorAll('.line').forEach(function(l){l.textContent=Array(W+1).join('-');});
+    tmp.querySelectorAll('.center').forEach(function(c){var t=c.textContent.trim(),p=Math.max(0,Math.floor((W-t.length)/2));c.textContent=' '.repeat(p)+t;});
+    // Block-Elemente mit Zeilenumbruch trennen (nicht auf innerText verlassen)
+    var out='';
+    var kids = tmp.childNodes;
+    var walk = function(node){
+      for(var i=0;i<node.childNodes.length;i++){
+        var ch=node.childNodes[i];
+        if(ch.nodeType===3){ out += ch.textContent; }
+        else if(ch.nodeType===1){
+          var disp = (ch.className&&(''+ch.className).match(/row|line|center/)) || /^(DIV|P|BR|TR|LI)$/.test(ch.tagName);
+          walk(ch);
+          if(disp) out += '\n';
+        }
+      }
+    };
+    walk(tmp);
+    if(!out.trim()) out = tmp.innerText||tmp.textContent||'';
+    return this._toAscii(out);
   },
   // Komplett: HTML auf verbundenen Drucker drucken
   printHtml: function(address, html, fontCmd){
     var P=this._plugin();
     var self=this;
     if(!P) return Promise.reject(new Error('Drucker-Plugin nicht verfügbar'));
-    var text = this.htmlToText(html);
+    // Bon-Breite aus dem HTML (body{width:XXXpx}) lesen -> Zeichen pro Zeile
+    var W = 32;
+    var m = /width\s*:\s*(\d+)px/.exec(html||'');
+    if(m){ var px=parseInt(m[1],10); if(px>=384) W=48; else if(px>=304) W=42; else W=32; }
+    var text = this.htmlToText(html, W);
+    // Schriftgroesse aus fontCmd ableiten:
+    // 0x00=12pt normal, 0x01=14pt (nur Hoehe verdoppelt), 0x11/0x33=16pt (Hoehe+Breite)
+    var fc = fontCmd || 0;
+    var dblH = (fc & 0x01) !== 0;      // Hoehe verdoppeln
+    var dblW = (fc & 0x10) !== 0;      // Breite verdoppeln
     // Native Plugin-Methoden EINZELN nacheinander aufrufen (kein builder-chain noetig).
     // Jede Methode gibt ein Promise zurueck; wir warten der Reihe nach.
     var doPrint = function(){
       return Promise.resolve()
         .then(function(){ return P.begin(); })
         .then(function(){ return P.align({ alignment: 'left' }); })
+        .then(function(){ return P.doubleHeight({ enabled: dblH }); })
+        .then(function(){ return P.doubleWidth({ enabled: dblW }); })
+        .then(function(){ return P.bold({ enabled: true }); })
         .then(function(){ return P.text({ text: text + '\n' }); })
         .then(function(){ return P.cutPaper({}); })
         .then(function(){ return P.write(); });
@@ -7099,8 +7143,8 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   </body></html>`;
   if (printerCfg?.method === "bluetooth") {
     const devId = printerCfg?.btAddress;
-    const szMap={klein:0x00,normal:0x01,gross:0x11,xl:0x33};
-    const fsz=szMap[printerCfg?.bonFontSize||'normal']??0x00;
+    const szMap={klein:0x00,normal:0x00,gross:0x01,xl:0x11};
+    const fsz=szMap[printerCfg?.bonFontSize||'gross']??0x01;
     if (devId && BTPrint.isNative()) {
       BTPrint.printHtml(devId, html, fsz).catch(e => { printHtml(html); });
       return;
@@ -7115,8 +7159,8 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
       tmp.querySelectorAll('.center').forEach(c=>{const t=c.textContent.trim(),p=Math.max(0,Math.floor((32-t.length)/2));c.textContent=' '.repeat(p)+t;});
       const text = tmp.innerText||tmp.textContent||'';
       const ESC='\x1B',GS='\x1D';
-      const szMap={klein:0x00,normal:0x01,gross:0x11,xl:0x33};
-      const fsz=szMap[printerCfg?.bonFontSize||'normal']??0x00;
+      const szMap={klein:0x00,normal:0x00,gross:0x01,xl:0x11};
+      const fsz=szMap[printerCfg?.bonFontSize||'gross']??0x01;
       const raw=ESC+'@'+GS+'!'+String.fromCharCode(fsz)+text+'\n\n\n'+GS+'V\x41\x03';
       const a=document.createElement('a'); a.href='rawbt://'+encodeURIComponent(raw); a.target='_blank';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -7187,11 +7231,11 @@ function BonModal({
   ` : "";
   // -- ESC/POS font size helper --
   const getFontCmd = () => {
-    const sz = printerSettings?.bonFontSize || "normal";
+    const sz = printerSettings?.bonFontSize || "gross";
     // ESC/POS GS ! n: bit0-2 = height, bit4-6 = width multiplier
-    // Klein: normal (1x), Normal: 2x height, Gross: default (2x both), XL: 4x
-    const sizes = { klein: 0x00, normal: 0x01, gross: 0x11, xl: 0x33 };
-    return sizes[sz] ?? 0x00;
+    // 12pt(normal)=0x00 Standard, 14pt(gross)=0x01 doppelte Hoehe, 16pt(xl)=0x11 Hoehe+Breite
+    const sizes = { klein: 0x00, normal: 0x00, gross: 0x01, xl: 0x11 };
+    return sizes[sz] ?? 0x01;
   };
 
   // -- Plain text from HTML for RawBT --
@@ -7277,21 +7321,35 @@ function BonModal({
     <div class="line"></div>
     <div class="center" style="font-size:8px;color:#aaa">${printerSettings?.firmaName||"Belks Direktvertrieb GmbH"}${printerSettings?.firmaStNr?" · StNr: "+printerSettings.firmaStNr:""}</div>
   </body></html>`;
+  // Schlanker Bon NUR fuer Kueche/Bar: nur Tisch/Kunde + Speisen/Getraenke, grosse Schrift
+  const kvBonHtml = (title, lines) => {
+    const kundeInfo = customerName ? `<div class="row" style="font-size:18px"><span>Kunde:</span><span class="bold">${customerName}</span></div>` : "";
+    return `<html><head><style>
+    body{font-family:monospace;font-size:18px;width:${printerSettings?.width || 280}px;margin:0 auto;padding:8px}
+    .row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:700}
+    .line{border-top:2px solid #000;margin:6px 0}.center{text-align:center}
+  </style></head><body>
+    <div class="center bold" style="font-size:22px;margin:4px 0">${title}</div>
+    <div class="row" style="font-size:20px"><span>Tisch:</span><span class="bold">${label}</span></div>
+    ${kundeInfo}
+    <div class="line"></div>${lines}
+  </body></html>`;
+  };
   const printGast = () => {
     const lines = items.map(i => `
       <div class="row bold"><span>${i.qty}× ${i.nr}. ${i.name}</span><span>${fmt(i.finalPrice * i.qty)}</span></div>
-      ${i.note ? `<div style="padding-left:10px;font-size:10px;color:green">→ ${i.note}</div>` : ""}
+      ${i.note ? `<div style="padding-left:10px;font-size:14px;color:green">→ ${i.note}</div>` : ""}
     `).join("") + `
       <div class="line"></div>
       <div class="row"><span>Netto</span><span>${fmt(netto)}</span></div>
       ${tax7 > 0 ? `<div class="row"><span>MwSt. 7% (Speisen)</span><span>${fmt(tax7)}</span></div>` : ""}
       ${tax19 > 0 ? `<div class="row"><span>MwSt. 19% (Getränke)</span><span>${fmt(tax19)}</span></div>` : ""}
-      ${fee > 0 ? `<div class="row" style="color:#1565c0"><span>🛵 Liefergebühr</span><span>${fmt(fee)}</span></div>` : ""}
+      ${fee > 0 ? `<div class="row" style="color:#1565c0"><span>Liefergebühr</span><span>${fmt(fee)}</span></div>` : ""}
       <div class="line"></div>
-      <div class="row bold" style="font-size:15px"><span>GESAMT</span><span>${fmt(total)}</span></div>
+      <div class="row bold" style="font-size:22px"><span>GESAMT</span><span>${fmt(total)}</span></div>
       <div class="line"></div>
-      <div class="center" style="font-size:11px">Zahlung noch offen</div>`;
-    doPrint(bonHtml("🧾 GÄSTEBON", lines));
+      <div class="center" style="font-size:16px">Zahlung noch offen</div>`;
+    doPrint(kvBonHtml("🧾 GÄSTEBON", lines));
     setPrinted(p => ({
       ...p,
       gast: true
@@ -7313,12 +7371,12 @@ function BonModal({
     }
     const groups = groupByCat(foodItems);
     const lines = Object.keys(groups).map(cat =>
-      `<div class="bold center" style="font-size:13px;background:#eee;padding:3px 0;margin:4px 0">— ${cat} —</div>` +
+      `<div class="bold center" style="font-size:17px;background:#eee;padding:4px 0;margin:6px 0">— ${cat} —</div>` +
       groups[cat].map(i =>
-        `<div class="bold" style="font-size:16px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:12px">→ ${i.note}</div>` : ""}${i.kitchenNote ? `<div style="color:blue;font-size:12px">📝 ${i.kitchenNote}</div>` : ""}<div class="line"></div>`
+        `<div class="bold" style="font-size:22px;margin:4px 0">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px">→ ${i.note}</div>` : ""}${i.kitchenNote ? `<div style="color:blue;font-size:16px">📝 ${i.kitchenNote}</div>` : ""}<div class="line"></div>`
       ).join("")
     ).join("");
-    doPrint(bonHtml("🍳 KÜCHE — SPEISEN", lines));
+    doPrint(kvBonHtml("🍳 KÜCHE — SPEISEN", lines));
     setPrinted(p => ({
       ...p,
       kuche: true
@@ -7330,12 +7388,12 @@ function BonModal({
     }
     const groups = groupByCat(drinkItems);
     const lines = Object.keys(groups).map(cat =>
-      `<div class="bold center" style="font-size:13px;background:#eee;padding:3px 0;margin:4px 0">— ${cat} —</div>` +
+      `<div class="bold center" style="font-size:17px;background:#eee;padding:4px 0;margin:6px 0">— ${cat} —</div>` +
       groups[cat].map(i =>
-        `<div class="bold" style="font-size:16px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:12px">→ ${i.note}</div>` : ""}<div class="line"></div>`
+        `<div class="bold" style="font-size:22px;margin:4px 0">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px">→ ${i.note}</div>` : ""}<div class="line"></div>`
       ).join("")
     ).join("");
-    doPrint(bonHtml("🍺 BAR — GETRÄNKE", lines));
+    doPrint(kvBonHtml("🍺 BAR — GETRÄNKE", lines));
     setPrinted(p => ({
       ...p,
       bar: true
@@ -7887,8 +7945,8 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
 
   const rawbtPrint = (text) => {
     const ESC='\x1B', GS='\x1D';
-    const szMap={klein:0x00,normal:0x01,gross:0x11,xl:0x33};
-    const fsz = szMap[printerSettings?.bonFontSize||'normal'] ?? 0x00;
+    const szMap={klein:0x00,normal:0x00,gross:0x01,xl:0x11};
+    const fsz = szMap[printerSettings?.bonFontSize||'gross'] ?? 0x01;
     const raw = ESC+'@' + GS+'!'+String.fromCharCode(fsz) + text + '\n\n\n' + GS+'V\x41\x03';
     const a = document.createElement('a');
     a.href = 'rawbt://' + encodeURIComponent(raw);
@@ -8300,8 +8358,8 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
     }
     // --- RawBT: ESC/POS an Thermodrucker ---
     const ESC='\x1B', GS='\x1D';
-    const szMap={klein:0x00,normal:0x01,gross:0x11,xl:0x33};
-    const fsz = szMap[printerSettings?.bonFontSize||'normal'] ?? 0x00;
+    const szMap={klein:0x00,normal:0x00,gross:0x01,xl:0x11};
+    const fsz = szMap[printerSettings?.bonFontSize||'gross'] ?? 0x01;
     const center = t => ' '.repeat(Math.max(0,Math.floor((32-t.length)/2)))+t;
     const row = (l,r) => { const p=Math.max(1,32-l.length-r.length); return l+' '.repeat(p)+r; };
     const line = '--------------------------------';
@@ -13035,8 +13093,8 @@ function PrinterSettingsView({
         <div class="center">${form.footer||"Danke!"}</div>
       </body></html>`;
       if (BTPrint.isNative() && devId) {
-        const szMap={klein:0x00,normal:0x01,gross:0x11,xl:0x33};
-        const fsz=szMap[form.bonFontSize||'normal']??0x00;
+        const szMap={klein:0x00,normal:0x00,gross:0x01,xl:0x11};
+        const fsz=szMap[form.bonFontSize||'gross']??0x01;
         await BTPrint.printHtml(devId, testHtml, fsz);
         setBtStatus("✅ Testdruck gesendet!");
         return;
@@ -13235,16 +13293,16 @@ function PrinterSettingsView({
       "3. Hier Speichern → Bon drucken → RawBT öffnet automatisch"
     )
   ),
-  // Font Size selector (for RawBT)
-  form.method === "rawbt" && /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:10, padding:12, marginBottom:10, border:"1px solid #eee" } },
-    /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:12, color:"#333", marginBottom:8 } }, "📝 Schriftgröße (ESC/POS)"),
-    /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:6 } },
-      [["klein","Klein","10pt — normal"],["normal","Normal","2× Höhe"],["gross","Groß","2× beides"],["xl","XL","4× beides"]].map(([v,l,sub]) =>
+  // Font Size selector (Bluetooth + RawBT) — 12 / 14 / 16 pt
+  (form.method === "rawbt" || form.method === "bluetooth") && /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:10, padding:12, marginBottom:10, border:"1px solid #eee" } },
+    /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#333", marginBottom:8 } }, "📝 Schriftgröße auf dem Bon"),
+    /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 } },
+      [["normal","12 pt","Standard"],["gross","14 pt","Größer"],["xl","16 pt","Am größten"]].map(([v,l,sub]) =>
         /*#__PURE__*/React.createElement("div", { key:v, onClick:()=>setForm(f=>({...f,bonFontSize:v})),
-          style:{ borderRadius:8, border:`2px solid ${(form.bonFontSize||"normal")===v?C.blue:"#ddd"}`, background:(form.bonFontSize||"normal")===v?"#e3f2fd":"#fff", padding:"8px 4px", cursor:"pointer", textAlign:"center" }
+          style:{ borderRadius:8, border:`2px solid ${(form.bonFontSize||"gross")===v?C.blue:"#ddd"}`, background:(form.bonFontSize||"gross")===v?"#e3f2fd":"#fff", padding:"10px 4px", cursor:"pointer", textAlign:"center" }
         },
-          /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:(form.bonFontSize||"normal")===v?C.blue:"#555" } }, l),
-          /*#__PURE__*/React.createElement("div", { style:{ fontSize:9, color:"#888", marginTop:2 } }, sub)
+          /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:16, color:(form.bonFontSize||"gross")===v?C.blue:"#555" } }, l),
+          /*#__PURE__*/React.createElement("div", { style:{ fontSize:10, color:"#888", marginTop:2 } }, sub)
         )
       )
     )
