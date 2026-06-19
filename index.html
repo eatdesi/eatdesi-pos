@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v52</title>
+<title>eatDeSi POS v54</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v52';",
+    "var CACHE='eatdesi-v54';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -2179,7 +2179,8 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 302
     },
     {
       "nr": "21G",
@@ -2188,7 +2189,8 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 303
     },
     {
       "nr": "22",
@@ -2197,7 +2199,8 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 304
     },
     {
       "nr": "23",
@@ -2206,7 +2209,8 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 305
     },
     {
       "nr": "24",
@@ -2215,7 +2219,8 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 306
     },
     {
       "nr": "25",
@@ -2224,7 +2229,8 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 307
     },
     {
       "nr": "26",
@@ -2243,7 +2249,8 @@ const MENU = {
             "Smoky Chicken"
           ]
         }
-      ]
+      ],
+      "id": 308
     },
     {
       "nr": "27",
@@ -2262,7 +2269,8 @@ const MENU = {
             "Smoky Chicken"
           ]
         }
-      ]
+      ],
+      "id": 309
     },
     {
       "nr": "28",
@@ -2271,7 +2279,8 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 310
     }
   ],
   "Indisch Curry & Naan": [
@@ -2337,7 +2346,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 311
     },
     {
       "nr": "32",
@@ -2401,7 +2411,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 312
     },
     {
       "nr": "33",
@@ -2465,7 +2476,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 313
     },
     {
       "nr": "34",
@@ -2529,7 +2541,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 314
     },
     {
       "nr": "35",
@@ -2593,7 +2606,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 315
     },
     {
       "nr": "36",
@@ -2657,7 +2671,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 316
     },
     {
       "nr": "38",
@@ -2721,7 +2736,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 317
     },
     {
       "nr": "39",
@@ -2785,7 +2801,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 318
     },
     {
       "nr": "40",
@@ -2818,7 +2835,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 319
     },
     {
       "nr": "51",
@@ -2851,7 +2869,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 320
     },
     {
       "nr": "52",
@@ -2884,7 +2903,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 321
     },
     {
       "nr": "53",
@@ -2917,7 +2937,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 322
     },
     {
       "nr": "60A",
@@ -2926,7 +2947,8 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 323
     },
     {
       "nr": "60B",
@@ -2935,7 +2957,8 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 324
     },
     {
       "nr": "60C",
@@ -2944,7 +2967,8 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 325
     },
     {
       "nr": "60D",
@@ -2953,7 +2977,8 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 326
     }
   ],
   "Tandoori & Grill": [
@@ -2988,7 +3013,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 327
     },
     {
       "nr": "42",
@@ -3021,7 +3047,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 328
     },
     {
       "nr": "43",
@@ -3054,7 +3081,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 329
     },
     {
       "nr": "46",
@@ -3087,7 +3115,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 330
     },
     {
       "nr": "47",
@@ -3120,7 +3149,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 331
     }
   ],
   "Tacos": [
@@ -3188,7 +3218,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 332
     },
     {
       "nr": "72",
@@ -3254,7 +3285,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 333
     },
     {
       "nr": "73",
@@ -3320,7 +3352,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 334
     },
     {
       "nr": "74",
@@ -3386,7 +3419,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 335
     },
     {
       "nr": "75",
@@ -3443,7 +3477,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 336
     },
     {
       "nr": "76",
@@ -3500,7 +3535,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 337
     },
     {
       "nr": "77",
@@ -3557,7 +3593,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 338
     }
   ],
   "Burger": [
@@ -3647,7 +3684,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 339
     },
     {
       "nr": "82",
@@ -3735,7 +3773,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 340
     },
     {
       "nr": "84",
@@ -3823,7 +3862,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 341
     },
     {
       "nr": "85",
@@ -3911,7 +3951,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 342
     },
     {
       "nr": "86",
@@ -3999,7 +4040,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 343
     },
     {
       "nr": "87",
@@ -4087,7 +4129,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 344
     },
     {
       "nr": "88",
@@ -4175,7 +4218,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 345
     },
     {
       "nr": "89",
@@ -4263,7 +4307,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 346
     },
     {
       "nr": "90",
@@ -4340,7 +4385,8 @@ const MENU = {
             }
           ]
         }
-      ]
+      ],
+      "id": 347
     }
   ],
   "Schnitzel": [
@@ -6065,7 +6111,8 @@ const MENU = {
             "Smoky Chicken"
           ]
         }
-      ]
+      ],
+      "id": 348
     },
     {
       "nr": "112",
@@ -6074,7 +6121,8 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 349
     },
     {
       "nr": "113",
@@ -6093,7 +6141,8 @@ const MENU = {
             "Smoky Chicken"
           ]
         }
-      ]
+      ],
+      "id": 350
     },
     {
       "nr": "114",
@@ -6112,7 +6161,8 @@ const MENU = {
             "Smoky Chicken"
           ]
         }
-      ]
+      ],
+      "id": 351
     },
     {
       "nr": "115",
@@ -6131,7 +6181,8 @@ const MENU = {
             "Smoky Chicken"
           ]
         }
-      ]
+      ],
+      "id": 352
     },
     {
       "nr": "116",
@@ -6140,7 +6191,8 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 353
     },
     {
       "nr": "117",
@@ -6149,7 +6201,8 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 354
     },
     {
       "nr": "118",
@@ -6158,7 +6211,8 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 355
     },
     {
       "nr": "119",
@@ -6167,7 +6221,8 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 356
     },
     {
       "nr": "120",
@@ -6176,7 +6231,8 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 357
     },
     {
       "nr": "121",
@@ -6185,7 +6241,8 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 358
     }
   ],
   "Potato Bombs": [
@@ -6196,7 +6253,8 @@ const MENU = {
       "veg": true,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 359
     },
     {
       "nr": "62",
@@ -6215,7 +6273,8 @@ const MENU = {
             "Smoky Chicken"
           ]
         }
-      ]
+      ],
+      "id": 360
     },
     {
       "nr": "63",
@@ -6224,7 +6283,8 @@ const MENU = {
       "veg": false,
       "vegan": false,
       "taxRate": "food",
-      "options": []
+      "options": [],
+      "id": 361
     },
     {
       "nr": "64",
@@ -6243,7 +6303,8 @@ const MENU = {
             "Smoky Chicken"
           ]
         }
-      ]
+      ],
+      "id": 362
     }
   ],
   "Dips": [
@@ -7323,14 +7384,14 @@ function BonModal({
   </body></html>`;
   // Schlanker Bon NUR fuer Kueche/Bar: nur Tisch/Kunde + Speisen/Getraenke, grosse Schrift
   const kvBonHtml = (title, lines) => {
-    const kundeInfo = customerName ? `<div class="row" style="font-size:18px"><span>Kunde:</span><span class="bold">${customerName}</span></div>` : "";
+    const kundeInfo = customerName ? `<div class="center bold" style="font-size:20px;margin:2px 0">${customerName}</div>` : "";
     return `<html><head><style>
     body{font-family:monospace;font-size:18px;width:${printerSettings?.width || 280}px;margin:0 auto;padding:8px}
     .row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:700}
     .line{border-top:2px solid #000;margin:6px 0}.center{text-align:center}
   </style></head><body>
     <div class="center bold" style="font-size:22px;margin:4px 0">${title}</div>
-    <div class="row" style="font-size:20px"><span>Tisch:</span><span class="bold">${label}</span></div>
+    <div class="center bold" style="font-size:24px;margin:4px 0">${label}</div>
     ${kundeInfo}
     <div class="line"></div>${lines}
   </body></html>`;
@@ -9804,7 +9865,9 @@ function OrderView({
     }
   };
   const addItem = (item, finalPrice, note) => {
-    const key = `${item.id}_${note}`;
+    // Eindeutiger Schluessel: nr + name + note + Preis.
+    // (item.id ist bei manchen Artikeln undefined -> wuerde sonst alle zusammenfassen!)
+    const key = `${item.nr||""}_${item.name||""}_${note||""}_${finalPrice}`;
     const existing = items.find(i => i._key === key);
     const next = existing ? items.map(i => i._key === key ? {
       ...i,
@@ -16344,8 +16407,8 @@ function BewirtungButtons(props) {
   var openPrint = function(fmt80) {
     var html = _bewHtml(items, total, label, fmt80, F);
     try {
-      printHtml(html);
-      setPrintStatus('🖨️ Druckdialog wird geöffnet...');
+      printAny(html);
+      setPrintStatus('🖨️ Wird gedruckt...');
       setTimeout(function() { setPrintStatus(''); }, 4000);
       if (false) {
       } else {
@@ -18140,7 +18203,16 @@ function App() {
         const _bonNr = ta.bonNr || genNr();
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: ta.items, tableId: null }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
-        setCompletedOrders(p => [...p, { ...ta, time: new Date(), payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse }]);
+        setCompletedOrders(p => [...p, { ...ta, time: new Date(), tableId: null, label: "Takeaway #"+taId, isTakeaway: true, payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse }]);
+        // Zahlungs-Beleg automatisch drucken (mit Firma + TSE)
+        try {
+          let bonLines = (ta.items||[]).map(i => `<div class="row"><span>${i.qty}× ${i.nr?i.nr+'. ':''}${i.name}</span><span>${fmt(i.finalPrice*i.qty)}</span></div>`).join("");
+          bonLines += `<div class="line"></div><div class="row bold" style="font-size:15px"><span>GESAMT</span><span>${fmt(orderTotal)}</span></div>`;
+          if(trinkgeld>0) bonLines += `<div class="row"><span>Trinkgeld</span><span>${fmt(trinkgeld)}</span></div>`;
+          bonLines += `<div class="row"><span>Zahlung:</span><span>${payMethod}</span></div>`;
+          const delivery = ta.customerName ? {name:ta.customerName,phone:ta.customerPhone,street:ta.customerStreet,city:ta.customerCity} : null;
+          printBon("💳 ZAHLUNG — Takeaway", bonLines, ta.label||"Takeaway", _bonNr, new Date(), delivery, printerSettings, _tse);
+        } catch(e){ console.warn("Bondruck:", e); }
         // Auto Loyalty Points
         if (ta.customerPhone && loyaltySettings?.active !== false) {
           const pts = Math.floor(orderTotal * (loyaltySettings?.pointsPerEuro||10));
@@ -18157,6 +18229,15 @@ function App() {
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: o.items, tableId: tid }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
         setCompletedOrders(p => [...p, { ...o, time: new Date(), tableId: tid, payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse }]);
+        // Zahlungs-Beleg automatisch drucken (mit Firma + TSE)
+        try {
+          let bonLines = (o.items||[]).map(i => `<div class="row"><span>${i.qty}× ${i.nr?i.nr+'. ':''}${i.name}</span><span>${fmt(i.finalPrice*i.qty)}</span></div>`).join("");
+          bonLines += `<div class="line"></div><div class="row bold" style="font-size:15px"><span>GESAMT</span><span>${fmt(orderTotal)}</span></div>`;
+          if(trinkgeld>0) bonLines += `<div class="row"><span>Trinkgeld</span><span>${fmt(trinkgeld)}</span></div>`;
+          bonLines += `<div class="row"><span>Zahlung:</span><span>${payMethod}</span></div>`;
+          const delivery = o.customerName ? {name:o.customerName,phone:o.customerPhone,street:o.customerStreet,city:o.customerCity} : null;
+          printBon("💳 ZAHLUNG — Tisch " + tid, bonLines, o.label||("Tisch "+tid), _bonNr, new Date(), delivery, printerSettings, _tse);
+        } catch(e){ console.warn("Bondruck:", e); }
         // Auto Loyalty Points
         if (o.customerPhone && loyaltySettings?.active !== false) {
           const pts = Math.floor(orderTotal * (loyaltySettings?.pointsPerEuro||10));
@@ -18184,10 +18265,32 @@ function App() {
     setTakeaway(t => t.filter(x => x.id !== taId));
   };
 
-  // Reaktiviere eine abgeschlossene Bestellung - zur_ck auf Tisch
+  // Reaktiviere eine abgeschlossene Bestellung - zur_ck auf Tisch ODER Takeaway
   const reactivateOrder = idx => {
     const o = completedOrders[idx];
     if (!o) return;
+    // War es ein Takeaway? -> als Takeaway reaktivieren
+    if (o.isTakeaway || (!o.tableId && (o.label||"").toLowerCase().includes("takeaway"))) {
+      const newId = taRef.current++;
+      setTakeaway(t => [...t, {
+        id: newId,
+        items: o.items || [],
+        time: new Date(),
+        done: false,
+        bonNr: o.bonNr,
+        customerName: o.customerName || null,
+        customerPhone: o.customerPhone || null,
+        customerStreet: o.customerStreet || null,
+        customerPlz: o.customerPlz || null,
+        customerCity: o.customerCity || null,
+        saved: false
+      }]);
+      setCompletedOrders(p => p.filter((_, i) => i !== idx));
+      setActiveTable(`ta_${newId}`);
+      setIsTakeaway(true);
+      setView("order");
+      return;
+    }
     const tid = o.tableId || `ta_${Date.now()}`;
     setTableOrders(p => ({
       ...p,
@@ -20765,6 +20868,35 @@ console.log('Sync Engine gestartet - Geraet: ' + window._deviceId);
 
 
 // APK-kompatibler Druck (iframe statt window.open — funktioniert in Android WebView)
+// Universeller Druck: routet zu Bluetooth / RawBT / Browser je nach gespeicherter Einstellung.
+// Wird von Bewirtungsbeleg & Zahlungs-Beleg genutzt (ausserhalb von BonModal).
+function printAny(htmlContent) {
+  var cfg = {};
+  try { cfg = JSON.parse(localStorage.getItem('eatdesi_printer')||'{}') || {}; } catch(e) {}
+  var method = cfg.method || 'browser';
+  var szMap={klein:0x00,normal:0x00,gross:0x01,xl:0x11};
+  var fsz=szMap[cfg.bonFontSize||'gross']??0x01;
+  if (method === 'bluetooth' && cfg.btAddress && typeof BTPrint!=='undefined' && BTPrint.isNative()) {
+    BTPrint.printHtml(cfg.btAddress, htmlContent, fsz).catch(function(e){ printHtml(htmlContent); });
+    return;
+  }
+  if (method === 'rawbt') {
+    try {
+      var tmp=document.createElement('div'); tmp.innerHTML=htmlContent;
+      tmp.querySelectorAll('style,script').forEach(function(el){ el.parentNode&&el.parentNode.removeChild(el); });
+      tmp.querySelectorAll('.row').forEach(function(r){ var s=r.querySelectorAll('span'); if(s.length>=2){var l=s[0].textContent.trim(),ri=s[1].textContent.trim(),p=Math.max(1,32-l.length-ri.length);r.textContent=l+' '.repeat(p)+ri;} });
+      tmp.querySelectorAll('.line').forEach(function(l){l.textContent='--------------------------------';});
+      tmp.querySelectorAll('.center').forEach(function(c){var t=c.textContent.trim(),p=Math.max(0,Math.floor((32-t.length)/2));c.textContent=' '.repeat(p)+t;});
+      var text=tmp.innerText||tmp.textContent||'';
+      var ESC='\x1B',GS='\x1D';
+      var raw=ESC+'@'+GS+'!'+String.fromCharCode(fsz)+text+'\n\n\n'+GS+'V\x41\x03';
+      var a=document.createElement('a'); a.href='rawbt://'+encodeURIComponent(raw); a.target='_blank';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      return;
+    } catch(e) {}
+  }
+  printHtml(htmlContent);
+}
 function printHtml(htmlContent) {
   try {
     // Vorheriges Druck-iframe entfernen
