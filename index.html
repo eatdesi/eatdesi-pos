@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v58</title>
+<title>eatDeSi POS v63</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v58';",
+    "var CACHE='eatdesi-v63';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6554,25 +6554,41 @@ const BTPrint = {
     // Bon-Breite aus dem HTML (body{width:XXXpx}) lesen -> Zeichen pro Zeile
     var W = 32;
     var m = /width\s*:\s*(\d+)px/.exec(html||'');
-    if(m){ var px=parseInt(m[1],10); if(px>=384) W=48; else if(px>=304) W=42; else W=32; }
+    if(m){ var px=parseInt(m[1],10); if(px>=384) W=46; else if(px>=304) W=40; else W=32; }
     var text = this.htmlToText(html, W);
     // Schriftgroesse aus fontCmd ableiten:
     // 0x00=12pt normal, 0x01=14pt (nur Hoehe verdoppelt), 0x11/0x33=16pt (Hoehe+Breite)
     var fc = fontCmd || 0;
     var dblH = (fc & 0x01) !== 0;      // Hoehe verdoppeln
     var dblW = (fc & 0x10) !== 0;      // Breite verdoppeln
+    // QR-Code aus dem HTML lesen (data-qr Attribut)
+    var qrUrl = '';
+    var qm = /data-qr=["']([^"']+)["']/.exec(html||'');
+    if(qm){ qrUrl = qm[1]; }
     // Native Plugin-Methoden EINZELN nacheinander aufrufen (kein builder-chain noetig).
     // Jede Methode gibt ein Promise zurueck; wir warten der Reihe nach.
     var doPrint = function(){
-      return Promise.resolve()
+      var chain = Promise.resolve()
         .then(function(){ return P.begin(); })
         .then(function(){ return P.align({ alignment: 'left' }); })
         .then(function(){ return P.doubleHeight({ enabled: dblH }); })
         .then(function(){ return P.doubleWidth({ enabled: dblW }); })
         .then(function(){ return P.bold({ enabled: true }); })
-        .then(function(){ return P.text({ text: text + '\n' }); })
+        .then(function(){ return P.text({ text: text + '\n' }); });
+      // QR-Code zentriert drucken (falls vorhanden)
+      if(qrUrl){
+        chain = chain
+          .then(function(){ return P.doubleHeight({ enabled: false }); })
+          .then(function(){ return P.doubleWidth({ enabled: false }); })
+          .then(function(){ return P.align({ alignment: 'center' }); })
+          .then(function(){ return P.qr({ data: qrUrl }); })
+          .then(function(){ return P.text({ text: '\n' }); })
+          .then(function(){ return P.align({ alignment: 'left' }); });
+      }
+      chain = chain
         .then(function(){ return P.cutPaper({}); })
         .then(function(){ return P.write(); });
+      return chain;
     };
     // sicherstellen dass verbunden
     if(self._connectedAddr === address){
@@ -7189,7 +7205,9 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     ${(deliveryInfo.plz || deliveryInfo.city) ? `<div>${[deliveryInfo.plz, deliveryInfo.city].filter(Boolean).join(" ")}</div>` : ""}
     ${deliveryInfo.phone ? `<div>📞 ${deliveryInfo.phone}</div>` : ""}
   ` : "";
-  const html = `<html><head><style>body{font-family:monospace;font-size:13px;width:${printerCfg?.width||280}px;margin:0 auto;padding:8px}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:700}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}</style></head><body>
+  const qrOn = printerCfg?.qrEnabled !== false;
+  const qrLink = printerCfg?.qrUrl || "https://beacons.ai/eatdesi.bw";
+  const html = `<html><head><style>body{font-family:monospace;font-size:13px;width:${printerCfg?.width||280}px;margin:0 auto;padding:8px}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:700}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}</style></head><body${qrOn?` data-qr="${qrLink}"`:""}>
     <div class="center bold" style="font-size:16px">${printerCfg?.name||"eatDeSi"}</div>
     <div class="center bold">${printerCfg?.firmaZusatz||"Fusion Kitchen & Grill"}</div>
     <div class="center bold">${printerCfg?.street||"Brunnenallee 30"}</div>
@@ -7204,6 +7222,7 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     <div class="line"></div>${lines}
     ${tseBlock}
     <div class="center" style="margin-top:8px;font-size:11px">${printerCfg?.footer||"Danke & bis bald! 🙏"}</div>
+    ${qrOn?`<div class="center" style="font-size:11px;margin-top:4px">📱 ${qrLink}</div>`:""}
     <div>&nbsp;</div><div>&nbsp;</div><div>&nbsp;</div>
   </body></html>`;
   if (printerCfg?.method === "bluetooth") {
@@ -7325,13 +7344,15 @@ function BonModal({
     return tmp.innerText || tmp.textContent || '';
   };
 
-  const doPrint = html => {
+  const doPrint = (html, fontOverride) => {
     const method = printerSettings?.method || "browser";
+    // Küche/Bar = 14pt (0x01), Belege geben eigenen Wert mit
+    const fc = (typeof fontOverride === 'number') ? fontOverride : 0x01;
     if (method === "bluetooth") {
       // Native Bluetooth (Capacitor BLE) — direkt an Thermodrucker
       const devId = printerSettings?.btAddress;
       if (devId && BTPrint.isNative()) {
-        BTPrint.printHtml(devId, html, getFontCmd()).catch(e => {
+        BTPrint.printHtml(devId, html, fc).catch(e => {
           // bei Fehler: Browser-Druck als Notfall
           printHtml(html);
         });
@@ -7345,7 +7366,7 @@ function BonModal({
         const text = htmlToRawText(html);
         const ESC = '\x1B', GS = '\x1D';
         const init = ESC + '@';
-        const fontSize = GS + '!' + String.fromCharCode(getFontCmd());
+        const fontSize = GS + '!' + String.fromCharCode(fc);
         const cut = GS + 'V' + '\x41' + '\x03'; // partial cut
         const rawText = init + fontSize + text + '\n\n\n' + cut;
         const encoded = encodeURIComponent(rawText);
@@ -7397,6 +7418,7 @@ function BonModal({
     <div class="center bold" style="font-size:24px;margin:4px 0">${label}</div>
     ${kundeInfo}
     <div class="line"></div>${lines}
+    <div>&nbsp;</div><div>&nbsp;</div><div>&nbsp;</div>
   </body></html>`;
   };
   const printGast = () => {
@@ -7413,7 +7435,7 @@ function BonModal({
       <div class="row bold" style="font-size:22px"><span>GESAMT</span><span>${fmt(total)}</span></div>
       <div class="line"></div>
       <div class="center" style="font-size:16px">Zahlung noch offen</div>`;
-    doPrint(kvBonHtml("🧾 GÄSTEBON", lines));
+    doPrint(kvBonHtml("🧾 GÄSTEBON", lines), 0x00);
     setPrinted(p => ({
       ...p,
       gast: true
@@ -7436,9 +7458,9 @@ function BonModal({
     const groups = groupByCat(foodItems);
     const cats = Object.keys(groups);
     const lines = cats.map((cat, ci) =>
-      `<div class="bold center" style="font-size:16px;margin:6px 0 4px">- ${cat} -</div>` +
+      `<div class="bold center" style="font-size:16px;margin:6px 0 4px">- ${cat} -</div><div>&nbsp;</div>` +
       groups[cat].map(i =>
-        `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px;margin-bottom:2px">→ ${i.note}</div>` : ""}${i.kitchenNote ? `<div style="color:blue;font-size:16px;margin-bottom:2px">📝 ${i.kitchenNote}</div>` : ""}`
+        `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px;margin-bottom:2px">→ ${i.note}</div>` : ""}${i.kitchenNote ? `<div style="color:blue;font-size:16px;margin-bottom:2px">📝 ${i.kitchenNote}</div>` : ""}<div>&nbsp;</div>`
       ).join("")
     ).join("");
     doPrint(kvBonHtml("🍳 KÜCHE — SPEISEN", lines));
@@ -7454,9 +7476,9 @@ function BonModal({
     const groups = groupByCat(drinkItems);
     const cats = Object.keys(groups);
     const lines = cats.map((cat, ci) =>
-      `<div class="bold center" style="font-size:16px;margin:6px 0 4px">- ${cat} -</div>` +
+      `<div class="bold center" style="font-size:16px;margin:6px 0 4px">- ${cat} -</div><div>&nbsp;</div>` +
       groups[cat].map(i =>
-        `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px;margin-bottom:2px">→ ${i.note}</div>` : ""}`
+        `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px;margin-bottom:2px">→ ${i.note}</div>` : ""}<div>&nbsp;</div>`
       ).join("")
     ).join("");
     doPrint(kvBonHtml("🍺 BAR — GETRÄNKE", lines));
@@ -13093,7 +13115,7 @@ function PrinterSettingsView({
     address: "Brunnenallee 30 · 34537 Bad Wildungen",
     phone: "05621 9449087",
     footer: "Danke & bis bald! 🙏",
-    width: 280,
+    width: 384,
     method: "browser",
     ip: "",
     btName: "",
@@ -13389,6 +13411,26 @@ function PrinterSettingsView({
         )
       )
     )
+  ),
+  // QR-Code on/off
+  (form.method === "rawbt" || form.method === "bluetooth") && /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:10, padding:12, marginBottom:10, border:"1px solid #eee" } },
+    /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#333", marginBottom:8 } }, "📱 QR-Code auf Zahlungs-Beleg"),
+    /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:6 } },
+      [[true,"✅ Ein","QR drucken"],[false,"❌ Aus","kein QR"]].map(([v,l,sub]) =>
+        /*#__PURE__*/React.createElement("div", { key:String(v), onClick:()=>setForm(f=>({...f,qrEnabled:v})),
+          style:{ borderRadius:8, border:`2px solid ${((form.qrEnabled!==false))===v?C.blue:"#ddd"}`, background:((form.qrEnabled!==false))===v?"#e3f2fd":"#fff", padding:"10px 4px", cursor:"pointer", textAlign:"center" }
+        },
+          /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:15, color:((form.qrEnabled!==false))===v?C.blue:"#555" } }, l),
+          /*#__PURE__*/React.createElement("div", { style:{ fontSize:10, color:"#888", marginTop:2 } }, sub)
+        )
+      )
+    ),
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#888", marginTop:8 } }, "Link: ", /*#__PURE__*/React.createElement("span", { style:{fontWeight:700} }, form.qrUrl||"https://beacons.ai/eatdesi.bw")),
+    /*#__PURE__*/React.createElement("input", {
+      type:"text", value:form.qrUrl||"", placeholder:"https://beacons.ai/eatdesi.bw",
+      onChange:(e)=>setForm(f=>({...f,qrUrl:e.target.value})),
+      style:{ width:"100%", marginTop:6, padding:"8px", borderRadius:8, border:"1px solid #ddd", fontFamily:"inherit", fontSize:12, boxSizing:"border-box" }
+    })
   ),
   form.method === "bluetooth" && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -17888,7 +17930,7 @@ function App() {
   }, []);
   const [loyaltySettings, setLoyaltySettings] = useState(() => LS.get("eatdesi_loyalty_settings", { pointsPerEuro:10, redeemRate:100, minRedeem:100, active:true }));
   const [happyHours, setHappyHours] = useState(() => LS.get("eatdesi_happyhours", []));
-  const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); return Object.assign({ name: "eatDeSi", address: "Brunnenallee 30 · 34537 Bad Wildungen", phone: "05621 9449087", footer: "Danke & bis bald! 🙏", width: 280, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: "Belks Direktvertrieb GmbH", firmaZusatz: "eatDeSi – Fusion Kitchen & Grill", firmaStrasse: "Brunnenallee 30", firmaPlzOrt: "34537 Bad Wildungen", firmaStNr: "26/229/25450", firmaUst: "DE361161517", firmaGericht: "Amtsgericht Kassel", firmaEmail: "eatdesi.bw@gmail.com", firmaWeb: "www.eatdesi-bw.de", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal" }, saved); });
+  const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); return Object.assign({ name: "eatDeSi", address: "Brunnenallee 30 · 34537 Bad Wildungen", phone: "05621 9449087", footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: "Belks Direktvertrieb GmbH", firmaZusatz: "eatDeSi – Fusion Kitchen & Grill", firmaStrasse: "Brunnenallee 30", firmaPlzOrt: "34537 Bad Wildungen", firmaStNr: "26/229/25450", firmaUst: "DE361161517", firmaGericht: "Amtsgericht Kassel", firmaEmail: "eatdesi.bw@gmail.com", firmaWeb: "www.eatdesi-bw.de", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal" }, saved); });
   const [menuOpen, setMenuOpen] = useState(false);
   const [now, setNow] = useState(new Date());
   const [isOnline, setIsOnline] = useState(navigator.onLine);
