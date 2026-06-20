@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v79</title>
+<title>eatDeSi POS v80</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v79';",
+    "var CACHE='eatdesi-v80';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6608,6 +6608,29 @@ function isPendingOnline(o){ return o && typeof o.note === 'string' && o.note.in
 function isAcceptedOnline(o){ return o && typeof o.note === 'string' && o.note.indexOf('[OK:') !== -1; }
 function onlinePrepMin(o){ try{ var m=(o.note||'').match(/\[OK:(\d+)\]/); return m?parseInt(m[1]):null; }catch(e){return null;} }
 function isOnlineDeliv(o){ return o && ((o.customerStreet) || (typeof o.note==='string' && o.note.indexOf('LIEFERUNG')!==-1) || (typeof o.tableId==='string' && o.tableId.indexOf('Lieferung')!==-1)); }
+
+// ===== KDS-STATUS über note-Marker (Single Source of Truth, sync zu Supabase -> Website liest mit) =====
+// Pipeline: [OK:min] (=Neu/akzeptiert) -> [KOCHT] -> [FERTIG] -> [GELIEFERT] (=erledigt/geschlossen)
+function kdsStageOf(o){
+  var n = (o && typeof o.note==='string') ? o.note : '';
+  if (n.indexOf('[GELIEFERT]') !== -1) return 'delivered';
+  if (n.indexOf('[FERTIG]') !== -1) return 'ready';
+  if (n.indexOf('[KOCHT]') !== -1) return 'working';
+  if (n.indexOf('[OK:') !== -1) return 'new';
+  return null;
+}
+// note auf neuen KDS-Stage umschreiben (alte KDS-Marker raus, [OK:min] bleibt für die Zeitanzeige)
+function setKdsMarkerInNote(note, stage){
+  var clean = String(note||'').replace(/\[KOCHT\]/g,'').replace(/\[FERTIG\]/g,'').replace(/\[GELIEFERT\]/g,'').replace(/\s·\s·\s/g,' · ').trim();
+  var marker = stage==='working' ? '[KOCHT]' : stage==='ready' ? '[FERTIG]' : stage==='delivered' ? '[GELIEFERT]' : '';
+  if (!marker) return clean;
+  // [OK:..] am Anfang behalten, KDS-Marker direkt dahinter
+  var okm = clean.match(/^\[OK:\d+\]/);
+  if (okm) return okm[0] + ' ' + marker + ' ' + clean.slice(okm[0].length).replace(/^[\s·]+/,'').trim();
+  return marker + ' ' + clean;
+}
+// Order ist im KDS aktiv (akzeptiert, aber noch nicht erledigt/geschlossen)
+function isKdsActive(o){ var s=kdsStageOf(o); return s && s!=='delivered'; }
 
 // KANAL eines Auftrags bestimmen (für Finanzamt-getrennte Umsatzauswertung).
 function orderChannel(o){
@@ -18008,6 +18031,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
           { icon:"🥡", label:"Takeaway", id:"takeaway_new" },
           { icon:"🍳", label:"Küche", id:"kitchen" },
           { icon:"🍺", label:"Bar", id:"bar" },
+          { icon:"🍳", label:"KDS Pro", id:"kds_pro" },
           { icon:"📅", label:"Reservierung", id:"reservations" },
           { icon:"📊", label:"Tagesbericht", id:"summary" },
           { icon:"⏱️", label:"Zeiterfassung", id:"zeiterfassung" },
@@ -19596,30 +19620,20 @@ function App() {
   }), view === "online_orders" && /*#__PURE__*/React.createElement(OnlineOrdersLive, {
     pendingOrders: pendingOnlineOrders,
     onAccept: (order, prepMin) => {
-      // 1) note-Marker auf [OK:min] setzen (lokal + Cloud)
+      // EINHEITLICHER FLOW: Annehmen -> direkt in KDS Pro "Neu" (NICHT mehr Takeaway!)
+      // note-Marker [NEU] -> [OK:min]. Das ist KDS-Stage 'new'. Sync zu Supabase -> Website liest Status mit.
       var cleanNote = String(order.note||'').replace('[NEU]','').replace(/^[\s·]+/,'').trim();
       var newNote = '[OK:'+prepMin+'] · '+cleanNote;
-      // lokal in completedOrders aktualisieren
+      // lokal in completedOrders aktualisieren (KDS liest direkt aus completedOrders)
       setCompletedOrders(function(list){
         return list.map(function(o){
           return String(o.bonNr)===String(order.bonNr) ? Object.assign({}, o, { note:newNote }) : o;
         });
       });
-      // Cloud aktualisieren
+      // Cloud aktualisieren (Website-Kunde sieht "angenommen, X Min")
       if (typeof updateOrderNoteInSupabase === "function") updateOrderNoteInSupabase(order.bonNr, newNote);
-      // 2) als Takeaway anlegen (erscheint in Takeaway + Küche)
-      var id = taRef.current++;
-      var deliv = isOnlineDeliv(order);
-      setTakeaway(function(t){ return t.concat([{
-        id: id, items: order.items||[], time: new Date(), done: false,
-        customerName: order.customerName||null, customerPhone: order.customerPhone||null,
-        customerStreet: order.customerStreet||null,
-        source: order.source||"WEBSHOP", bonNr: order.bonNr,
-        orderType: deliv ? "Lieferung" : "Abholung",
-        prepMin: prepMin, onlineNote: cleanNote
-      }]); });
-      // 3) zur Takeaway-Seite
-      setView("tables");
+      // direkt zum KDS Pro Monitor wechseln
+      setView("kds_pro");
       setPendingOnlinePopup(null);
     },
     onReject: (order) => {
@@ -19674,7 +19688,7 @@ function App() {
   ), view === "ai_betriebsleiter" && React.createElement(AiBetriebsleiterView, {completedOrders:completedOrders}
   ), view === "ai_whatsapp" && React.createElement(AiWhatsAppView, {menuData:menuData}
   ), view === "ai_marketing" && React.createElement(AiMarketingView, {completedOrders:completedOrders}
-  ), view === "kds_pro" && React.createElement(KdsProView, {tableOrders:tableOrders,takeaway:takeaway}
+  ), view === "kds_pro" && React.createElement(KdsProView, {tableOrders:tableOrders,takeaway:takeaway,completedOrders:completedOrders,setCompletedOrders:setCompletedOrders,setTakeaway:setTakeaway}
   ), view === "rezeptkosten" && React.createElement(RezeptkostenView, {menuData:menuData}
   ), view === "lieferfahrer" && React.createElement(LieferfahrerView, null
   ), view === "kiosk" && React.createElement(KioskView, {menuData:menuData}
@@ -20380,74 +20394,132 @@ function AiEinkaufView({ inventory, menuData, completedOrders }) {
 // PHASE 3 - RESTAURANT-AUTOMATISIERUNG
 // ===============================================================
 
-function KdsProView({ tableOrders, takeaway, completedOrders }) {
-  const [tickets, setTickets] = React.useState(() => {
-    const saved = LS.get('eatdesi_kds_tickets', []);
-    return saved;
-  });
+function KdsProView({ tableOrders, takeaway, completedOrders, setCompletedOrders, setTakeaway }) {
+  var R = React;
+  // Online-Aufträge: kommen aus completedOrders mit KDS-Marker (akzeptiert, noch nicht geliefert)
+  // Tische + lokale Takeaways: bleiben weiterhin als Live-Tickets im LS (kein note-Marker nötig)
+  var [localTickets, setLocalTickets] = R.useState(function(){ return LS.get('eatdesi_kds_tickets', []); });
 
-  React.useEffect(() => {
-    // Sync with active orders
-    const allOrders = [];
-    Object.entries(tableOrders||{}).forEach(([tableId, order]) => {
+  // Tische + lokale (manuell getippte) Takeaways automatisch als Tickets aufnehmen
+  R.useEffect(function(){
+    var add = [];
+    Object.entries(tableOrders||{}).forEach(function(e){
+      var tableId=e[0], order=e[1];
       if ((order.items||[]).length > 0) {
-        const existing = tickets.find(t => t.id === 'table_'+tableId);
-        if (!existing) allOrders.push({ id:'table_'+tableId, source:'🪑 Tisch '+tableId, items:order.items, status:'new', time:new Date().toISOString(), priority:1 });
+        if (!localTickets.find(function(t){return t.id==='table_'+tableId;})) {
+          add.push({ id:'table_'+tableId, source:'🪑 Tisch '+tableId, items:order.items, status:'new', time:new Date().toISOString(), kind:'local' });
+        }
       }
     });
-    (takeaway||[]).filter(t=>!t.done).forEach(ta => {
-      const existing = tickets.find(t => t.id === 'ta_'+ta.id);
-      if (!existing) allOrders.push({ id:'ta_'+ta.id, source:(ta.source||'🥡 Takeaway')+' #'+ta.id, items:ta.items, status:'new', time:ta.time||new Date().toISOString(), priority:ta.source==='Webshop'?2:1 });
+    (takeaway||[]).filter(function(t){return !t.done;}).forEach(function(ta){
+      if (!localTickets.find(function(t){return t.id==='ta_'+ta.id;})) {
+        var lbl = (ta.source && ta.source!=='Takeaway') ? ta.source : '🥡 Takeaway';
+        add.push({ id:'ta_'+ta.id, source:lbl+' #'+ta.id, items:ta.items, status:'new', time:ta.time||new Date().toISOString(), kind:'local' });
+      }
     });
-    if (allOrders.length > 0) {
-      setTickets(prev => {
-        const merged = [...prev, ...allOrders];
-        LS.set('eatdesi_kds_tickets', merged.slice(-50));
-        return merged;
-      });
+    if (add.length>0) {
+      setLocalTickets(function(prev){ var m=prev.concat(add); LS.set('eatdesi_kds_tickets', m.slice(-60)); return m; });
     }
   }, [tableOrders, takeaway]);
 
-  const updateStatus = (id, status) => {
-    setTickets(prev => {
-      const updated = prev.map(t => t.id===id ? {...t, status} : t);
-      LS.set('eatdesi_kds_tickets', updated);
-      return updated;
-    });
-  };
+  // Online-Tickets aus completedOrders (note-Marker) ableiten
+  var onlineTickets = (completedOrders||[]).filter(isKdsActive).map(function(o){
+    var deliv = isOnlineDeliv(o);
+    var src = (o.source||'Online');
+    var icon = src.indexOf('LIEFER')!==-1 ? '🛵' : src.indexOf('UBER')!==-1 ? '🚗' : src.indexOf('WEBSHOP')!==-1||src.indexOf('WEBSITE')!==-1 ? '🌐' : '🌐';
+    return {
+      id:'online_'+o.bonNr, bonNr:o.bonNr, kind:'online',
+      source: icon+' '+src+(o.bonNr?(' '+o.bonNr):'') + (deliv?' · Lieferung':' · Abholung'),
+      items: o.items||[], status: kdsStageOf(o),
+      time: o.time||o.created_at||new Date().toISOString(),
+      prepMin: onlinePrepMin(o),
+      customerName: o.customerName, customerPhone: o.customerPhone,
+      _order: o
+    };
+  });
 
-  const removeTicket = (id) => {
-    setTickets(prev => { const u = prev.filter(t=>t.id!==id); LS.set('eatdesi_kds_tickets',u); return u; });
-  };
+  var allTickets = onlineTickets.concat(localTickets);
 
-  const statuses = [
-    {id:'new', label:'🆕 Neu', color:'#ef5350', bg:'#ffebee'},
-    {id:'working', label:'👨🍳 In Arbeit', color:'#f57c00', bg:'#fff3e0'},
-    {id:'ready', label:'✅ Fertig', color:'#2e7d32', bg:'#e8f5e9'},
-    {id:'delivered', label:'🚀 Ausgeliefert', color:'#1565c0', bg:'#e3f2fd'},
+  // STATUS WECHSELN
+  function moveStage(ticket, dir){
+    var order = ['new','working','ready','delivered'];
+    var idx = order.indexOf(ticket.status);
+    var ni = Math.max(0, Math.min(3, idx + dir));
+    var newStatus = order[ni];
+
+    if (ticket.kind === 'online') {
+      // note-Marker umschreiben + Supabase sync (Website liest Status mit)
+      var o = ticket._order;
+      var newNote = setKdsMarkerInNote(o.note, newStatus);
+      setCompletedOrders(function(list){
+        return list.map(function(x){ return String(x.bonNr)===String(ticket.bonNr) ? Object.assign({}, x, {note:newNote}) : x; });
+      });
+      if (typeof updateOrderNoteInSupabase === 'function') updateOrderNoteInSupabase(ticket.bonNr, newNote);
+    } else {
+      // lokales Ticket
+      setLocalTickets(function(prev){ var u=prev.map(function(t){return t.id===ticket.id?Object.assign({},t,{status:newStatus}):t;}); LS.set('eatdesi_kds_tickets',u); return u; });
+    }
+  }
+
+  // ERLEDIGT (Ausgeliefert -> aus KDS raus, Order geschlossen)
+  function finishTicket(ticket){
+    if (ticket.kind === 'online') {
+      // [GELIEFERT] -> Order ist abgeschlossen, verschwindet aus KDS (isKdsActive=false), bleibt in Order-Liste
+      var o = ticket._order;
+      var newNote = setKdsMarkerInNote(o.note, 'delivered');
+      setCompletedOrders(function(list){
+        return list.map(function(x){ return String(x.bonNr)===String(ticket.bonNr) ? Object.assign({}, x, {note:newNote}) : x; });
+      });
+      if (typeof updateOrderNoteInSupabase === 'function') updateOrderNoteInSupabase(ticket.bonNr, newNote);
+    } else {
+      // lokales Ticket: Takeaway als done markieren falls vorhanden, Ticket entfernen
+      if (ticket.id.indexOf('ta_')===0 && setTakeaway) {
+        var taId = parseInt(ticket.id.slice(3));
+        setTakeaway(function(t){ return t.map(function(x){ return x.id===taId?Object.assign({},x,{done:true}):x; }); });
+      }
+      setLocalTickets(function(prev){ var u=prev.filter(function(t){return t.id!==ticket.id;}); LS.set('eatdesi_kds_tickets',u); return u; });
+    }
+  }
+
+  var statuses = [
+    {id:'new',       label:'🆕 Neu',          color:'#ef5350', bg:'#ffebee'},
+    {id:'working',   label:'👨‍🍳 In Arbeit',  color:'#f57c00', bg:'#fff3e0'},
+    {id:'ready',     label:'✅ Fertig',        color:'#2e7d32', bg:'#e8f5e9'},
+    {id:'delivered', label:'🚀 Ausgeliefert',  color:'#1565c0', bg:'#e3f2fd'},
   ];
 
-  return React.createElement('div', {style:{padding:12,overflowY:'auto',height:'calc(100vh - 90px)'}},
-    React.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}},
-      React.createElement('div', {style:{fontWeight:800,fontSize:17,color:'#C84B31'}}, '🍳 KDS Pro - Küchenmonitor'),
-      React.createElement('button', {onClick:()=>{setTickets([]);LS.set('eatdesi_kds_tickets',[]);}, style:{padding:'6px 12px',borderRadius:8,border:'1px solid #ddd',background:'#fff',cursor:'pointer',fontSize:12,fontFamily:'inherit'}}, '🗑️ Leeren')
+  function minsSince(t){ try{ return Math.floor((Date.now()-new Date(t).getTime())/60000); }catch(e){return 0;} }
+
+  return R.createElement('div', {style:{padding:12,overflowY:'auto',height:'calc(100vh - 90px)'}},
+    R.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}},
+      R.createElement('div', {style:{fontWeight:800,fontSize:17,color:'#C84B31'}}, '🍳 KDS Pro - Küchenmonitor'),
+      R.createElement('div',{style:{fontSize:12,color:'#888'}}, allTickets.length+' aktive Tickets')
     ),
-    React.createElement('div', {style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}},
-      statuses.map(st => React.createElement('div', {key:st.id},
-        React.createElement('div', {style:{padding:'8px 10px',borderRadius:'10px 10px 0 0',background:st.color,color:'#fff',fontWeight:700,fontSize:12,textAlign:'center'}}, st.label, ' (', tickets.filter(t=>t.status===st.id).length, ')'),
-        React.createElement('div', {style:{background:st.bg,borderRadius:'0 0 10px 10px',minHeight:200,padding:8,display:'flex',flexDirection:'column',gap:6}},
-          tickets.filter(t=>t.status===st.id).map(ticket => React.createElement('div', {key:ticket.id, style:{background:'#fff',borderRadius:8,padding:10,boxShadow:'0 1px 4px rgba(0,0,0,.1)'}},
-            React.createElement('div', {style:{fontWeight:700,fontSize:12,marginBottom:4,color:st.color}}, ticket.source),
-            React.createElement('div', {style:{fontSize:11,color:'#888',marginBottom:6}}, new Date(ticket.time).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})),
-            (ticket.items||[]).map((it,i) => React.createElement('div', {key:i, style:{fontSize:12,padding:'2px 0'}}, (it.qty||1)+'× '+it.name)),
-            React.createElement('div', {style:{display:'flex',gap:4,marginTop:8,flexWrap:'wrap'}},
-              st.id!=='new' && React.createElement('button', {onClick:()=>updateStatus(ticket.id, statuses[Math.max(0,statuses.findIndex(s=>s.id===st.id)-1)].id), style:{flex:1,padding:'4px 6px',borderRadius:5,border:'none',background:'#f5f5f5',cursor:'pointer',fontSize:10,fontFamily:'inherit'}}, '← Zurück'),
-              st.id!=='delivered' && React.createElement('button', {onClick:()=>updateStatus(ticket.id, statuses[Math.min(3,statuses.findIndex(s=>s.id===st.id)+1)].id), style:{flex:1,padding:'4px 6px',borderRadius:5,border:'none',background:st.color,color:'#fff',cursor:'pointer',fontSize:10,fontFamily:'inherit',fontWeight:700}}, 'Weiter →'),
-              st.id==='delivered' && React.createElement('button', {onClick:()=>removeTicket(ticket.id), style:{flex:1,padding:'4px 6px',borderRadius:5,border:'none',background:'#f5f5f5',cursor:'pointer',fontSize:10,fontFamily:'inherit'}}, '✓ Erledigt')
-            )
-          ))
-        )
-      ))
+    R.createElement('div', {style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}},
+      statuses.map(function(st){
+        var col = allTickets.filter(function(t){return t.status===st.id;});
+        return R.createElement('div', {key:st.id},
+          R.createElement('div', {style:{padding:'8px 10px',borderRadius:'10px 10px 0 0',background:st.color,color:'#fff',fontWeight:700,fontSize:12,textAlign:'center'}}, st.label, ' (', col.length, ')'),
+          R.createElement('div', {style:{background:st.bg,borderRadius:'0 0 10px 10px',minHeight:200,padding:8,display:'flex',flexDirection:'column',gap:6}},
+            col.map(function(ticket){
+              var mins = minsSince(ticket.time);
+              var late = ticket.prepMin && mins > ticket.prepMin;
+              return R.createElement('div', {key:ticket.id, style:{background:'#fff',borderRadius:8,padding:10,boxShadow:'0 1px 4px rgba(0,0,0,.1)',border: late?'2px solid #ef5350':'1px solid #eee'}},
+                R.createElement('div', {style:{fontWeight:700,fontSize:12,marginBottom:4,color:st.color}}, ticket.source),
+                ticket.customerName && R.createElement('div',{style:{fontSize:11,color:'#555',marginBottom:2}}, '👤 '+ticket.customerName + (ticket.customerPhone?(' · '+ticket.customerPhone):'')),
+                R.createElement('div', {style:{fontSize:11,color: late?'#ef5350':'#888',marginBottom:6,fontWeight:late?700:400}},
+                  '🕐 '+mins+' Min' + (ticket.prepMin?(' / Ziel '+ticket.prepMin+' Min'):'') + (late?' ⚠️':'')),
+                (ticket.items||[]).map(function(it,i){ return R.createElement('div', {key:i, style:{fontSize:12,padding:'2px 0'}}, (it.qty||1)+'× '+it.name); }),
+                R.createElement('div', {style:{display:'flex',gap:4,marginTop:8,flexWrap:'wrap'}},
+                  st.id!=='new' && R.createElement('button', {onClick:function(){moveStage(ticket,-1);}, style:{flex:1,padding:'5px 6px',borderRadius:5,border:'none',background:'#f5f5f5',cursor:'pointer',fontSize:10,fontFamily:'inherit'}}, '← Zurück'),
+                  st.id!=='delivered' && R.createElement('button', {onClick:function(){moveStage(ticket,1);}, style:{flex:1,padding:'5px 6px',borderRadius:5,border:'none',background:st.color,color:'#fff',cursor:'pointer',fontSize:10,fontFamily:'inherit',fontWeight:700}}, 'Weiter →'),
+                  st.id==='delivered' && R.createElement('button', {onClick:function(){finishTicket(ticket);}, style:{flex:1,padding:'5px 6px',borderRadius:5,border:'none',background:'#1565c0',color:'#fff',cursor:'pointer',fontSize:10,fontFamily:'inherit',fontWeight:700}}, '✓ Erledigt (schließen)')
+                )
+              );
+            })
+          )
+        );
+      })
     )
   );
 }
