@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v73</title>
+<title>eatDeSi POS v77</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v73';",
+    "var CACHE='eatdesi-v77';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6599,6 +6599,31 @@ const BTPrint = {
 };
 
 // --- Kernfunktionen (zentral definiert, damit sie überall verfügbar sind) ---
+// ONLINE-BESTELLUNG STATUS-HELPER
+// Website schickt note mit Marker: "[NEU]" = wartet auf Annahme, "[OK:30]" = angenommen, prep 30 Min.
+function isWebOrder(o){ return o && (o.source === 'WEBSHOP' || o.source === 'WEBSITE'); }
+function isPendingOnline(o){ return isWebOrder(o) && typeof o.note === 'string' && o.note.indexOf('[NEU]') !== -1; }
+function isAcceptedOnline(o){ return isWebOrder(o) && typeof o.note === 'string' && o.note.indexOf('[OK:') !== -1; }
+function onlinePrepMin(o){ try{ var m=(o.note||'').match(/\[OK:(\d+)\]/); return m?parseInt(m[1]):null; }catch(e){return null;} }
+function isOnlineDeliv(o){ return o && ((o.customerStreet) || (typeof o.note==='string' && o.note.indexOf('LIEFERUNG')!==-1) || (typeof o.tableId==='string' && o.tableId.indexOf('Lieferung')!==-1)); }
+
+// KANAL eines Auftrags bestimmen (für Finanzamt-getrennte Umsatzauswertung).
+function orderChannel(o){
+  if(!o) return 'tisch';
+  var src = String(o.source||'').toUpperCase();
+  if(src==='LIEFERANDO') return 'lieferando';
+  if(src==='UBEREATS' || src==='UBER EATS' || src==='UBER_EATS') return 'ubereats';
+  if(src==='WEBSHOP' || src==='WEBSITE') return 'website';
+  if(src==='ONLINE') return 'online';
+  if(o.tableId && !o.isTakeaway) return 'tisch';
+  if(o.isTakeaway || (typeof o.label==='string' && o.label.toLowerCase().indexOf('takeaway')!==-1)) return 'takeaway';
+  return 'tisch';
+}
+function channelLabel(ch){
+  return ({tisch:'🪑 Tisch', takeaway:'🥡 Takeaway', website:'🌐 Website', lieferando:'🛵 Lieferando', ubereats:'🚗 Uber Eats', online:'📱 Online'})[ch] || ch;
+}
+var CHANNEL_ORDER = ['tisch','takeaway','website','lieferando','ubereats','online'];
+
 // Getränk? -> 19% MwSt, sonst Speise -> 7%
 function isDrink(item){
   if(!item) return false;
@@ -8968,8 +8993,82 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
   );
 }
 // --- ONLINE BESTELLUNGEN ------------------------------------------------------
+// ===== NEU: Online-Bestellungen LIVE (echte Web-Bestellungen mit Annahme-Pflicht) =====
+function OnlineOrdersLive({ pendingOrders, onAccept, onReject }) {
+  var R = React;
+  var [accepting, setAccepting] = R.useState(null); // order das gerade angenommen wird
+  var [customMin, setCustomMin] = R.useState("");
+  var C = (window.C || { green:'#2e7d32', orange:'#C84B31' });
+
+  function fmtItems(o){
+    try { return (o.items||[]).map(function(i){ return (i.qty||1)+'× '+(i.name||''); }).join(', '); }
+    catch(e){ return ''; }
+  }
+  function typeLabel(o){ return isOnlineDeliv(o) ? '🛵 Lieferung' : '🥡 Abholung'; }
+  function cleanNote(o){
+    return String(o.note||'').replace('[NEU]','').replace(/\[OK:\d+\]/,'').replace(/^[\s·]+/,'').trim();
+  }
+  function doAccept(o, min){
+    if(!min || min<1){ alert('Bitte Vorbereitungszeit wählen'); return; }
+    onAccept(o, min);
+    setAccepting(null); setCustomMin("");
+  }
+
+  return R.createElement('div',{style:{padding:14,overflowY:'auto',height:'calc(100vh - 90px)'}},
+    R.createElement('div',{style:{fontWeight:800,fontSize:17,color:C.orange,marginBottom:4}},'📱 Online-Bestellungen'),
+    R.createElement('div',{style:{fontSize:12,color:'#888',marginBottom:14}},'Neue Web-Bestellungen müssen angenommen werden, bevor sie in die Küche gehen.'),
+
+    (pendingOrders.length===0) && R.createElement('div',{style:{textAlign:'center',color:'#bbb',marginTop:50}},
+      R.createElement('div',{style:{fontSize:48}},'📭'),
+      R.createElement('div',{style:{marginTop:8,fontWeight:600}},'Keine offenen Online-Bestellungen')
+    ),
+
+    pendingOrders.map(function(o){
+      var isAcc = accepting && String(accepting.bonNr)===String(o.bonNr);
+      return R.createElement('div',{key:o.bonNr,style:{background:'#fff',borderRadius:14,padding:15,marginBottom:12,boxShadow:'0 2px 10px #0002',borderLeft:'5px solid '+C.orange}},
+        // Kopf
+        R.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}},
+          R.createElement('div',null,
+            R.createElement('div',{style:{fontWeight:800,fontSize:15}},(o.customerName||'Gast')),
+            o.customerPhone && R.createElement('a',{href:'tel:'+o.customerPhone,style:{fontSize:13,color:C.orange,textDecoration:'none'}},'📞 '+o.customerPhone)
+          ),
+          R.createElement('div',{style:{textAlign:'right'}},
+            R.createElement('div',{style:{fontWeight:800,fontSize:16,color:C.green}},(parseFloat(o.total)||0).toFixed(2)+' €'),
+            R.createElement('div',{style:{fontSize:11,color:'#999'}},String(o.bonNr||''))
+          )
+        ),
+        R.createElement('div',{style:{display:'inline-block',background:'#fff3e0',color:'#e65100',fontSize:12,fontWeight:700,padding:'3px 10px',borderRadius:20,marginBottom:8}},typeLabel(o)),
+        // Artikel
+        R.createElement('div',{style:{fontSize:13,color:'#444',marginBottom:6,lineHeight:1.5}},fmtItems(o)),
+        // Lieferadresse / Notiz
+        cleanNote(o) && R.createElement('div',{style:{fontSize:12,color:'#666',background:'#f7f7f7',borderRadius:8,padding:'7px 10px',marginBottom:10}},cleanNote(o)),
+
+        // ANNAHME-Bereich
+        !isAcc && R.createElement('div',{style:{display:'flex',gap:8,marginTop:4}},
+          R.createElement('button',{onClick:function(){setAccepting(o);setCustomMin("");},style:{flex:2,padding:12,borderRadius:10,border:'none',background:C.green,color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'✓ Annehmen'),
+          R.createElement('button',{onClick:function(){ if(confirm('Diese Bestellung wirklich ablehnen?')) onReject(o); },style:{flex:1,padding:12,borderRadius:10,border:'2px solid #e57373',background:'#fff',color:'#c62828',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}},'Ablehnen')
+        ),
+
+        // prep-time chooser
+        isAcc && R.createElement('div',{style:{marginTop:6,background:'#e8f5e9',borderRadius:12,padding:12}},
+          R.createElement('div',{style:{fontWeight:700,fontSize:13,color:C.green,marginBottom:9}},(isOnlineDeliv(o)?'In wie vielen Minuten geliefert?':'In wie vielen Minuten abholbereit?')),
+          R.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:7,marginBottom:9}},
+            [20,30,45,60].map(function(m){
+              return R.createElement('button',{key:m,onClick:function(){doAccept(o,m);},style:{padding:'12px 4px',borderRadius:9,border:'2px solid '+C.green,background:'#fff',color:C.green,fontWeight:800,fontSize:15,cursor:'pointer',fontFamily:'inherit'}},m);
+            })
+          ),
+          R.createElement('div',{style:{display:'flex',gap:7,alignItems:'center'}},
+            R.createElement('input',{type:'number',inputMode:'numeric',placeholder:'eigene Min.',value:customMin,onChange:function(e){setCustomMin(e.target.value);},style:{flex:1,padding:'10px 12px',borderRadius:9,border:'2px solid #a5d6a7',fontSize:14,fontFamily:'inherit',boxSizing:'border-box'}}),
+            R.createElement('button',{onClick:function(){doAccept(o,parseInt(customMin));},style:{padding:'10px 16px',borderRadius:9,border:'none',background:C.green,color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'OK'),
+            R.createElement('button',{onClick:function(){setAccepting(null);},style:{padding:'10px 14px',borderRadius:9,border:'2px solid #ddd',background:'#fff',color:'#777',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}},'Zurück')
+          )
+        )
+      );
+    })
+  );
+}
+
 function OnlineOrdersView({ onAccept }) {
-  const [orders, setOrders] = React.useState(() => LS.get("eatdesi_online_orders", []));
   const [form, setForm] = React.useState({ name:"", phone:"", street:"", plz:"", city:"", items:"", source:"Online", note:"" });
   const [showForm, setShowForm] = React.useState(false);
   React.useEffect(() => { LS.set("eatdesi_online_orders", orders); }, [orders]);
@@ -11049,6 +11148,8 @@ function DayEndView({
     label
   } = getPeriodRange(period, customFrom, customTo);
   const filtered = completedOrders.filter(o => {
+    if (isPendingOnline(o)) return false; // noch nicht angenommen -> nicht zählen
+    if (typeof o.note === 'string' && o.note.indexOf('[ABGELEHNT]') !== -1) return false;
     const d = new Date(o.time);
     return d >= from && d <= to && !o.storniert;
   });
@@ -11064,6 +11165,18 @@ function DayEndView({
   const bar = filtered.filter(o => o.payMethod === "Bar").reduce((s, o) => s + o.total, 0);
   const karte = filtered.filter(o => o.payMethod === "Karte").reduce((s, o) => s + o.total, 0);
   const netto = rev - tax7 - tax19;
+  // KANAL-AUFSCHLÜSSELUNG (Finanzamt: jeder Bestellweg getrennt)
+  const channelStats = {};
+  CHANNEL_ORDER.forEach(ch => { channelStats[ch] = { count:0, total:0, tax7:0, tax19:0 }; });
+  filtered.forEach(o => {
+    const ch = orderChannel(o);
+    if (!channelStats[ch]) channelStats[ch] = { count:0, total:0, tax7:0, tax19:0 };
+    channelStats[ch].count += 1;
+    channelStats[ch].total += (o.total || 0);
+    channelStats[ch].tax7 += calcTax7(o.items || []);
+    channelStats[ch].tax19 += calcTax19(o.items || []);
+  });
+  const activeChannels = CHANNEL_ORDER.filter(ch => channelStats[ch] && channelStats[ch].count > 0);
   const PERIODS = [["heute", "Heute"], ["gestern", "Gestern"], ["woche", "Woche"], ["monat", "Monat"], ["letztermonat", "Letzter Monat"], ["quartal", "Quartal"], ["jahr", "Jahr"], ["custom", "Benutzerdefiniert"]];
   const printBericht = (a4 = false) => {
     const rName = printerSettings?.name || "eatDeSi";
@@ -11155,6 +11268,13 @@ ${trinkgeldTotal > 0 ? `<div style="margin-top:8px;padding:6px 10px;background:#
 <tr><td>💳 EC/Karte (SumUp)</td><td>${filtered.filter(o => o.payMethod === "Karte").length}</td><td>${fmt(karte)}</td><td>${fmt(filtered.filter(o => o.payMethod === "Karte").reduce((s, o) => s + (o.trinkgeld || 0), 0))}</td><td>${rev > 0 ? (karte / rev * 100).toFixed(1) : 0}%</td></tr>
 <tr><td>👥 Getrennt</td><td>${filtered.filter(o => o.payMethod === "Getrennt").length}</td><td>${fmt(filtered.filter(o => o.payMethod === "Getrennt").reduce((s, o) => s + o.total, 0))}</td><td>${fmt(filtered.filter(o => o.payMethod === "Getrennt").reduce((s, o) => s + (o.trinkgeld || 0), 0))}</td><td>${rev > 0 ? (filtered.filter(o => o.payMethod === "Getrennt").reduce((s, o) => s + o.total, 0) / rev * 100).toFixed(1) : 0}%</td></tr>
 <tr class="total-row"><td><b>Gesamt</b></td><td><b>${filtered.length}</b></td><td><b>${fmt(rev)}</b></td><td><b style="color:#e65100">${fmt(trinkgeldTotal)}</b></td><td><b>100%</b></td></tr>
+</table>
+
+<h2>📊 Umsatz nach Bestellweg</h2>
+<table>
+<tr><th>Bestellweg</th><th>Anzahl</th><th>Betrag</th><th>MwSt. 7%</th><th>MwSt. 19%</th><th>Anteil</th></tr>
+${activeChannels.map(ch => { const s=channelStats[ch]; return `<tr><td>${channelLabel(ch)}</td><td>${s.count}</td><td>${fmt(s.total)}</td><td>${fmt(s.tax7)}</td><td>${fmt(s.tax19)}</td><td>${rev>0?(s.total/rev*100).toFixed(1):0}%</td></tr>`; }).join("")}
+<tr class="total-row"><td><b>Gesamt</b></td><td><b>${filtered.length}</b></td><td><b>${fmt(rev)}</b></td><td><b>${fmt(tax7)}</b></td><td><b>${fmt(tax19)}</b></td><td><b>100%</b></td></tr>
 </table>
 
 ${filteredExp.length > 0 ? `
@@ -11452,7 +11572,34 @@ ${filtered.map((o, i) => {
       fontWeight: 700,
       fontSize: 13
     }
-  }, fmt(tax7 + tax19)))), /*#__PURE__*/React.createElement("div", {
+  }, fmt(tax7 + tax19)))),
+  // ===== UMSATZ NACH BESTELLWEG (Finanzamt: jeder Kanal getrennt) =====
+  /*#__PURE__*/React.createElement("div", {
+    style: { background:"#fff", borderRadius:14, padding:"14px 16px", marginBottom:14, boxShadow:"0 2px 8px #0001" }
+  },
+    React.createElement("div", { style:{ fontWeight:800, fontSize:14, marginBottom:10, color:"#333" } }, "📊 Umsatz nach Bestellweg"),
+    activeChannels.length === 0
+      ? React.createElement("div", { style:{ color:"#aaa", fontSize:13, textAlign:"center", padding:10 } }, "Keine Bestellungen im Zeitraum")
+      : React.createElement("div", null,
+          activeChannels.map(function(ch){
+            var s = channelStats[ch];
+            return React.createElement("div", { key:ch, style:{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 0", borderBottom:"1px solid #f0f0f0" } },
+              React.createElement("div", null,
+                React.createElement("span", { style:{ fontSize:13, fontWeight:700, color:"#333" } }, channelLabel(ch)),
+                React.createElement("span", { style:{ fontSize:11, color:"#999", marginLeft:7 } }, s.count + (s.count===1?" Bestellung":" Bestellungen"))
+              ),
+              React.createElement("div", { style:{ textAlign:"right" } },
+                React.createElement("div", { style:{ fontWeight:800, fontSize:14, color:C.green } }, fmt(s.total)),
+                React.createElement("div", { style:{ fontSize:10, color:"#aaa" } }, "MwSt: " + fmt(s.tax7 + s.tax19))
+              )
+            );
+          }),
+          React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"11px 0 2px", marginTop:4, borderTop:"2px solid #eee" } },
+            React.createElement("span", { style:{ fontSize:13, fontWeight:800 } }, "Gesamt"),
+            React.createElement("span", { style:{ fontWeight:800, fontSize:15, color:C.green } }, fmt(rev))
+          )
+        )
+  ), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 10,
@@ -11615,6 +11762,8 @@ function OrderListView({
   } = getPeriodRange(period, customFrom, customTo);
   const PERIODS = [["heute", "Heute"], ["gestern", "Gestern"], ["woche", "Woche"], ["monat", "Monat"], ["alle", "Alle"]];
   const filtered = completedOrders.filter(o => {
+    if (isPendingOnline(o)) return false; // wartet auf Annahme -> nur in Online-Bestellungen
+    if (typeof o.note === 'string' && o.note.indexOf('[ABGELEHNT]') !== -1) return false; // abgelehnt -> ausblenden
     const d = new Date(o.time);
     return d >= from && d <= to;
   }).slice().reverse();
@@ -17672,7 +17821,7 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
 }
 
 
-function DashboardView({ completedOrders, tableOrders, takeaway, floors, expenses, setView, openTable, setShowTaCustomerSearch, loggedInUser, deleteTakeaway, inventory, happyHours }) {
+function DashboardView({ completedOrders, tableOrders, takeaway, floors, expenses, setView, openTable, setShowTaCustomerSearch, loggedInUser, deleteTakeaway, inventory, happyHours, onChannelOrder, pendingOnlineOrders }) {
   const [showTaList, setShowTaList] = React.useState(false);
   const C2 = { red:"#C84B31", gold:"#D4A017", green:"#2e7d32", blue:"#1565c0", purple:"#6a1b9a", bg:"#f5f5f5" };
   const isAdmin = loggedInUser && (loggedInUser.role === "Admin" || loggedInUser.role === "Manager");
@@ -17760,8 +17909,18 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
         React.createElement("div", { style:{ padding:"10px 14px", borderBottom:"1px solid #eee" } },
           React.createElement("button", {
             onClick:()=>{ setShowTaList(false); setShowTaCustomerSearch(true); },
-            style:{ width:"100%", padding:11, borderRadius:10, border:"2px dashed #1565c0", background:"#e3f2fd", color:"#1565c0", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
-          }, "➕ Neue Takeaway Bestellung")
+            style:{ width:"100%", padding:11, borderRadius:10, border:"2px dashed #1565c0", background:"#e3f2fd", color:"#1565c0", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13, marginBottom:8 }
+          }, "➕ Neue Takeaway Bestellung"),
+          React.createElement("div", { style:{ display:"flex", gap:8 } },
+            React.createElement("button", {
+              onClick:()=>{ setShowTaList(false); if(onChannelOrder) onChannelOrder("LIEFERANDO"); },
+              style:{ flex:1, padding:10, borderRadius:10, border:"2px solid #ff8000", background:"#fff5ec", color:"#ff8000", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5 }
+            }, "🛵 Lieferando"),
+            React.createElement("button", {
+              onClick:()=>{ setShowTaList(false); if(onChannelOrder) onChannelOrder("UBEREATS"); },
+              style:{ flex:1, padding:10, borderRadius:10, border:"2px solid #06c167", background:"#ecfff5", color:"#06914c", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5 }
+            }, "🚗 Uber Eats")
+          )
         ),
         // Liste aller Takeaways
         React.createElement("div", { style:{ padding:"10px 14px" } },
@@ -17832,6 +17991,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
 
     // Stats Grid
     React.createElement("div", { style:{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" } },
+      pendingOnlineOrders.length > 0 && card("🔔", "Online NEU", pendingOnlineOrders.length, "#e53935", "Annehmen!", () => setView("online_orders")),
       card("🪑", "Tische", openTables.length, C2.green, openTables.length + " belegt", () => setView("tables")),
       card("🥡", "Takeaway", activeTakeaway.length > 0 ? activeTakeaway.length : "+", C2.blue, activeTakeaway.length > 0 ? activeTakeaway.length + " aktiv" : "Neue Bestellung", () => activeTakeaway.length > 0 ? setShowTaList(true) : setShowTaCustomerSearch(true)),
       card("📋", "Bestellungen", todayOrders.length, C2.red, "Heute", null)
@@ -17948,6 +18108,41 @@ function App() {
   const [bonModal, setBonModal] = useState(null);
   const [checkout, setCheckout] = useState(null);
   const [completedOrders, setCompletedOrders] = useState(() => LS.get("eatdesi_orders", []));
+  // ONLINE-BESTELLUNG: Popup wenn neue Web-Bestellung wartet (nach completedOrders definiert!)
+  const [pendingOnlinePopup, setPendingOnlinePopup] = React.useState(null);
+  const _seenOnlineRef = React.useRef(null);
+  const pendingOnlineOrders = (completedOrders||[]).filter(isPendingOnline);
+  const playNotifySound = React.useCallback(() => {
+    try {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) {
+        var ac = new Ctx();
+        [0, 0.18, 0.36].forEach(function(t){
+          var o = ac.createOscillator(), g = ac.createGain();
+          o.type = 'sine'; o.frequency.value = 880;
+          o.connect(g); g.connect(ac.destination);
+          g.gain.setValueAtTime(0.001, ac.currentTime + t);
+          g.gain.exponentialRampToValueAtTime(0.4, ac.currentTime + t + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + t + 0.15);
+          o.start(ac.currentTime + t); o.stop(ac.currentTime + t + 0.16);
+        });
+      }
+    } catch(e){}
+    try { if (navigator.vibrate) navigator.vibrate([200,100,200]); } catch(e){}
+  }, []);
+  React.useEffect(() => {
+    if (_seenOnlineRef.current === null) {
+      _seenOnlineRef.current = new Set(pendingOnlineOrders.map(o => String(o.bonNr)));
+      return;
+    }
+    var fresh = pendingOnlineOrders.filter(o => !_seenOnlineRef.current.has(String(o.bonNr)));
+    if (fresh.length > 0) {
+      fresh.forEach(o => _seenOnlineRef.current.add(String(o.bonNr)));
+      playNotifySound();
+      setPendingOnlinePopup(fresh[fresh.length - 1]);
+      setView("online_orders");
+    }
+  }, [completedOrders]);
   const [expenses, setExpenses] = useState(() => LS.get("eatdesi_expenses", []));
   const [gutscheine, setGutscheine] = useState(() => LS.get("eatdesi_gutscheine", []));
   const [customers, setCustomers] = React.useState(() => {
@@ -18268,7 +18463,7 @@ function App() {
     setView("order");
     setMenuOpen(false);
   };
-  const newTakeaway = (customer = null) => {
+  const newTakeaway = (customer = null, channelSource = null) => {
     const id = taRef.current++;
     setTakeaway(t => [...t, {
       id,
@@ -18280,6 +18475,7 @@ function App() {
       customerStreet: customer?.street || null,
       customerPlz: customer?.plz || null,
       customerCity: customer?.city || null,
+      source: channelSource || null,
     }]);
     setActiveTable(`ta_${id}`);
     setIsTakeaway(true);
@@ -19245,7 +19441,7 @@ function App() {
     setGutscheine: setGutscheine,
     loggedInUser: loggedInUser,
     printerSettings: printerSettings
-  }), view === "dashboard" && React.createElement(DashboardView, { completedOrders: completedOrders, tableOrders: tableOrders, takeaway: takeaway, floors: floors, expenses: expenses, setView: setView, openTable: openTable, setShowTaCustomerSearch: setShowTaCustomerSearch, loggedInUser: loggedInUser, deleteTakeaway: deleteTakeaway, inventory: inventory, happyHours: happyHours }), view === "tables" && React.createElement(TableView, {
+  }), view === "dashboard" && React.createElement(DashboardView, { completedOrders: completedOrders, tableOrders: tableOrders, takeaway: takeaway, floors: floors, expenses: expenses, setView: setView, openTable: openTable, setShowTaCustomerSearch: setShowTaCustomerSearch, loggedInUser: loggedInUser, deleteTakeaway: deleteTakeaway, inventory: inventory, happyHours: happyHours, pendingOnlineOrders: pendingOnlineOrders, onChannelOrder: (src) => newTakeaway(null, src) }), view === "tables" && React.createElement(TableView, {
     orders: tableOrders,
     onSelect: openTable,
     onNewTakeaway: () => setShowTaCustomerSearch(true),
@@ -19392,11 +19588,45 @@ function App() {
     setView: setView,
     setActiveTable: setActiveTable,
     menuData: menuData
-  }), view === "online_orders" && /*#__PURE__*/React.createElement(OnlineOrdersView, {
-    onAccept: order => {
-      const id = taRef.current++;
-      setTakeaway(t => [...t, { id, items:order.items||[], time:new Date(), done:false, customerName:order.name||null, customerPhone:order.phone||null, customerStreet:order.street||null, customerPlz:order.plz||null, customerCity:order.city||null, source:order.source||"Online" }]);
+  }), view === "online_orders" && /*#__PURE__*/React.createElement(OnlineOrdersLive, {
+    pendingOrders: pendingOnlineOrders,
+    onAccept: (order, prepMin) => {
+      // 1) note-Marker auf [OK:min] setzen (lokal + Cloud)
+      var cleanNote = String(order.note||'').replace('[NEU]','').replace(/^[\s·]+/,'').trim();
+      var newNote = '[OK:'+prepMin+'] · '+cleanNote;
+      // lokal in completedOrders aktualisieren
+      setCompletedOrders(function(list){
+        return list.map(function(o){
+          return String(o.bonNr)===String(order.bonNr) ? Object.assign({}, o, { note:newNote }) : o;
+        });
+      });
+      // Cloud aktualisieren
+      if (typeof updateOrderNoteInSupabase === "function") updateOrderNoteInSupabase(order.bonNr, newNote);
+      // 2) als Takeaway anlegen (erscheint in Takeaway + Küche)
+      var id = taRef.current++;
+      var deliv = isOnlineDeliv(order);
+      setTakeaway(function(t){ return t.concat([{
+        id: id, items: order.items||[], time: new Date(), done: false,
+        customerName: order.customerName||null, customerPhone: order.customerPhone||null,
+        customerStreet: order.customerStreet||null,
+        source: order.source||"WEBSHOP", bonNr: order.bonNr,
+        orderType: deliv ? "Lieferung" : "Abholung",
+        prepMin: prepMin, onlineNote: cleanNote
+      }]); });
+      // 3) zur Takeaway-Seite
       setView("tables");
+      setPendingOnlinePopup(null);
+    },
+    onReject: (order) => {
+      var cleanNote = String(order.note||'').replace('[NEU]','').replace(/^[\s·]+/,'').trim();
+      var newNote = '[ABGELEHNT] · '+cleanNote;
+      setCompletedOrders(function(list){
+        return list.map(function(o){
+          return String(o.bonNr)===String(order.bonNr) ? Object.assign({}, o, { note:newNote, storniert:true }) : o;
+        });
+      });
+      if (typeof updateOrderNoteInSupabase === "function") updateOrderNoteInSupabase(order.bonNr, newNote);
+      setPendingOnlinePopup(null);
     }
   }), view === "kassenbuch" && /*#__PURE__*/React.createElement(KassenbuchView, {
     completedOrders: completedOrders, expenses: expenses, printerSettings: printerSettings,
@@ -19445,7 +19675,31 @@ function App() {
   ), view === "kiosk" && React.createElement(KioskView, {menuData:menuData}
   ), view === "personalplanung" && React.createElement(PersonalplanungView, null
   ), view === "saas_dashboard" && React.createElement(SaasDashboardView, null
-  ), bonModal && /*#__PURE__*/React.createElement(BonModal, _extends({}, bonModal, {
+  ),
+  // ===== 🔔 POPUP: Neue Online-Bestellung wartet auf Annahme =====
+  pendingOnlinePopup && /*#__PURE__*/React.createElement("div", {
+    style: { position:"fixed", inset:0, zIndex:9999, background:"rgba(0,0,0,.55)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 },
+    onClick: () => setPendingOnlinePopup(null)
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: (e)=>e.stopPropagation(),
+    style: { background:"#fff", borderRadius:20, padding:"26px 22px", maxWidth:360, width:"100%", textAlign:"center", boxShadow:"0 20px 60px #0006", animation:"none" }
+  },
+    React.createElement("div", { style:{ fontSize:54, marginBottom:6 } }, "🔔"),
+    React.createElement("div", { style:{ fontWeight:900, fontSize:20, color:"#C84B31", marginBottom:4 } }, "Neue Online-Bestellung!"),
+    React.createElement("div", { style:{ fontSize:15, fontWeight:700, color:"#333", marginBottom:2 } }, (pendingOnlinePopup.customerName||"Gast")),
+    React.createElement("div", { style:{ display:"inline-block", background:"#fff3e0", color:"#e65100", fontSize:13, fontWeight:700, padding:"3px 12px", borderRadius:20, margin:"6px 0" } }, isOnlineDeliv(pendingOnlinePopup) ? "🛵 Lieferung" : "🥡 Abholung"),
+    React.createElement("div", { style:{ fontSize:13, color:"#666", margin:"4px 0 8px", lineHeight:1.5 } }, (pendingOnlinePopup.items||[]).map(i=>(i.qty||1)+"× "+(i.name||"")).join(", ")),
+    React.createElement("div", { style:{ fontWeight:900, fontSize:22, color:"#2e7d32", marginBottom:16 } }, (parseFloat(pendingOnlinePopup.total)||0).toFixed(2)+" €"),
+    React.createElement("button", {
+      onClick: () => { setView("online_orders"); setPendingOnlinePopup(null); },
+      style: { width:"100%", padding:14, borderRadius:12, border:"none", background:"#2e7d32", color:"#fff", fontWeight:800, fontSize:16, cursor:"pointer", fontFamily:"inherit", marginBottom:8 }
+    }, "Jetzt ansehen & annehmen"),
+    React.createElement("button", {
+      onClick: () => setPendingOnlinePopup(null),
+      style: { width:"100%", padding:11, borderRadius:12, border:"2px solid #ddd", background:"#fff", color:"#888", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }
+    }, "Später")
+  )),
+  bonModal && /*#__PURE__*/React.createElement(BonModal, _extends({}, bonModal, {
     printerSettings: printerSettings,
     onClose: () => setBonModal(null),
     onPay: () => startPay(bonModal.tableId, bonModal.items, bonModal.total),
@@ -20714,6 +20968,35 @@ async function updateOrderInSupabase(order) {
   } catch(e) { console.warn('updateOrder error:', e.message); return false; }
 }
 
+// Online-Bestellung: nur das note-Feld aktualisieren (Annahme/Ablehnung).
+// newNote z.B. "[OK:30] · 🥡 ABHOLUNG ..." oder "[ABGELEHNT] ..."
+async function updateOrderNoteInSupabase(bonNr, newNote) {
+  if (!bonNr) return false;
+  try {
+    var resp = await fetch(SUPA_URL + '/rest/v1/eatdesi_orders?location_id=eq.' + LOCATION_ID + '&bon_nr=eq.' + encodeURIComponent(String(bonNr)), {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPA_KEY,
+        'Authorization': 'Bearer ' + SUPA_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ note: newNote })
+    });
+    return resp.ok;
+  } catch(e) {
+    console.warn('updateOrderNote error:', e.message);
+    // bei Fehler in pending_push-Queue (Daten gehen nicht verloren)
+    try {
+      var pend = JSON.parse(localStorage.getItem('eatdesi_pending_notepush') || '[]');
+      pend = pend.filter(function(p){ return p && p.bonNr !== bonNr; });
+      pend.push({ bonNr: bonNr, note: newNote, ts: Date.now() });
+      localStorage.setItem('eatdesi_pending_notepush', JSON.stringify(pend));
+    } catch(e2) {}
+    return false;
+  }
+}
+
 // Bestellungen von Supabase laden
 async function pullOrdersFromSupabase() {
   try {
@@ -20785,6 +21068,7 @@ function mergeRemoteOrders(remoteOrders) {
     remoteByBon[String(ro.bon_nr || '')] = {
       bonNr: ro.bon_nr, tableId: ro.table_id, items: items, total: ro.total,
       payMethod: ro.payment, customerName: ro.customer_name, customerPhone: ro.customer_phone,
+      customerStreet: ro.customer_street || null, note: ro.note || '',
       source: ro.source || 'POS', time: ro.created_at, synced: true,
       storniert: ro.storniert || false, stornoVon: ro.storno_von || null, stornoZeit: ro.storno_zeit || null
     };
