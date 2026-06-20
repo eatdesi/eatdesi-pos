@@ -109,9 +109,14 @@ h2.head{font-family:'Fraunces',serif;font-weight:900;font-size:clamp(30px,5vw,46
 
 /* ---------- MENU / SHOP ---------- */
 .shopbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:24px}
-.mode-pills{display:flex;gap:6px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:999px;padding:4px}
-.mode-pills button{padding:9px 18px;border-radius:999px;font-size:14px;font-weight:600;color:var(--paper-2);transition:.18s}
+.mode-pills{display:flex;gap:5px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:999px;padding:4px;flex-wrap:nowrap;max-width:100%}
+.mode-pills button{white-space:nowrap}
+.mode-pills button{padding:9px 14px;border-radius:999px;font-size:13.5px;font-weight:600;color:var(--paper-2);transition:.18s}
+@media(max-width:520px){.mode-pills button{padding:8px 9px;font-size:12.5px}}
 .mode-pills button.on{background:var(--gold);color:var(--ink)}
+.time-pills{display:flex;gap:6px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:12px;padding:4px}
+.time-pills button{flex:1;padding:11px 8px;border-radius:9px;font-size:13.5px;font-weight:600;color:var(--paper-2);transition:.18s;cursor:pointer;border:none;background:transparent;font-family:inherit}
+.time-pills button.on{background:var(--gold);color:var(--ink)}
 .shop{display:grid;grid-template-columns:190px 1fr;gap:30px;align-items:start}
 .catnav{position:sticky;top:84px;display:flex;flex-direction:column;gap:2px;max-height:calc(100vh - 110px);overflow-y:auto;padding-right:5px}
 .catnav button{text-align:left;padding:9px 12px;border-radius:9px;font-size:13.5px;font-weight:600;color:var(--paper-2);transition:.15s;border-left:2px solid transparent}
@@ -417,9 +422,17 @@ footer .fl:hover{color:var(--gold)}
     <div>
       <span class="eyebrow">Bad Wildungen · Indian Fusion Kitchen & Grill</span>
       <h1>Trendiges Essen.<br><em>Frisch. Indisch. Anders.</em></h1>
-      <p class="lede">Familie Sidhu bringt authentische indische Aromen mit modernen Food-Trends zusammen – Currys, Smashed Burger, Tacos, Pizza & mehr. Jetzt online bestellen: Abholung oder Lieferung.</p>
+      <p class="lede">Currys, Smashed Burger, Tacos, Pizza & mehr – frisch von Familie Sidhu. Jetzt online bestellen:</p>
+      <div class="shopbar" style="margin:6px 0 14px">
+        <div class="mode-pills" id="modePills">
+          <button data-mode="abholung" class="on">🥡 Abholung</button>
+          <button data-mode="lieferung">🛵 Lieferung</button>
+          <button data-mode="dinein">🍽️ Vor Ort</button>
+        </div>
+        <span style="font-size:13px;color:var(--paper-2);display:block;margin-top:8px" id="modeHint">Kostenlos abholen in der Brunnenallee 30</span>
+      </div>
       <div class="hero-cta">
-        <button class="btn-pri" onclick="openShopFromHero()">Speisekarte & Bestellen</button>
+        <button class="btn-pri" onclick="openShopFromHero()">📋 Speisekarte ansehen & bestellen</button>
         <a class="btn-ghost" href="#catering">Catering anfragen</a>
       </div>
       <div class="hero-badges">
@@ -535,15 +548,8 @@ footer .fl:hover{color:var(--gold)}
 <section class="sec alt" id="menu">
   <div class="wrap">
     <span class="eyebrow">Speisekarte</span>
-    <h2 class="head">Online bestellen</h2>
-    <div class="shopbar">
-      <div class="mode-pills" id="modePills">
-        <button data-mode="abholung" class="on">🥡 Abholung</button>
-        <button data-mode="lieferung">🛵 Lieferung</button>
-      </div>
-      <span style="font-size:13px;color:var(--paper-2)" id="modeHint">Kostenlos abholen in der Brunnenallee 30</span>
-    </div>
-    <!-- Toggle: Speisekarte anzeigen/schließen -->
+    <h2 class="head">Unsere Gerichte</h2>
+    <!-- Toggle: Speisekarte anzeigen/schließen (Bestellweg wird oben gewählt) -->
     <button id="menuToggle" class="menu-toggle" onclick="toggleShop()">📋 Speisekarte ansehen & bestellen</button>
     <div class="shop" id="shopWrap" style="display:none">
       <nav class="catnav" id="catNav"></nav>
@@ -864,33 +870,68 @@ function renderCartList(){
    CHECKOUT -> Supabase
    ==================================================================== */
 function goCheckout(){
-  const sub=cartTotal(), isDeliv=mode==='lieferung';
+  const sub=cartTotal(), isDeliv=mode==='lieferung', isDine=mode==='dinein';
   const z=ZONES[activeZone]||{fee:0}; const fee=isDeliv?z.fee:0, tot=sub+fee;
-  $('#drawerTitle').textContent='Kasse · '+(isDeliv?'Lieferung':'Abholung');
+  const modeTitle = isDeliv?'Lieferung':(isDine?'Vor Ort essen':'Abholung');
+  const timeWord = isDeliv?'Lieferung':(isDine?'Ankunft':'Abholung');
+  $('#drawerTitle').textContent='Kasse · '+modeTitle;
   $('#cartList').innerHTML=`
     <div class="field"><label>Name *</label><input id="f_name" placeholder="Dein Name"><div class="err">Bitte Namen angeben</div></div>
     <div class="field"><label>Telefon *</label><input id="f_phone" inputmode="tel" placeholder="Für Rückfragen"><div class="err">Bitte Telefonnummer angeben</div></div>
     ${isDeliv?`<div class="field"><label>Straße & Hausnummer *</label><input id="f_street" placeholder="z.B. Brunnenallee 12"><div class="err">Bitte Adresse angeben</div></div>
       <div class="row2"><div class="field"><label>PLZ *</label><input id="f_zip" inputmode="numeric" placeholder="34537"><div class="err">PLZ</div></div>
       <div class="field"><label>Ort *</label><input id="f_city" value="Bad Wildungen"><div class="err">Ort</div></div></div>`
-      :`<div class="deliv-note">🥡 Abholung: <b>eatDeSi, Brunnenallee 30, Bad Wildungen</b>. Wir melden uns, sobald deine Bestellung fertig ist.</div>`}
+      :isDine?`<div class="field"><label>Anzahl Personen *</label><input id="f_guests" inputmode="numeric" placeholder="z.B. 4"><div class="err">Bitte Personenzahl angeben</div></div>
+      <div class="deliv-note">🍽️ Wir reservieren deinen Tisch und bereiten dein Essen vor. Die genaue Zeit bestätigen wir dir.</div>`
+      :`<div class="deliv-note">🥡 Abholung: <b>eatDeSi, Brunnenallee 30, Bad Wildungen</b>.</div>`}
+
+    <div class="field"><label>Wann? *</label>
+      <div class="time-pills" id="timePills">
+        <button type="button" data-time="asap" class="on" onclick="setWishTime('asap')">⚡ Schnellstmöglich</button>
+        <button type="button" data-time="later" onclick="setWishTime('later')">📅 Datum & Uhrzeit</button>
+      </div>
+      <input id="f_wishtime" type="datetime-local" style="display:none;margin-top:8px" />
+      <div style="font-size:11.5px;color:var(--paper-2);margin-top:5px">${isDine?'Du kannst auch für einen späteren Tag reservieren. ':''}Wir bestätigen dir die genaue ${timeWord}szeit.</div>
+    </div>
+
     <div class="field"><label>Zahlungsart</label><select id="f_pay">
-      <option value="bar">Bar bei ${isDeliv?'Lieferung':'Abholung'}</option><option value="ec">EC/Karte bei ${isDeliv?'Lieferung':'Abholung'}</option></select></div>
-    <div class="field"><label>Anmerkung (optional)</label><textarea id="f_note" rows="2" placeholder="z.B. ohne Zwiebeln, klingeln bei…"></textarea></div>`;
-  $('#drawerFoot').innerHTML=`<div class="sumrow tot"><span>Zu zahlen</span><b>${eur(tot)}</b></div>
+      <option value="bar">Bar bei ${isDine?'vor Ort':timeWord}</option><option value="ec">EC/Karte bei ${isDine?'vor Ort':timeWord}</option></select></div>
+    <div class="field"><label>Anmerkung (optional)</label><textarea id="f_note" rows="2" placeholder="z.B. ohne Zwiebeln, Allergien…"></textarea></div>`;
+  $('#drawerFoot').innerHTML=`<div class="sumrow tot"><span>${isDine?'Summe (Vorbestellung)':'Zu zahlen'}</span><b>${eur(tot)}</b></div>
     <button class="checkout" id="placeBtn" onclick="placeOrder()">Zahlungspflichtig bestellen · ${eur(tot)}</button>
     <button style="width:100%;margin-top:9px;color:var(--paper-2);font-size:13px;font-weight:600" onclick="renderCartList()">← Zurück zum Warenkorb</button>`;
+}
+function setWishTime(t){
+  document.querySelectorAll('#timePills button').forEach(b=>b.classList.toggle('on',b.dataset.time===t));
+  const inp=$('#f_wishtime'); if(inp){
+    inp.style.display = t==='later'?'block':'none';
+    if(t==='later'){
+      try{ var n=new Date(); n.setMinutes(n.getMinutes()-n.getTimezoneOffset()); inp.min=n.toISOString().slice(0,16); }catch(e){}
+    }
+  }
 }
 function bad(id,cond){const f=document.getElementById(id).closest('.field');f.classList.toggle('bad',cond);return cond;}
 
 async function placeOrder(){
-  const isDeliv=mode==='lieferung';
+  const isDeliv=mode==='lieferung', isDine=mode==='dinein';
   const name=$('#f_name').value.trim(), phone=$('#f_phone').value.trim();
   let inv=false; inv=bad('f_name',!name)||inv; inv=bad('f_phone',phone.length<5)||inv;
-  let street='',zip='',city='';
+  let street='',zip='',city='',guests='';
   if(isDeliv){street=$('#f_street').value.trim();zip=$('#f_zip').value.trim();city=$('#f_city').value.trim();
     inv=bad('f_street',!street)||inv; inv=bad('f_zip',!zip)||inv; inv=bad('f_city',!city)||inv;}
+  if(isDine){guests=$('#f_guests').value.trim(); inv=bad('f_guests',!guests)||inv;}
   if(inv){toast('Bitte Pflichtfelder ausfüllen');return;}
+
+  // Wunschzeit
+  let wishTime='asap', wishLabel='Schnellstmöglich';
+  var tp=document.querySelector('#timePills button.on');
+  if(tp && tp.dataset.time==='later'){ var wt=$('#f_wishtime').value; if(wt){
+    wishTime=wt;
+    try{ var dt=new Date(wt); var heute=new Date(); var sameDay=dt.toDateString()===heute.toDateString();
+      var hh=String(dt.getHours()).padStart(2,'0'), mm=String(dt.getMinutes()).padStart(2,'0');
+      wishLabel = sameDay ? ('um '+hh+':'+mm+' Uhr') : (dt.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'})+' um '+hh+':'+mm+' Uhr');
+    }catch(e){ wishLabel='um '+wt; }
+  }}
 
   const btn=$('#placeBtn');btn.disabled=true;btn.textContent='Wird gesendet…';
   const pay=$('#f_pay').value, note=$('#f_note').value.trim();
@@ -899,9 +940,12 @@ async function placeOrder(){
   const items=cart.map(c=>({name:c.name,nr:c.nr,qty:c.qty,price:c.unit,taxRate:c.taxRate||'food',options:c.opts.map(o=>({label:o.label,value:o.name,price:o.price})),note:''}));
   const sub=cartTotal(), fee=isDeliv?z.fee:0, total=sub+fee;
   const addr=isDeliv?`${street}, ${zip} ${city}`:'';
-  const orderNote=[isDeliv?('🛵 LIEFERUNG · '+z.name):'🥡 ABHOLUNG',addr,note].filter(Boolean).join(' · ');
+  // Bestellweg-Text
+  const wayText = isDeliv ? ('🛵 LIEFERUNG · '+z.name) : (isDine ? ('🍽️ VOR ORT · '+guests+' Pers.') : '🥡 ABHOLUNG');
+  // [NEU] = wartet auf Annahme im POS. Wird nach Annahme zu [OK:Minuten] geändert.
+  const orderNote=['[NEU]',wayText,'⏰ '+wishLabel,addr,note].filter(Boolean).join(' · ');
 
-  const body={location_id:LOCATION_ID,bon_nr:bonNr,table_id:isDeliv?('Lieferung '+z.name):'Abholung',
+  const body={location_id:LOCATION_ID,bon_nr:bonNr,table_id:isDeliv?('Lieferung '+z.name):(isDine?('Vor Ort '+guests+'P'):'Abholung'),
     items:JSON.stringify(items),total,payment:pay,customer_name:name,customer_phone:phone,
     customer_street:addr||null,note:orderNote,source:'WEBSHOP',created_at:new Date().toISOString(),storniert:false};
   try{
@@ -919,10 +963,12 @@ async function retryMinimal(bonNr,tableId,items,total,pay,name,phone,note){
     return r.ok||r.status===201||r.status===409;}catch(e){return false;}
 }
 function showDone(bonNr,total,isDeliv){
+  const isDine=mode==='dinein';
+  const word=isDeliv?'Lieferzeit':(isDine?'Tischzeit':'Abholzeit');
   $('#drawerTitle').textContent='Bestellt!';
   $('#cartList').innerHTML=`<div class="done"><div class="ic">✓</div><h3>Danke für deine Bestellung!</h3>
-    <p>Sie ist direkt in unserer Küche eingegangen.</p><div class="bn">${bonNr}</div>
-    <p>${isDeliv?'🛵 Wir liefern zu dir – ca. 30–45 Min.':'🥡 Abholbereit in ca. 25–35 Min.'}</p>
+    <p>Wir prüfen sie gerade und bestätigen gleich deine ${word}.</p><div class="bn">${bonNr}</div>
+    <p style="color:var(--gold-glow)">⏳ Warte auf Bestätigung…</p>
     <p style="margin-top:8px">Gesamt: <b style="color:var(--gold-glow)">${eur(total)}</b></p></div>`;
   $('#drawerFoot').innerHTML=`<button class="checkout" onclick="closeCart()">Fertig</button>`;
 }
@@ -988,7 +1034,7 @@ async function pushRequest(p){
 function openCart(){renderCartList();$('#drawer').classList.add('show');$('#drawerScrim').classList.add('show');$('#drawerScrim').style.display='block';document.body.style.overflow='hidden';}
 function closeCart(){$('#drawer').classList.remove('show');$('#drawerScrim').classList.remove('show');$('#drawerScrim').style.display='none';document.body.style.overflow='';$('#drawerTitle').textContent='Dein Warenkorb';}
 function setMode(m){mode=m;document.querySelectorAll('#modePills button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
-  $('#modeHint').textContent= m==='lieferung'?('Lieferung ab '+eur(ZONES[0].min)+' · Zonen wählbar an der Kasse'):'Kostenlos abholen in der Brunnenallee 30';
+  $('#modeHint').textContent= m==='lieferung'?('Lieferung ab '+eur(ZONES[0].min)+' · Zonen wählbar an der Kasse'):(m==='dinein'?'Tisch reservieren & vorbestellen – wir bestätigen deine Zeit':'Kostenlos abholen in der Brunnenallee 30');
   renderCartList();}
 document.querySelectorAll('#modePills button').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
 
