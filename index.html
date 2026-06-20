@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v77</title>
+<title>eatDeSi POS v79</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v77';",
+    "var CACHE='eatdesi-v79';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6602,8 +6602,10 @@ const BTPrint = {
 // ONLINE-BESTELLUNG STATUS-HELPER
 // Website schickt note mit Marker: "[NEU]" = wartet auf Annahme, "[OK:30]" = angenommen, prep 30 Min.
 function isWebOrder(o){ return o && (o.source === 'WEBSHOP' || o.source === 'WEBSITE'); }
-function isPendingOnline(o){ return isWebOrder(o) && typeof o.note === 'string' && o.note.indexOf('[NEU]') !== -1; }
-function isAcceptedOnline(o){ return isWebOrder(o) && typeof o.note === 'string' && o.note.indexOf('[OK:') !== -1; }
+// WICHTIG: [NEU]-Marker reicht — source kann durch Sync/Retry verloren gehen.
+// Nur die Website schreibt jemals "[NEU]" ins note-Feld.
+function isPendingOnline(o){ return o && typeof o.note === 'string' && o.note.indexOf('[NEU]') !== -1; }
+function isAcceptedOnline(o){ return o && typeof o.note === 'string' && o.note.indexOf('[OK:') !== -1; }
 function onlinePrepMin(o){ try{ var m=(o.note||'').match(/\[OK:(\d+)\]/); return m?parseInt(m[1]):null; }catch(e){return null;} }
 function isOnlineDeliv(o){ return o && ((o.customerStreet) || (typeof o.note==='string' && o.note.indexOf('LIEFERUNG')!==-1) || (typeof o.tableId==='string' && o.tableId.indexOf('Lieferung')!==-1)); }
 
@@ -18131,12 +18133,15 @@ function App() {
     try { if (navigator.vibrate) navigator.vibrate([200,100,200]); } catch(e){}
   }, []);
   React.useEffect(() => {
+    console.log('🔔 CHECK: ' + (completedOrders||[]).length + ' orders gesamt, davon ' + pendingOnlineOrders.length + ' pending [NEU]', pendingOnlineOrders.map(o=>o.bonNr));
     if (_seenOnlineRef.current === null) {
       _seenOnlineRef.current = new Set(pendingOnlineOrders.map(o => String(o.bonNr)));
+      console.log('🔔 Erststart: ' + _seenOnlineRef.current.size + ' bereits gesehen (kein Alarm)');
       return;
     }
     var fresh = pendingOnlineOrders.filter(o => !_seenOnlineRef.current.has(String(o.bonNr)));
     if (fresh.length > 0) {
+      console.log('🔔 NEU erkannt! ' + fresh.length + ' frische Bestellung(en):', fresh.map(o=>o.bonNr));
       fresh.forEach(o => _seenOnlineRef.current.add(String(o.bonNr)));
       playNotifySound();
       setPendingOnlinePopup(fresh[fresh.length - 1]);
@@ -21072,6 +21077,13 @@ function mergeRemoteOrders(remoteOrders) {
       source: ro.source || 'POS', time: ro.created_at, synced: true,
       storniert: ro.storniert || false, stornoVon: ro.storno_von || null, stornoZeit: ro.storno_zeit || null
     };
+    // DEBUG: jede Web/Online-relevante Order loggen
+    try {
+      var _n = ro.note || '';
+      if ((ro.source && String(ro.source).toUpperCase().indexOf('WEB')!==-1) || _n.indexOf('[NEU]')!==-1 || _n.indexOf('[OK:')!==-1) {
+        console.log('🔎 ORDER ' + ro.bon_nr + ' | source="' + ro.source + '" | table_id="' + ro.table_id + '" | note="' + _n + '" | hat[NEU]=' + (_n.indexOf('[NEU]')!==-1));
+      }
+    } catch(e){}
   });
 
   // lokale Orders die NOCH NICHT in der Cloud sind (offline erstellt) behalten
