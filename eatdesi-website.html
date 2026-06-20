@@ -351,6 +351,11 @@ footer .fl:hover{color:var(--gold)}
 .gadmin input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:8px;padding:9px;color:var(--cream);font-size:13px;margin-bottom:6px}
 .upbtn{font-size:12px;font-weight:600;color:var(--gold);border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:rgba(200,160,78,.08);display:inline-flex;gap:6px;cursor:pointer}
 
+/* ---------- MENU TOGGLE ---------- */
+.menu-toggle{display:block;width:100%;max-width:420px;margin:0 0 22px;background:var(--gold);color:var(--ink);font-weight:700;font-size:16px;padding:15px 22px;border-radius:13px;box-shadow:var(--shadow);transition:.18s}
+.menu-toggle:hover{background:var(--gold-glow)}
+.menu-toggle.open{background:rgba(255,255,255,.06);color:var(--paper);border:1px solid var(--line);box-shadow:none}
+
 /* ---------- LEGAL OVERLAY ---------- */
 .legal{position:fixed;inset:0;z-index:120;background:var(--ink);display:none;flex-direction:column}
 .legal.show{display:flex}
@@ -414,7 +419,7 @@ footer .fl:hover{color:var(--gold)}
       <h1>Trendiges Essen.<br><em>Frisch. Indisch. Anders.</em></h1>
       <p class="lede">Familie Sidhu bringt authentische indische Aromen mit modernen Food-Trends zusammen – Currys, Smashed Burger, Tacos, Pizza & mehr. Jetzt online bestellen: Abholung oder Lieferung.</p>
       <div class="hero-cta">
-        <button class="btn-pri" onclick="jump('menu')">Speisekarte & Bestellen</button>
+        <button class="btn-pri" onclick="openShopFromHero()">Speisekarte & Bestellen</button>
         <a class="btn-ghost" href="#catering">Catering anfragen</a>
       </div>
       <div class="hero-badges">
@@ -431,7 +436,7 @@ footer .fl:hover{color:var(--gold)}
       <div class="hc-row"><span class="k">Ruhetag</span><span class="v">Dienstag</span></div>
       <div class="hc-row"><span class="k">Abholung</span><span class="v">Kostenlos</span></div>
       <div class="hc-row"><span class="k">Lieferung ab</span><span class="v">9,90 € · Zone 1</span></div>
-      <button class="btn-pri" style="width:100%;margin-top:18px" onclick="jump('menu')">Bestellung starten →</button>
+      <button class="btn-pri" style="width:100%;margin-top:18px" onclick="openShopFromHero()">Bestellung starten →</button>
     </div>
   </div>
 </section>
@@ -538,7 +543,9 @@ footer .fl:hover{color:var(--gold)}
       </div>
       <span style="font-size:13px;color:var(--paper-2)" id="modeHint">Kostenlos abholen in der Brunnenallee 30</span>
     </div>
-    <div class="shop">
+    <!-- Toggle: Speisekarte anzeigen/schließen -->
+    <button id="menuToggle" class="menu-toggle" onclick="toggleShop()">📋 Speisekarte ansehen & bestellen</button>
+    <div class="shop" id="shopWrap" style="display:none">
       <nav class="catnav" id="catNav"></nav>
       <div class="menu-col" id="menuCol"></div>
     </div>
@@ -662,9 +669,9 @@ const LOCATION_ID = 'eatdesi-bw';
 
 /* ---- LIEFERZONEN (aus eatdesi-bw.de; später im Admin editierbar) ---- */
 let ZONES = [
-  {name:'Zone 1', min:9.90, fee:2.50},
-  {name:'Zone 2', min:14.90, fee:2.90},
-  {name:'Zone 3', min:19.90, fee:3.50}
+  {name:'Zone 1', min:9.90, fee:2.50, plz:'34537', orte:'Bad Wildungen (Kernstadt)'},
+  {name:'Zone 2', min:14.90, fee:2.90, plz:'34537', orte:'Reinhardshausen, Reitzenhagen'},
+  {name:'Zone 3', min:19.90, fee:3.50, plz:'34537, 34549', orte:'Wega, Mandern, Albertshausen'}
 ];
 let activeZone = 0; // gewählte Zone für Lieferung
 
@@ -711,20 +718,47 @@ function checkOpen(){
 function indexMenu(){ window._byId={}; for(const c of Object.keys(MENU)){for(const it of MENU[c]){it._cat=c;window._byId[it.id]=it;}} }
 // nur Artikel zeigen, die im Webshop sichtbar sind (channel both/web; fehlt = both)
 function webVisible(it){ return (it.channel||'both')!=='house'; }
-function renderMenu(){
-  let nav='',col='';
+let activeCat=null; // aktuell gewählte Kategorie (nur eine sichtbar)
+function visibleCats(){
+  const list=[];
   for(const grp of Object.keys(CAT_GROUPS)){
-    let grpHasItems=false, grpNav='';
     for(const cat of CAT_GROUPS[grp]){
       const all=MENU[cat]; if(!all||!all.length)continue;
-      const items=all.filter(webVisible); if(!items.length)continue;
-      grpHasItems=true;
-      grpNav+=`<button data-cat="${slug(cat)}" onclick="jumpCat('${slug(cat)}')">${cat}</button>`;
-      col+=`<div class="cat-block" id="cat-${slug(cat)}"><div class="cat-head"><h3>${cat}</h3><span class="count">${items.length} Gerichte</span></div><div class="items">${items.map(renderCard).join('')}</div></div>`;
+      if(all.filter(webVisible).length) list.push({grp,cat});
     }
-    if(grpHasItems) nav+=`<div class="grp">${grp}</div>`+grpNav;
   }
-  $('#catNav').innerHTML=nav; $('#menuCol').innerHTML=col;
+  return list;
+}
+function renderMenu(){
+  const cats=visibleCats();
+  if(!cats.length){$('#catNav').innerHTML='';$('#menuCol').innerHTML='<p style="color:var(--paper-2)">Aktuell keine Artikel verfügbar.</p>';return;}
+  // aktive Kategorie sicherstellen
+  if(!activeCat || !cats.some(c=>c.cat===activeCat)) activeCat=cats[0].cat;
+  // Kategorie-Navigation (Buttons)
+  let nav='';
+  let lastGrp='';
+  for(const {grp,cat} of cats){
+    if(grp!==lastGrp){ nav+=`<div class="grp">${grp}</div>`; lastGrp=grp; }
+    nav+=`<button data-cat="${slug(cat)}" class="${cat===activeCat?'on':''}" onclick="selectCat('${cat.replace(/'/g,"\\'")}')">${cat}</button>`;
+  }
+  $('#catNav').innerHTML=nav;
+  // nur die aktive Kategorie anzeigen
+  const items=(MENU[activeCat]||[]).filter(webVisible);
+  $('#menuCol').innerHTML=`<div class="cat-block"><div class="cat-head"><h3>${activeCat}</h3><span class="count">${items.length} Gerichte</span></div><div class="items">${items.map(renderCard).join('')}</div></div>`;
+}
+function selectCat(cat){ activeCat=cat; renderMenu();
+  // auf Mobile zum Menü-Anfang scrollen
+  const mc=document.getElementById('menuCol'); if(mc){const y=mc.getBoundingClientRect().top+window.scrollY-80; window.scrollTo({top:y,behavior:'smooth'});}
+}
+function toggleShop(){
+  const w=$('#shopWrap'), b=$('#menuToggle');
+  if(w.style.display==='none'){ w.style.display='grid'; b.textContent='✕ Speisekarte schließen'; b.classList.add('open'); renderMenu(); }
+  else { w.style.display='none'; b.textContent='📋 Speisekarte ansehen & bestellen'; b.classList.remove('open'); }
+}
+function openShopFromHero(){
+  const w=$('#shopWrap'), b=$('#menuToggle');
+  if(w.style.display==='none'){ w.style.display='grid'; b.textContent='✕ Speisekarte schließen'; b.classList.add('open'); renderMenu(); }
+  jump('menu');
 }
 function renderCard(it){
   const hasOpt=it.options&&it.options.length;
@@ -814,8 +848,9 @@ function renderCartList(){
   const belowMin=isDeliv && sub<z.min;
   let zoneSel='';
   if(isDeliv){
-    zoneSel=`<div class="field" style="margin-bottom:10px"><label>Liefergebiet</label><select id="zoneSel" onchange="activeZone=this.value;renderCartList()">
-      ${ZONES.map((z,i)=>`<option value="${i}" ${i==activeZone?'selected':''}>${z.name} · Min ${eur(z.min)} · Gebühr ${eur(z.fee)}</option>`).join('')}</select></div>`;
+    zoneSel=`<div class="field" style="margin-bottom:10px"><label>Liefergebiet – wähle deinen Ort</label><select id="zoneSel" onchange="activeZone=this.value;renderCartList()">
+      ${ZONES.map((z,i)=>`<option value="${i}" ${i==activeZone?'selected':''}>${z.name}${z.orte?' ('+z.orte+')':''} · Min ${eur(z.min)} · ${eur(z.fee)}</option>`).join('')}</select>
+      ${z.plz?`<div style="font-size:11px;color:var(--paper-2);margin-top:5px">PLZ dieser Zone: ${z.plz}</div>`:''}</div>`;
   }
   foot.innerHTML=`${zoneSel}
     <div class="sumrow"><span>Zwischensumme</span><span>${eur(sub)}</span></div>
@@ -957,10 +992,7 @@ function setMode(m){mode=m;document.querySelectorAll('#modePills button').forEac
   renderCartList();}
 document.querySelectorAll('#modePills button').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
 
-function spy(){const blocks=[...document.querySelectorAll('.cat-block')];let cur=blocks[0];
-  for(const b of blocks){if(b.getBoundingClientRect().top<150)cur=b;}
-  if(cur){const s=cur.id.replace('cat-','');document.querySelectorAll('#catNav button').forEach(x=>x.classList.toggle('on',x.dataset.cat===s));}}
-window.addEventListener('scroll',()=>{clearTimeout(window._sp);window._sp=setTimeout(spy,80);},{passive:true});
+// Scroll-Spy nicht mehr nötig – es wird immer nur eine Kategorie angezeigt.
 
 /* ====================================================================
    CONFIG (Supabase pos_state: eatdesi-bw_websiteconfig)
@@ -1045,10 +1077,15 @@ async function saveConfig(){
   }catch(e){toast('⚠️ Speichern fehlgeschlagen');}
 }
 function renderOffers(){
-  $('#offersWrap').innerHTML=OFFERS.map(o=>`<div class="ocard"><span class="tagm">${o.tag}</span>${o.big?`<div class="big">${o.big}</div>`:''}<h3>${o.title}</h3><p>${o.text}</p></div>`).join('')||'<p style="color:var(--paper-2)">Aktuell keine Angebote.</p>';
+  const vis=OFFERS.filter(o=>o.active!==false);
+  $('#offersWrap').innerHTML=vis.map(o=>`<div class="ocard"><span class="tagm">${o.tag}</span>${o.big?`<div class="big">${o.big}</div>`:''}<h3>${o.title}</h3><p>${o.text}</p></div>`).join('')||'<p style="color:var(--paper-2)">Aktuell keine Angebote.</p>';
+  // ganze Sektion ausblenden, wenn nichts sichtbar
+  const sec=document.getElementById('angebote'); if(sec)sec.style.display=vis.length?'':'none';
 }
 function renderEvents(){
-  $('#eventsWrap').innerHTML=EVENTS.map(e=>`<div class="ocard"><span class="tagm">${e.tag}</span><h3>${e.title}</h3><p>${e.text}</p></div>`).join('')||'<p style="color:var(--paper-2)">Aktuell keine Veranstaltungen.</p>';
+  const vis=EVENTS.filter(e=>e.active!==false);
+  $('#eventsWrap').innerHTML=vis.map(e=>`<div class="ocard"><span class="tagm">${e.tag}</span><h3>${e.title}</h3><p>${e.text}</p></div>`).join('')||'<p style="color:var(--paper-2)">Aktuell keine Veranstaltungen.</p>';
+  const sec=document.getElementById('events'); if(sec)sec.style.display=vis.length?'':'none';
 }
 function renderGallery(){
   const g=$('#galGrid'); if(!g)return;
@@ -1250,20 +1287,27 @@ async function toggleReqStatus(i){
 /* ---- ZONES ---- */
 function drawZones(){
   $('#adminBody').innerHTML=`<div class="acard"><h3>Liefergebiete & Gebühren</h3>
-    <p class="hint">Pro Zone: Name, Mindestbestellwert (€) und Liefergebühr (€). Gilt sofort im Webshop nach Speichern.</p>
+    <p class="hint">Pro Zone: Name, Mindestbestellwert (€), Liefergebühr (€), Postleitzahl(en) und Ortsteile. Der Kunde wählt an der Kasse seinen Ort – die passende Zone wird automatisch gesetzt. Gilt sofort im Webshop nach Speichern.</p>
     <div id="zoneRows"></div>
     <button class="btn-add" onclick="addZone()">+ Zone hinzufügen</button>
     <div style="margin-top:18px"><button class="btn-save" onclick="saveConfig()">💾 Speichern</button></div></div>`;
   drawZoneRows();
 }
 function drawZoneRows(){
-  $('#zoneRows').innerHTML=ZONES.map((z,i)=>`<div class="zrow">
-    <div><div class="tlabel">Name</div><input value="${z.name}" oninput="ZONES[${i}].name=this.value"></div>
-    <div><div class="tlabel">Min €</div><input type="number" step="0.10" value="${z.min}" oninput="ZONES[${i}].min=parseFloat(this.value)||0"></div>
-    <div><div class="tlabel">Gebühr €</div><input type="number" step="0.10" value="${z.fee}" oninput="ZONES[${i}].fee=parseFloat(this.value)||0"></div>
-    <button class="btn-del" onclick="delZone(${i})">✕</button></div>`).join('');
+  $('#zoneRows').innerHTML=ZONES.map((z,i)=>`<div style="border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:12px">
+    <div class="zrow" style="margin-bottom:10px">
+      <div><div class="tlabel">Name</div><input value="${(z.name||'').replace(/"/g,'&quot;')}" oninput="ZONES[${i}].name=this.value"></div>
+      <div><div class="tlabel">Min €</div><input type="number" step="0.10" value="${z.min}" oninput="ZONES[${i}].min=parseFloat(this.value)||0"></div>
+      <div><div class="tlabel">Gebühr €</div><input type="number" step="0.10" value="${z.fee}" oninput="ZONES[${i}].fee=parseFloat(this.value)||0"></div>
+      <button class="btn-del" onclick="delZone(${i})">✕</button>
+    </div>
+    <div style="margin-bottom:8px"><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Postleitzahl(en) – mit Komma trennen</div>
+      <input style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:8px;padding:9px;color:var(--cream);font-size:13px" value="${(z.plz||'').replace(/"/g,'&quot;')}" placeholder="z.B. 34537, 34549" oninput="ZONES[${i}].plz=this.value"></div>
+    <div><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Ortsteile – mit Komma trennen</div>
+      <input style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:8px;padding:9px;color:var(--cream);font-size:13px" value="${(z.orte||'').replace(/"/g,'&quot;')}" placeholder="z.B. Reinhardshausen, Wega, Mandern" oninput="ZONES[${i}].orte=this.value"></div>
+    </div>`).join('');
 }
-function addZone(){ZONES.push({name:'Zone '+(ZONES.length+1),min:0,fee:0});drawZoneRows();}
+function addZone(){ZONES.push({name:'Zone '+(ZONES.length+1),min:0,fee:0,plz:'',orte:''});drawZoneRows();}
 function delZone(i){if(ZONES.length<=1){toast('Mindestens eine Zone nötig');return;}ZONES.splice(i,1);if(activeZone>=ZONES.length)activeZone=0;drawZoneRows();}
 
 /* ---- HOURS ---- */
@@ -1287,14 +1331,20 @@ function drawOffers(){
   drawOfferRows();
 }
 function drawOfferRows(){
-  $('#offerRows').innerHTML=OFFERS.map((o,i)=>`<div style="border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:11px">
-    <div class="itemedit"><div><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Tag (Label)</div><input class="zrow" style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px;color:var(--cream)" value="${o.tag}" oninput="OFFERS[${i}].tag=this.value"></div>
-    <div><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Große Zahl/Emoji</div><input style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px;color:var(--cream)" value="${o.big||''}" oninput="OFFERS[${i}].big=this.value"></div>
-    <button class="btn-del" onclick="delOffer(${i})">✕</button></div>
-    <div class="afield" style="margin:8px 0 0"><input style="width:100%;margin-bottom:7px" placeholder="Titel" value="${o.title}" oninput="OFFERS[${i}].title=this.value"></div>
-    <textarea style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px;color:var(--cream);font-size:13px;font-family:inherit" rows="2" placeholder="Beschreibung" oninput="OFFERS[${i}].text=this.value">${o.text}</textarea></div>`).join('');
+  $('#offerRows').innerHTML=OFFERS.map((o,i)=>{
+    const active=o.active!==false;
+    return `<div style="border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:11px;${active?'':'opacity:.55'}">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <button type="button" onclick="OFFERS[${i}].active=${!active};drawOfferRows()" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:700;padding:7px 13px;border-radius:8px;cursor:pointer;border:1px solid ${active?'var(--green)':'var(--line)'};background:${active?'rgba(91,122,58,.18)':'rgba(255,255,255,.03)'};color:${active?'#a4c46f':'var(--paper-2)'}">${active?'✓ Sichtbar':'◯ Ausgeblendet'}</button>
+      <button class="btn-del" onclick="delOffer(${i})">✕ Löschen</button>
+    </div>
+    <div class="itemedit"><div><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Tag (Label)</div><input style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px;color:var(--cream)" value="${(o.tag||'').replace(/"/g,'&quot;')}" oninput="OFFERS[${i}].tag=this.value"></div>
+    <div><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Große Zahl/Emoji</div><input style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px;color:var(--cream)" value="${(o.big||'').replace(/"/g,'&quot;')}" oninput="OFFERS[${i}].big=this.value"></div></div>
+    <div class="afield" style="margin:8px 0 0"><input style="width:100%;margin-bottom:7px" placeholder="Titel" value="${(o.title||'').replace(/"/g,'&quot;')}" oninput="OFFERS[${i}].title=this.value"></div>
+    <textarea style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px;color:var(--cream);font-size:13px;font-family:inherit" rows="2" placeholder="Beschreibung" oninput="OFFERS[${i}].text=this.value">${o.text||''}</textarea></div>`;
+  }).join('');
 }
-function addOffer(){OFFERS.push({tag:'Neu',big:'',title:'Neues Angebot',text:''});drawOfferRows();}
+function addOffer(){OFFERS.push({tag:'Neu',big:'',title:'Neues Angebot',text:'',active:true});drawOfferRows();}
 function delOffer(i){OFFERS.splice(i,1);drawOfferRows();}
 
 /* ---- EVENTS ---- */
@@ -1305,13 +1355,19 @@ function drawEvents(){
   drawEventRows();
 }
 function drawEventRows(){
-  $('#eventRows').innerHTML=EVENTS.map((e,i)=>`<div style="border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:11px">
-    <div class="itemedit"><div><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Tag (Label)</div><input style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px;color:var(--cream)" value="${e.tag}" oninput="EVENTS[${i}].tag=this.value"></div>
-    <div><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Titel</div><input style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px;color:var(--cream)" value="${e.title}" oninput="EVENTS[${i}].title=this.value"></div>
-    <button class="btn-del" onclick="delEvent(${i})">✕</button></div>
-    <textarea style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px;color:var(--cream);font-size:13px;font-family:inherit;margin-top:8px" rows="2" placeholder="Beschreibung" oninput="EVENTS[${i}].text=this.value">${e.text}</textarea></div>`).join('');
+  $('#eventRows').innerHTML=EVENTS.map((e,i)=>{
+    const active=e.active!==false;
+    return `<div style="border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:11px;${active?'':'opacity:.55'}">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <button type="button" onclick="EVENTS[${i}].active=${!active};drawEventRows()" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:700;padding:7px 13px;border-radius:8px;cursor:pointer;border:1px solid ${active?'var(--green)':'var(--line)'};background:${active?'rgba(91,122,58,.18)':'rgba(255,255,255,.03)'};color:${active?'#a4c46f':'var(--paper-2)'}">${active?'✓ Sichtbar':'◯ Ausgeblendet'}</button>
+      <button class="btn-del" onclick="delEvent(${i})">✕ Löschen</button>
+    </div>
+    <div class="itemedit"><div><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Tag (Label)</div><input style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px;color:var(--cream)" value="${(e.tag||'').replace(/"/g,'&quot;')}" oninput="EVENTS[${i}].tag=this.value"></div>
+    <div><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Titel</div><input style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px;color:var(--cream)" value="${(e.title||'').replace(/"/g,'&quot;')}" oninput="EVENTS[${i}].title=this.value"></div></div>
+    <textarea style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px;color:var(--cream);font-size:13px;font-family:inherit;margin-top:8px" rows="2" placeholder="Beschreibung" oninput="EVENTS[${i}].text=this.value">${e.text||''}</textarea></div>`;
+  }).join('');
 }
-function addEvent(){EVENTS.push({tag:'Neu',title:'Neue Veranstaltung',text:''});drawEventRows();}
+function addEvent(){EVENTS.push({tag:'Neu',title:'Neue Veranstaltung',text:'',active:true});drawEventRows();}
 function delEvent(i){EVENTS.splice(i,1);drawEventRows();}
 
 /* ---- GALERIE ---- */
