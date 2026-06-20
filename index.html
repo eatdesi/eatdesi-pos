@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v63</title>
+<title>eatDeSi POS v73</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26,7 +26,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v63';",
+    "var CACHE='eatdesi-v73';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6900,6 +6900,43 @@ var TSE = (function () {
 })();
 window.TSE = TSE;
 
+// ====== Zentrale AI-Funktion (aktuell Google Gemini, spaeter leicht austauschbar) ======
+// Liest den API-Key aus den Drucker-Einstellungen (printerSettings.geminiKey).
+// Rueckgabe: Antworttext (String). Bei Fehler: wirft Error.
+window.callAI = async function(prompt, maxTokens) {
+  var cfg = {};
+  try { cfg = JSON.parse(localStorage.getItem('eatdesi_printer') || '{}') || {}; } catch(e) {}
+  var provider = cfg.aiProvider || 'gemini';
+  var key = cfg.geminiKey || '';
+  if (!key) throw new Error('Kein Gemini API-Key. Bitte in Drucker-Einstellungen eingeben.');
+
+  if (provider === 'gemini') {
+    var model = cfg.geminiModel || 'gemini-2.0-flash';
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
+    var resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: maxTokens || 600, temperature: 0.7 }
+      })
+    });
+    if (!resp.ok) {
+      var errTxt = '';
+      try { var ej = await resp.json(); errTxt = (ej.error && ej.error.message) || ''; } catch(e){}
+      throw new Error('Gemini Fehler (' + resp.status + '): ' + errTxt);
+    }
+    var data = await resp.json();
+    var text = '';
+    try { text = data.candidates[0].content.parts[0].text; } catch(e) { text = ''; }
+    if (!text) throw new Error('Gemini: leere Antwort');
+    return text;
+  }
+
+  throw new Error('Unbekannter AI-Provider: ' + provider);
+};
+
+
 // genNr: fortlaufende Bon-Nummer (behebt fehlende Definition + dient TSE-Zähler)
 function genNr() {
   var n = 0;
@@ -8361,7 +8398,7 @@ function ArticleSplitSetup({
   );
 }
 
-function CheckoutModal({ label, items, total, directSplit, printerSettings, onClose, onComplete, gutscheine, setGutscheine }) {
+function CheckoutModal({ label, items, total, directSplit, printerSettings, onClose, onComplete, gutscheine, setGutscheine, customers, loyaltySettings, setCustomers }) {
   const sumupMode = printerSettings?.sumupMode || "same"; // "same" | "other"
   const [step, setStep] = React.useState(directSplit ? "split" : "main");
   const [gutscheinCode, setGutscheinCode] = React.useState("");
@@ -8377,6 +8414,15 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
     setGutscheinApplied(g); setGutscheinError("");
   };
   const [trinkgeld, setTrinkgeld] = React.useState("");
+  const [loyaltyPhone, setLoyaltyPhone] = React.useState("");
+  const [pointsRabatt, setPointsRabatt] = React.useState(0); // €-Rabatt durch eingeloeste Punkte
+  const [redeemedPts, setRedeemedPts] = React.useState(0);
+  const loyCfg = loyaltySettings || { pointsPerEuro:3, redeemRate:100, minRedeem:100, active:true };
+  const foundCustomer = (() => {
+    const q = (loyaltyPhone||"").trim().replace(/\s/g,"").toLowerCase();
+    if(!q) return null;
+    return (customers||[]).find(c => (c.phone||"").replace(/\s/g,"").toLowerCase()===q || (c.kundenNr||"").toLowerCase()===q) || null;
+  })();
   const [cashGiven, setCashGiven] = React.useState("");
   const [splitPersons, setSplitPersons] = React.useState(2);
   const [splitPaid, setSplitPaid] = React.useState([]);
@@ -8399,7 +8445,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
     if (rabattType === "euro") return Math.min(parseFloat(rabattVal)||0, total);
     return 0;
   })();
-  const totalNachRabatt = Math.max(0, total - rabattAmt);
+  const totalNachRabatt = Math.max(0, total - rabattAmt - (pointsRabatt||0));
   const tg = parseFloat(trinkgeld) || 0;
   const totalWithTG = totalNachRabatt + tg;
   const tax7 = calcTax7(items);
@@ -8542,6 +8588,45 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
 
         // -- MAIN STEP ----------------------------------------------
         step === "main" && /*#__PURE__*/React.createElement(React.Fragment, null,
+          // Stammkunde / Loyalty (Telefon oder Kundennummer)
+          /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", border:"2px solid #81c784", borderRadius:12, padding:12, marginBottom:12 } },
+            /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#2e7d32", marginBottom:8 } }, "\u2B50 Stammkunde? Treuepunkte sammeln"),
+            /*#__PURE__*/React.createElement("input", { type:"tel", value:loyaltyPhone, onChange:e=>setLoyaltyPhone(e.target.value),
+              placeholder:"\uD83D\uDCF1 Handynummer (= Kundennummer)",
+              style:{ width:"100%", padding:"10px 12px", borderRadius:8, border:"2px solid #81c784", fontSize:14, fontFamily:"inherit", boxSizing:"border-box" }
+            }),
+            (() => {
+              const q = (loyaltyPhone||"").trim().replace(/\s/g,"").toLowerCase();
+              if(!q) return /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#558b2f", marginTop:6 } }, "Telefon oder Kundennummer eingeben \u2192 Gast bekommt Punkte.");
+              const found = foundCustomer;
+              if(found) {
+                const cur = found.points||0;
+                const rate = loyCfg.redeemRate||100;
+                const minR = loyCfg.minRedeem||100;
+                // maximal einloesbar: nicht mehr als Bestellsumme, und nur in rate-Schritten
+                const maxEuroFromPts = Math.floor(cur/rate);
+                const maxEuro = Math.min(maxEuroFromPts, Math.floor(total));
+                const canRedeem = cur >= minR && maxEuro >= 1;
+                return /*#__PURE__*/React.createElement(React.Fragment, null,
+                  /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#2e7d32", marginTop:6, fontWeight:700 } }, "\u2705 " + found.name + " \u00b7 " + cur + " Punkte"),
+                  redeemedPts>0
+                    ? /*#__PURE__*/React.createElement("div", { style:{ marginTop:8, background:"#fff", borderRadius:8, padding:"8px 10px", display:"flex", justifyContent:"space-between", alignItems:"center" } },
+                        /*#__PURE__*/React.createElement("span", { style:{ fontSize:13, color:"#2e7d32", fontWeight:700 } }, "\uD83C\uDF81 " + redeemedPts + " Punkte = \u2212" + pointsRabatt.toFixed(2) + " \u20AC"),
+                        /*#__PURE__*/React.createElement("button", { onClick:()=>{ setRedeemedPts(0); setPointsRabatt(0); },
+                          style:{ background:"#ffebee", color:"#c62828", border:"none", borderRadius:6, padding:"4px 10px", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:11 } }, "\u2715 Entfernen")
+                      )
+                    : (canRedeem
+                        ? /*#__PURE__*/React.createElement("button", { onClick:()=>{ const pts=maxEuro*rate; setRedeemedPts(pts); setPointsRabatt(maxEuro); },
+                            style:{ width:"100%", marginTop:8, padding:"9px", borderRadius:8, border:"2px solid #2e7d32", background:"#fff", color:"#2e7d32", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 } },
+                            "\uD83C\uDF81 " + (maxEuro*rate) + " Punkte einl\u00f6sen (\u2212" + maxEuro.toFixed(2) + " \u20AC)")
+                        : /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#999", marginTop:6 } }, "Mindestens " + minR + " Punkte zum Einl\u00f6sen n\u00f6tig.")
+                      )
+                );
+              }
+              const looksPhone = /^[+]?\d{5,}$/.test(q);
+              return /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:looksPhone?"#e65100":"#999", marginTop:6 } }, looksPhone ? "\u2139\uFE0F Neuer Gast \u2013 wird als Stammkunde angelegt." : "\u26A0\uFE0F Kein Kunde gefunden.");
+            })()
+          ),
           // Rabatt
           /*#__PURE__*/React.createElement("div", { style:{ background:"#fce4ec", border:"2px solid #f48fb1", borderRadius:12, padding:12, marginBottom:12 } },
             /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#c2185b", marginBottom:8 } }, "\uD83C\uDF9F\uFE0F Rabatt / Gutschein"),
@@ -8872,7 +8957,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
                   }, 500);
                 }
               }
-              onComplete(done.method, done.trinkgeld||0, done.rabatt||0, gutscheinApplied?{id:gutscheinApplied.id,rabatt:gutscheinRabatt}:null);
+              onComplete(done.method, done.trinkgeld||0, done.rabatt||0, gutscheinApplied?{id:gutscheinApplied.id,rabatt:gutscheinRabatt}:null, loyaltyPhone||null, redeemedPts||0);
             },
             style:{ width:"100%", padding:14, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:15 }
           }, "\uD83C\uDD95 Tisch freigeben"),
@@ -9493,24 +9578,43 @@ function BackupView({ data, onRestore }) {
     try { const parsed = JSON.parse(restoreText); onRestore(parsed); setMsg("\u2705 Wiederhergestellt!"); }
     catch { setMsg("\u274C Ung\xFCltiges JSON"); }
   };
+  // Restore direkt aus Datei (SD-Karte, USB, Downloads, Google Drive)
+  const restoreFromFile = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try { const parsed = JSON.parse(ev.target.result); onRestore(parsed); setMsg("\u2705 Aus Datei wiederhergestellt: " + file.name); }
+      catch { setMsg("\u274C Datei ist kein g\xFCltiges Backup"); }
+    };
+    reader.onerror = () => setMsg("\u274C Datei konnte nicht gelesen werden");
+    reader.readAsText(file);
+  };
   return /*#__PURE__*/React.createElement("div", { style:{ padding:14, overflowY:"auto", height:"calc(100vh - 90px)" } },
     /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, color:C.green, fontSize:15, marginBottom:14 } }, "\uD83D\uDCBE Backup & Restore"),
     /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:12, padding:14, marginBottom:12, border:"2px solid #a5d6a7" } },
       /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, marginBottom:8 } }, "\uD83D\uDCE4 Export (Backup erstellen)"),
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#555", marginBottom:10 } }, "Alle Daten als JSON-Datei. LocalStorage: ", (lsSize/1024).toFixed(1), " KB"),
-      /*#__PURE__*/React.createElement("button", { onClick:exportAll, style:{ width:"100%", padding:12, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 } }, "\u2B07\uFE0F Backup herunterladen")
+      /*#__PURE__*/React.createElement("button", { onClick:exportAll, style:{ width:"100%", padding:12, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 } }, "\u2B07\uFE0F Backup herunterladen"),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#558b2f", marginTop:8 } }, "\uD83D\uDCA1 Datei landet im Ordner \"Downloads\". Von dort kannst du sie auf SD-Karte, USB-Stick oder Google Drive kopieren.")
     ),
     /*#__PURE__*/React.createElement("div", { style:{ background:"#fff3e0", borderRadius:12, padding:14, border:"2px solid #ffcc80" } },
       /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, marginBottom:8, color:C.orange } }, "\uD83D\uDCE5 Import (Backup wiederherstellen)"),
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#555", marginBottom:8 } }, "\u26A0\uFE0F \xDCberschreibt alle aktuellen Daten!"),
-      /*#__PURE__*/React.createElement("textarea", { value:restoreText, onChange:e=>setRestoreText(e.target.value), rows:5,
+      // Datei direkt waehlen (einfachster Weg)
+      /*#__PURE__*/React.createElement("label", { style:{ display:"block", width:"100%", padding:12, borderRadius:10, border:"2px dashed "+C.orange, background:"#fff", color:C.orange, cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14, textAlign:"center", boxSizing:"border-box", marginBottom:10 } },
+        "\uD83D\uDCC1 Backup-Datei w\xE4hlen (.json)",
+        /*#__PURE__*/React.createElement("input", { type:"file", accept:".json,application/json", onChange:restoreFromFile, style:{ display:"none" } })
+      ),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#999", textAlign:"center", marginBottom:8 } }, "\u2014 oder JSON-Text einf\xFCgen \u2014"),
+      /*#__PURE__*/React.createElement("textarea", { value:restoreText, onChange:e=>setRestoreText(e.target.value), rows:4,
         placeholder:'{"orders":[...],"customers":[...],...}',
         style:{ width:"100%", padding:"9px 10px", borderRadius:8, border:"2px solid #ffcc80", fontSize:11, fontFamily:"monospace", boxSizing:"border-box", resize:"vertical", marginBottom:8 }
       }),
       msg && /*#__PURE__*/React.createElement("div", { style:{ padding:"8px 10px", borderRadius:8, background:msg.startsWith("\u2705")?"#e8f5e9":"#ffebee", color:msg.startsWith("\u2705")?C.green:C.red, fontSize:13, fontWeight:700, marginBottom:8 } }, msg),
       /*#__PURE__*/React.createElement("button", { onClick:doRestore, disabled:!restoreText.trim(),
         style:{ width:"100%", padding:12, borderRadius:10, border:"none", background:restoreText.trim()?C.orange:"#ccc", color:"#fff", cursor:restoreText.trim()?"pointer":"not-allowed", fontFamily:"inherit", fontWeight:700 }
-      }, "\u2B06\uFE0F Wiederherstellen")
+      }, "\u2B06\uFE0F Aus Text wiederherstellen")
     )
   );
 }
@@ -12607,7 +12711,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
   var [showForm, setShowForm] = R.useState(false);
   var [newCat, setNewCat] = R.useState('');
   var [showNewCat, setShowNewCat] = R.useState(false);
-  var [form, setForm] = R.useState({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',options:[],selectedGroups:[]});
+  var [form, setForm] = R.useState({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',channel:'both',options:[],selectedGroups:[]});
   var [showGroupForm, setShowGroupForm] = R.useState(false);
   var [editingGroup, setEditingGroup] = R.useState(null);
   var [groupForm, setGroupForm] = R.useState({name:'',required:false,multiple:false,choices:[{name:'',price:''}]});
@@ -12653,21 +12757,21 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
     });
     var item={id:(editing!==null&&menuData[activeCat]&&menuData[activeCat][editing])?menuData[activeCat][editing].id:Date.now(),
       nr:form.nr,name:form.name,price:parseFloat(form.price)||0,
-      veg:form.veg,vegan:form.vegan,taxRate:form.taxRate||'food',
+      veg:form.veg,vegan:form.vegan,taxRate:form.taxRate||'food',channel:form.channel||'both',
       options:cleanOpts,
       selectedGroups:form.selectedGroups||[]};
     var u=Object.assign({},menuData);
     if(editing!==null){u[activeCat]=u[activeCat].map(function(x,i){return i===editing?Object.assign({},x,item,{id:x.id}):x;});}
     else{u[activeCat]=(u[activeCat]||[]).concat([item]);}
     onUpdate(u);
-    setForm({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',options:[],selectedGroups:[]});
+    setForm({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',channel:'both',options:[],selectedGroups:[]});
     setEditing(null);setShowForm(false);
   };
 
   var deleteItem=function(i){var u=Object.assign({},menuData);u[activeCat]=u[activeCat].filter(function(_,j){return j!==i;});onUpdate(u);};
 
   var startEdit=function(item,i){
-    setForm({nr:item.nr||'',name:item.name||'',price:String(item.price||''),veg:item.veg||false,vegan:item.vegan||false,taxRate:item.taxRate||'food',options:item.options||[],selectedGroups:item.selectedGroups||[]});
+    setForm({nr:item.nr||'',name:item.name||'',price:String(item.price||''),veg:item.veg||false,vegan:item.vegan||false,taxRate:item.taxRate||'food',channel:item.channel||'both',options:item.options||[],selectedGroups:item.selectedGroups||[]});
     setEditing(i);setShowForm(true);
   };
 
@@ -12770,7 +12874,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
               activeCat,' ',R.createElement('span',{style:{fontSize:12,color:'#888',fontWeight:400}},'('+(menuData[activeCat]||[]).length+' Artikel)')
             ),
             R.createElement('div',{style:{display:'flex',gap:6}},
-              R.createElement('button',{onClick:function(){setEditing(null);setForm({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',options:[],selectedGroups:[]});setShowForm(true);},style:bS(C.green)},'+ Artikel'),
+              R.createElement('button',{onClick:function(){setEditing(null);setForm({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',channel:'both',options:[],selectedGroups:[]});setShowForm(true);},style:bS(C.green)},'+ Artikel'),
               R.createElement('button',{onClick:function(){deleteCat(activeCat);},style:{padding:'8px 10px',borderRadius:8,border:'none',background:'#ffebee',color:C.red,fontWeight:700,cursor:'pointer',fontSize:13}},'Loeschen')
             )
           ),
@@ -12802,6 +12906,21 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                 R.createElement('option',{value:'drinks'},'19% Getraenke'),
                 R.createElement('option',{value:'takeaway'},'7% Takeaway')
               )
+            ),
+            // --- Sichtbarkeit: Im Haus / Webshop / Beide ---
+            R.createElement('div',{style:{marginBottom:12}},
+              R.createElement('div',{style:{fontSize:12,fontWeight:700,color:'#555',marginBottom:6}},'Sichtbar in'),
+              R.createElement('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
+                [['both','\u2705 Beide'],['house','\uD83C\uDFE0 Nur im Haus'],['web','\uD83D\uDECD\uFE0F Nur Webshop']].map(function(opt){
+                  var active=(form.channel||'both')===opt[0];
+                  return R.createElement('button',{key:opt[0],type:'button',
+                    onClick:function(){setForm(Object.assign({},form,{channel:opt[0]}));},
+                    style:{flex:'1 1 30%',minWidth:96,padding:'9px 8px',borderRadius:8,fontSize:12.5,fontWeight:700,cursor:'pointer',fontFamily:'inherit',
+                      border:active?('2px solid '+C.green):'1.5px solid #ddd',
+                      background:active?C.green:'#fff',color:active?'#fff':'#555'}},opt[1]);
+                })
+              ),
+              R.createElement('div',{style:{fontSize:11,color:'#999',marginTop:5}},'Getr\xE4nke wie Cocktails/Bier ggf. auf \u201ENur im Haus\u201C stellen \u2013 erscheinen dann nicht im Webshop.')
             ),
             // --- Artikel-Optionen ---
             R.createElement('div',{style:{marginTop:12,borderTop:'1px dashed #ddd',paddingTop:10}},
@@ -12930,7 +13049,9 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                       R.createElement('div',{style:{display:'flex',gap:8,marginTop:2,alignItems:'center',flexWrap:'wrap'}},
                         R.createElement('span',{style:{fontWeight:700,fontSize:13,color:C.green}},(item.price||0).toFixed(2)+' EUR'),
                         R.createElement('span',{style:{fontSize:10,background:'#f3f4f6',padding:'1px 6px',borderRadius:6,color:'#666'}},item.taxRate==='drinks'?'19%':'7%'),
-                        (item.options&&item.options.length>0)&&R.createElement('span',{style:{fontSize:10,background:'#e8f5e9',padding:'1px 6px',borderRadius:6,color:C.green,fontWeight:700}},item.options.length+' Optionen')
+                        (item.options&&item.options.length>0)&&R.createElement('span',{style:{fontSize:10,background:'#e8f5e9',padding:'1px 6px',borderRadius:6,color:C.green,fontWeight:700}},item.options.length+' Optionen'),
+                        (item.channel==='house')&&R.createElement('span',{style:{fontSize:10,background:'#fff3e0',padding:'1px 6px',borderRadius:6,color:'#e65100',fontWeight:700}},'\uD83C\uDFE0 Nur Haus'),
+                        (item.channel==='web')&&R.createElement('span',{style:{fontSize:10,background:'#e3f2fd',padding:'1px 6px',borderRadius:6,color:C.blue,fontWeight:700}},'\uD83D\uDECD\uFE0F Nur Webshop')
                       )
                     ),
                     R.createElement('div',{style:{display:'flex',gap:4,flexShrink:0}},
@@ -14235,7 +14356,7 @@ function LoyaltyView({ customers, onUpdate, loyaltySettings, setLoyaltySettings 
   const [redeemPts, setRedeemPts] = React.useState("");
   const [showSettings, setShowSettings] = React.useState(false);
 
-  const settings = loyaltySettings || { pointsPerEuro: 10, redeemRate: 100, minRedeem: 100, active: true };
+  const settings = loyaltySettings || { pointsPerEuro: 3, redeemRate: 100, minRedeem: 100, active: true };
 
   const filtered = (customers||[]).filter(c =>
     c.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -14416,11 +14537,10 @@ function CustomersView({
   })).sort((a, b) => b.total - a.total);
   const saveForm = () => {
     if (!form.name) return;
-    // Phone = Kundennummer. Kein Phone? Auto-KD-Nummer generieren
-    const kundenNr = form.phone?.trim()
-      ? form.phone.trim().replace(/\s/g,"")
-      : "KD-" + Date.now().toString().slice(-6);
-    const customerData = { ...form, kundenNr, since: new Date().toISOString() };
+    // Handynummer = Kundennummer. Kein Phone? Auto-Nummer generieren
+    const phone = (form.phone||"").trim().replace(/\s/g,"");
+    const kundenNr = phone ? phone : "KD-" + Date.now().toString().slice(-6);
+    const customerData = { ...form, kundenNr, phone, since: form.since || new Date().toISOString() };
     if (editIdx !== null) {
       onUpdate(editIdx, customerData);
       setEditIdx(null);
@@ -15379,7 +15499,7 @@ function UserManagementView({
       fontSize: 40,
       marginBottom: 8
     }
-  }, "\uD83D\uDC65"), "Keine Mitarbeiter"), users.map((u, idx) => /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDC65"), "Keine Mitarbeiter"), users.filter(u=>!u.deleted).map((u, idx) => /*#__PURE__*/React.createElement("div", {
     key: idx,
     style: {
       background: "#fff",
@@ -16860,7 +16980,8 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
   const confirmDelete = () => {
     if (String(confirmDelId).startsWith("ma_")) {
       const name = String(confirmDelId).replace("ma_", "");
-      setUsers(p => p.filter(x => x.name !== name));
+      // Soft-Delete: deleted-Flag setzen statt entfernen, damit Sync die Loeschung uebernimmt (nicht ueberschreibt)
+      setUsers(p => p.map(x => x.name === name ? {...x, deleted:true, deletedAt:new Date().toISOString()} : x));
     } else {
       setZeiterfassung(p => p.map(z => z.id===confirmDelId ? {...z, deleted:true, deletedBy:loggedInUser?.name, deletedAt:new Date().toISOString()} : z));
     }
@@ -16869,8 +16990,8 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
 
   const addMitarbeiter = () => {
     if (!newMa.name.trim()||!newMa.pin.trim()) return;
-    if ((users||[]).find(u=>u.name===newMa.name)) return;
-    setUsers(p => [...p, {name:newMa.name, role:newMa.rolle, pin:newMa.pin, time:new Date()}]);
+    if ((users||[]).find(u=>u.name===newMa.name && !u.deleted)) return;
+    setUsers(p => [...p, {id: "u_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), name:newMa.name, role:newMa.rolle, pin:newMa.pin, time:new Date()}]);
     setNewMa({name:"",pin:"",rolle:"Kellner"});
   };
 
@@ -17052,7 +17173,7 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
       React.createElement("div", { style:{background:"#fff",borderRadius:12,padding:14,marginBottom:14,boxShadow:"0 1px 6px #0001"} },
         React.createElement("div", { style:{fontSize:12,fontWeight:700,color:"#888",marginBottom:8,textTransform:"uppercase"} }, "👤 Mitarbeiter wählen"),
         React.createElement("div", { style:{display:"flex",flexWrap:"wrap",gap:8} },
-          (users||[]).map(u =>
+          (users||[]).filter(u=>!u.deleted).map(u =>
             React.createElement("button", {
               key:u.name, onClick:()=>setSelUser(u.name),
               style:{
@@ -17127,7 +17248,7 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
           style:{flex:1,padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",fontFamily:"inherit",fontSize:12}
         },
           React.createElement("option",{value:"alle"},"👥 Alle"),
-          (users||[]).map(u=>React.createElement("option",{key:u.name,value:u.name},u.name))
+          (users||[]).filter(u=>!u.deleted).map(u=>React.createElement("option",{key:u.name,value:u.name},u.name))
         )
       ),
 
@@ -17147,7 +17268,7 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
       showAddEntry && React.createElement("div", { style:{background:"#fff",borderRadius:12,padding:14,marginBottom:12,border:"2px solid #a5d6a7"} },
         React.createElement("select", { value:addForm.userName, onChange:e=>setAddForm(f=>({...f,userName:e.target.value})), style:{width:"100%",padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",marginBottom:8,fontFamily:"inherit",fontSize:13} },
           React.createElement("option",{value:""},"Mitarbeiter wählen..."),
-          (users||[]).map(u=>React.createElement("option",{key:u.name,value:u.name},u.name))
+          (users||[]).filter(u=>!u.deleted).map(u=>React.createElement("option",{key:u.name,value:u.name},u.name))
         ),
         React.createElement("div", { style:{display:"flex",gap:8,marginBottom:8} },
           React.createElement("select", { value:addForm.type, onChange:e=>setAddForm(f=>({...f,type:e.target.value})), style:{flex:1,padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",fontFamily:"inherit",fontSize:12} },
@@ -17229,7 +17350,7 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
         ),
         React.createElement("button",{onClick:addMitarbeiter,style:{width:"100%",padding:11,borderRadius:10,border:"none",background:C.green,color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:700}},"✓ Hinzufügen")
       ),
-      (users||[]).map((u,i)=>
+      (users||[]).filter(u=>!u.deleted).map((u,i)=>
         React.createElement("div",{key:i,style:{background:"#fff",borderRadius:10,padding:"10px 12px",marginBottom:8,display:"flex",alignItems:"center",gap:10,boxShadow:"0 1px 4px #0001"}},
           React.createElement("span",{style:{fontSize:20}},u.role==="Admin"?"👑":u.role==="Küche"?"👨🍳":"👤"),
           React.createElement("div",{style:{flex:1}},
@@ -17928,7 +18049,7 @@ function App() {
     window.addEventListener('eatdesi_zeiterfassung_synced', onZeit);
     return () => window.removeEventListener('eatdesi_zeiterfassung_synced', onZeit);
   }, []);
-  const [loyaltySettings, setLoyaltySettings] = useState(() => LS.get("eatdesi_loyalty_settings", { pointsPerEuro:10, redeemRate:100, minRedeem:100, active:true }));
+  const [loyaltySettings, setLoyaltySettings] = useState(() => LS.get("eatdesi_loyalty_settings", { pointsPerEuro:3, redeemRate:100, minRedeem:100, active:true }));
   const [happyHours, setHappyHours] = useState(() => LS.get("eatdesi_happyhours", []));
   const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); return Object.assign({ name: "eatDeSi", address: "Brunnenallee 30 · 34537 Bad Wildungen", phone: "05621 9449087", footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: "Belks Direktvertrieb GmbH", firmaZusatz: "eatDeSi – Fusion Kitchen & Grill", firmaStrasse: "Brunnenallee 30", firmaPlzOrt: "34537 Bad Wildungen", firmaStNr: "26/229/25450", firmaUst: "DE361161517", firmaGericht: "Amtsgericht Kassel", firmaEmail: "eatdesi.bw@gmail.com", firmaWeb: "www.eatdesi-bw.de", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal" }, saved); });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -18258,7 +18379,7 @@ function App() {
     L += `<div class="row bold"><span>Zahlung:</span><span>${bpayMethod}</span></div>`;
     return L;
   };
-  const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0) => {
+  const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0, loyaltyPhone = null, redeemedPts = 0) => {
     const isTA = String(tid).startsWith("ta_");
     // Auto-deduct inventory: match item names to inventory articles
     const autoDeductItems = isTA
@@ -18294,7 +18415,7 @@ function App() {
         } catch(e){ console.warn("Bondruck:", e); }
         // Auto Loyalty Points
         if (ta.customerPhone && loyaltySettings?.active !== false) {
-          const pts = Math.floor(orderTotal * (loyaltySettings?.pointsPerEuro||10));
+          const pts = Math.floor(orderTotal * (loyaltySettings?.pointsPerEuro||3));
           const cIdx = customers.findIndex(c => c.phone === ta.customerPhone || c.name === ta.customerName);
           if (cIdx >= 0) setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts} : c));
         }
@@ -18314,11 +18435,24 @@ function App() {
           const delivery = o.customerName ? {name:o.customerName,phone:o.customerPhone,street:o.customerStreet,city:o.customerCity} : null;
           printBon("💳 ZAHLUNG — Tisch " + tid, bonLines, o.label||("Tisch "+tid), _bonNr, new Date(), delivery, printerSettings, _tse);
         } catch(e){ console.warn("Bondruck:", e); }
-        // Auto Loyalty Points
-        if (o.customerPhone && loyaltySettings?.active !== false) {
-          const pts = Math.floor(orderTotal * (loyaltySettings?.pointsPerEuro||10));
-          const cIdx = customers.findIndex(c => c.phone === o.customerPhone);
-          if (cIdx >= 0) setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts} : c));
+        // Auto Loyalty Points: Eingabe kann Telefon ODER Kundennummer (KD-xxxx) sein
+        const lookup = (loyaltyPhone || o.customerPhone || "").trim();
+        if (lookup && loyaltySettings?.active !== false) {
+          const pts = Math.floor(orderTotal * (loyaltySettings?.pointsPerEuro||3));
+          const norm = lookup.replace(/\s/g,"").toLowerCase();
+          const cIdx = customers.findIndex(c =>
+            (c.phone||"").replace(/\s/g,"").toLowerCase() === norm ||
+            (c.kundenNr||"").toLowerCase() === norm
+          );
+          if (cIdx >= 0) {
+            setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:Math.max(0,(c.points||0) - (redeemedPts||0) + pts), visits:(c.visits||0)+1, lastVisit:new Date().toISOString(), pointsHistory:[...(c.pointsHistory||[]), ...(redeemedPts>0?[{date:new Date().toLocaleDateString("de-DE"),pts:-redeemedPts,note:"Eingelöst beim Kauf"}]:[]), {date:new Date().toLocaleDateString("de-DE"),pts:pts,note:"Gesammelt"}]} : c));
+          } else {
+            // neuen Stammkunden anlegen (nur wenn es wie eine Telefonnummer aussieht)
+            const looksLikePhone = /^[+]?\d{5,}$/.test(norm);
+            if (looksLikePhone) {
+              setCustomers(p => [...p, { id:"c_"+Date.now(), kundenNr:lookup, name:(o.customerName||"Gast "+lookup.slice(-4)), phone:lookup, points:pts, visits:1, lastVisit:new Date().toISOString(), since:new Date().toISOString(), time:new Date().toISOString() }]);
+            }
+          }
         }
       }
       setTableOrders(p => {
@@ -18648,7 +18782,7 @@ function App() {
       !loginUser ? /*#__PURE__*/React.createElement("div", null,
         /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#888", marginBottom:14, textTransform:"uppercase", fontWeight:700 } }, "👤 Wer arbeitet?"),
         /*#__PURE__*/React.createElement("div", { style:{ display:"flex", flexWrap:"wrap", gap:8, justifyContent:"center" } },
-          (users||[]).map((u,i) => /*#__PURE__*/React.createElement("button", {
+          (users||[]).filter(u=>!u.deleted).map((u,i) => /*#__PURE__*/React.createElement("button", {
             key:i,
             onClick:()=>{ setLoginUser(u); setLoginPin(""); setLoginError(""); },
             style:{ padding:"10px 16px", borderRadius:12, border:"2px solid "+(u.role==="Admin"?"#C84B31":"#ddd"), background:u.role==="Admin"?"#fff5f2":"#f9f9f9", color:"#333", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
@@ -18960,11 +19094,11 @@ function App() {
       alignItems: "center",
       gap: 10
     }
-  }, /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#fff",
-      fontSize: 12,
-      opacity: .8
+      display: "flex",
+      alignItems: "center",
+      gap: 6
     }
   },
     /*#__PURE__*/React.createElement("div", {
@@ -19000,10 +19134,10 @@ function App() {
       onClick: () => setShowModeModal(true),
       style:{ display:"flex", alignItems:"center", gap:4, background: effectiveOnline?"rgba(76,175,80,0.25)":"rgba(239,83,80,0.3)", border: effectiveOnline?"1px solid rgba(76,175,80,0.6)":"1px solid rgba(239,83,80,0.7)", borderRadius:20, padding:"2px 8px", cursor:"pointer" }
     },
-      /*#__PURE__*/React.createElement("div", { style:{ width:6, height:6, borderRadius:"50%", background: effectiveOnline?"#4caf50":"#ef5350", boxShadow: effectiveOnline?"0 0 5px #4caf50":"none", cursor:"pointer" } }),
+      /*#__PURE__*/React.createElement("span", { style:{ width:6, height:6, borderRadius:"50%", background: effectiveOnline?"#4caf50":"#ef5350", boxShadow: effectiveOnline?"0 0 5px #4caf50":"none", cursor:"pointer", display:"inline-block" } }),
       /*#__PURE__*/React.createElement("span", { style:{ fontSize:10, fontWeight:700, color:"#fff" } }, effectiveOnline?"Online":"Offline")
     ),
-    now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })
+    /*#__PURE__*/React.createElement("span", { style:{ color:"#fff", fontSize:12, opacity:.85, fontWeight:600 } }, now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }))
   ), loggedInUser && /*#__PURE__*/React.createElement("span", {
     onClick: () => { if(window.confirm("Abmelden / Benutzer wechseln?")){ setLoggedInUser(null); LS.set("eatdesi_session", null); setLoginUser(null); setLoginPin(""); } },
     title: "Abmelden / wechseln",
@@ -19277,8 +19411,23 @@ function App() {
     completedOrders: completedOrders
   }), view === "menu_management" && React.createElement(MenuManagementView, {menuData:menuData,setMenuData:setMenuData,printerSettings:printerSettings,setPrinterSettings:setPrinterSettings,loggedInUser:loggedInUser}),
   view === "backup" && /*#__PURE__*/React.createElement(BackupView, {
-    data: { orders:completedOrders, expenses, customers, inventory, drivers, floors, users, menuData },
-    onRestore: d => { if(d.orders)setCompletedOrders(d.orders); if(d.expenses)setExpenses(d.expenses); if(d.customers)setCustomers(d.customers); if(d.inventory)setInventory(d.inventory); if(d.drivers)setDrivers(d.drivers); if(d.floors)setFloors(d.floors); if(d.users)setUsers(d.users); if(d.menuData)setMenuData(d.menuData); }
+    data: { orders:completedOrders, expenses, customers, inventory, drivers, floors, users, menuData, reservations, tableOrders, gutscheine, zeiterfassung, loyaltySettings, printerSettings },
+    onRestore: d => {
+      if(d.orders)setCompletedOrders(d.orders);
+      if(d.expenses)setExpenses(d.expenses);
+      if(d.customers)setCustomers(d.customers);
+      if(d.inventory)setInventory(d.inventory);
+      if(d.drivers)setDrivers(d.drivers);
+      if(d.floors)setFloors(d.floors);
+      if(d.users)setUsers(d.users);
+      if(d.menuData)setMenuData(d.menuData);
+      if(d.reservations)setReservations(d.reservations);
+      if(d.tableOrders)setTableOrders(d.tableOrders);
+      if(d.gutscheine)setGutscheine(d.gutscheine);
+      if(d.zeiterfassung)setZeiterfassung(d.zeiterfassung);
+      if(d.loyaltySettings)setLoyaltySettings(d.loyaltySettings);
+      if(d.printerSettings)setPrinterSettings(d.printerSettings);
+    }
   }), view === "tse_setup" && React.createElement(TSESetupView, null
   ), view === "cloud_setup" && React.createElement(CloudSetupView, null
   ), view === "datev_export" && React.createElement(DATEVView, {completedOrders:completedOrders,expenses:expenses}
@@ -19305,7 +19454,7 @@ function App() {
   })), checkout && /*#__PURE__*/React.createElement(CheckoutModal, _extends({}, checkout, {
     printerSettings: printerSettings,
     onClose: () => setCheckout(null),
-    onComplete: (method, tg, rabatt, usedGutschein) => {
+    onComplete: (method, tg, rabatt, usedGutschein, loyaltyPhone, redeemedPts) => {
       if(usedGutschein && setGutscheine) {
         setGutscheine(prev => prev.map(g => g.id === usedGutschein.id ? {
           ...g,
@@ -19314,10 +19463,13 @@ function App() {
           usedAt: new Date().toISOString()
         } : g));
       }
-      completeOrder(checkout.tableId, method, tg, rabatt);
+      completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts);
     },
     gutscheine: gutscheine,
-    setGutscheine: setGutscheine
+    setGutscheine: setGutscheine,
+    customers: customers,
+    loyaltySettings: loyaltySettings,
+    setCustomers: setCustomers
   })));
 }
 // ===============================================================
@@ -19696,19 +19848,8 @@ function AiBetriebsleiterView({ completedOrders }) {
       + 'mit einem Umsatz von ' + todayTotal.toFixed(2) + ' EUR. '
       + 'Bitte erstelle einen kurzen Tagesbericht auf Deutsch (max 200 Woerter).';
 
-    fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 500,
-        messages: [{role:'user', content: prompt}]
-      })
-    }).then(function(r) {
-      return r.json();
-    }).then(function(data) {
-      var text = (data.content && data.content[0] && data.content[0].text) || 'Kein Bericht verfuegbar.';
-      setReport(text);
+    window.callAI(prompt, 500).then(function(text) {
+      setReport(text || 'Kein Bericht verfuegbar.');
       setLoading(false);
     }).catch(function(e) {
       setError('Verbindungsfehler: ' + e.message);
@@ -19718,7 +19859,7 @@ function AiBetriebsleiterView({ completedOrders }) {
 
   return R.createElement('div',{style:{padding:16,overflowY:'auto',height:'calc(100vh - 90px)'}},
     R.createElement('div',{style:{fontWeight:800,fontSize:17,color:'#C84B31',marginBottom:4}},'AI Tagesbericht'),
-    R.createElement('div',{style:{fontSize:12,color:'#888',marginBottom:16}},'Powered by Claude AI'),
+    R.createElement('div',{style:{fontSize:12,color:'#888',marginBottom:16}},'Powered by Google Gemini'),
 
     R.createElement('div',{style:{background:'#fff',borderRadius:12,padding:14,border:'1px solid #eee',marginBottom:12}},
       R.createElement('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:8}},
@@ -19763,9 +19904,7 @@ function AiTelefonistinView() {
     addLog('👤 Gast: '+customerText, 'user');
     const prompt = 'Du bist die freundliche AI Telefonistin von ' + (firma.name) + '. \nÖffnungszeiten: ' + (firma.oeffnung) + '.\nAntworte kurz auf: "' + (customerText) + '"\nAntwort auf Deutsch, maximal 2 Sätze, freundlich und professionell.';
     try {
-      const resp = await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:200,messages:[{role:'user',content:prompt}]})});
-      const data = await resp.json();
-      const text = (data.content && data.content[0] && data.content[0].text || '') || 'Einen Moment bitte.';
+      const text = (await window.callAI(prompt, 200)) || 'Einen Moment bitte.';
       addLog('🤖 AI: '+text, 'ai');
       speak(text);
     } catch(e) { addLog('❌ Fehler: '+e.message,'err'); }
@@ -19835,9 +19974,8 @@ function AiWhatsAppView({ menuData }) {
     setLoading(true);
     const prompt = 'Du bist der WhatsApp Chatbot von ' + (firma.name) + '.\nÖffnungszeiten: ' + (firma.oeffnung) + '\nSpeisekarte Auszug:\\n' + (menuStr) + '\n\nAntworte auf: "' + (userMsg) + '"\n- Kurz (max 3 Sätze)\n- WhatsApp-Stil (keine HTML)\n- Bestellungen bestätigen mit Preis\n- Bei Reservierung: Datum, Zeit, Personenzahl abfragen\n- Freundlich, mit passenden Emojis';
     try {
-      const resp = await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:300,messages:[{role:'user',content:prompt}]})});
-      const data = await resp.json();
-      setMessages(m => [...m, {from:'bot', text:(data.content && data.content[0] && data.content[0].text || '')||'Einen Moment...'}]);
+      const text = (await window.callAI(prompt, 300)) || 'Einen Moment...';
+      setMessages(m => [...m, {from:'bot', text:text}]);
     } catch(e) { setMessages(m => [...m, {from:'bot', text:'❌ Verbindungsfehler'}]); }
     setLoading(false);
   };
@@ -19880,9 +20018,7 @@ function AiMarketingView({ completedOrders, menuData }) {
     const prompt = 'Erstelle einen ' + (platforms[platform]) + ' Post für das Restaurant "' + (firma.name) + '".\nSlogan: ' + (firma.slogan||'Authentische indische Küche') + '\nBestseller: ' + (top3.join(', ')||'Butter Chicken, Dal Makhani, Biryani') + '\nTyp: ' + (type) + '\n\n' + (platform==='instagram'?'Instagram Post mit Emojis, Hashtags (10-15), Call-to-Action':'') + '\n' + (platform==='facebook'?'Facebook Post, freundlich, lokal, mit Öffnungszeiten-Hinweis':'') + '\n' + (platform==='google'?'Google Unternehmen Post, sachlich, SEO-optimiert':'') + '\n' + (platform==='rabatt'?'Rabattaktion ankündigen (z.B. 10% Dienstag-Aktion), mit Bedingungen':'') + '\n\nErstelle 3 verschiedene Versionen. Auf Deutsch.';
 
     try {
-      const resp = await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:prompt}]})});
-      const data = await resp.json();
-      const text = (data.content && data.content[0] && data.content[0].text || '')||'';
+      const text = (await window.callAI(prompt, 1000)) || '';
       setPosts(text.split(/---+|Version \d+:/i).filter(p=>p.trim().length>20).map(p=>p.trim()));
     } catch(e) { setPosts(['❌ Fehler: '+e.message]); }
     setLoading(false);
@@ -19936,12 +20072,8 @@ function AiMenuOptimizerView(props) {
       'Schwach: ' + (slowItems||'keine Daten') + '. ' +
       'Erstelle eine kurze Analyse auf Deutsch (max 200 Woerter): ' +
       '1. Top-Gerichte Analyse 2. Schwache Gerichte 3. Preisvorschlaege 4. Neue Gerichte Ideen';
-    fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:800,messages:[{role:'user',content:prompt}]})
-    }).then(function(r){return r.json();})
-      .then(function(d){setAnalysis((d.content&&d.content[0]&&d.content[0].text)||'Keine Analyse');setLoading(false);})
+    window.callAI(prompt, 800)
+      .then(function(text){setAnalysis(text||'Keine Analyse');setLoading(false);})
       .catch(function(e){setAnalysis('Fehler: '+e.message);setLoading(false);});
   };
 
@@ -19966,9 +20098,8 @@ function AiEinkaufView({ inventory, menuData, completedOrders }) {
     const top5 = Object.entries(itemCounts).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([n,c])=>n+' ('+c+'×)').join(', ');
     const prompt = 'Du bist der Einkaufsmanager von eatDeSi, einem indischen Restaurant.\n\nAKTUELLER LAGERSTAND (niedrig):\n' + (lowStock.map(i=>i.name+': '+i.quantity+' (Minimum: '+i.minStock+')').join('\n')||'Keine kritischen Bestände') + '\n\nMEIST VERKAUFTE GERICHTE (letzte 50 Bestellungen):\n' + (top5||'Butter Chicken, Dal Makhani, Biryani') + '\n\nErstelle eine Einkaufsliste für die nächsten 5 Tage auf Deutsch:\n1. Kritisch (sofort kaufen)\n2. Diese Woche kaufen  \n3. Geschätzte Mengen und Hinweise\n\nFormat: übersichtliche Liste mit Emojis. Max 200 Wörter.';
     try {
-      const resp = await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:600,messages:[{role:'user',content:prompt}]})});
-      const data = await resp.json();
-      setList((data.content && data.content[0] && data.content[0].text || '')||'');
+      const text = (await window.callAI(prompt, 600)) || '';
+      setList(text);
     } catch(e) { setList('❌ '+e.message); }
     setLoading(false);
   };
@@ -20598,7 +20729,7 @@ async function pushStateToSupabase(key, value) {
   try {
     var stamp = new Date().toISOString();
     // on_conflict=key + merge-duplicates => bestehende Zeile wird UEBERSCHRIEBEN statt ignoriert
-    await fetch(SUPA_URL + '/rest/v1/pos_state?on_conflict=key', {
+    var resp = await fetch(SUPA_URL + '/rest/v1/pos_state?on_conflict=key', {
       method: 'POST',
       headers: {
         'apikey': SUPA_KEY,
@@ -20612,9 +20743,20 @@ async function pushStateToSupabase(key, value) {
         updated_at: stamp
       })
     });
+    if (!resp || !resp.ok) { throw new Error('HTTP ' + (resp ? resp.status : '?')); }
     // eigenen Zeitstempel mitfuehren, damit der eigene Push nicht zurueckgezogen wird
     try { localStorage.setItem('eatdesi_stamp_' + key, String(new Date(stamp).getTime())); } catch(e2) {}
-  } catch(e) { console.warn('pushState error:', e.message); }
+  } catch(e) {
+    console.warn('pushState error:', e.message);
+    // FEHLER: in Warteschlange legen, damit beim naechsten Online-Versuch erneut gepusht wird (Daten gehen NICHT verloren)
+    try {
+      var pend = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]');
+      // alten Eintrag fuer denselben Key entfernen, nur neuesten behalten
+      pend = pend.filter(function(p){ return p && p.key !== key; });
+      pend.push({ key: key, value: value, ts: Date.now() });
+      localStorage.setItem('eatdesi_pending_push', JSON.stringify(pend));
+    } catch(e3) {}
+  }
 }
 
 // State von Supabase laden
@@ -20667,20 +20809,27 @@ function mergeRemoteOrders(remoteOrders) {
   return true;
 }
 
-// Pending orders queue
+// Pending orders + state queue
 async function pushPendingOrders() {
   var pending = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]');
   if (!pending.length) return;
-  var pushed = [];
+  var keep = [];
   for (var i = 0; i < pending.length; i++) {
-    var ok = await pushOrderToSupabase(pending[i]);
-    if (ok) pushed.push(i);
+    var p = pending[i];
+    if (p && p.key && 'value' in p) {
+      // State-Eintrag (z.B. users, floors) erneut pushen
+      try { await pushStateToSupabase(p.key, p.value); } catch(e) { keep.push(p); }
+    } else {
+      // Order-Eintrag
+      var ok = await pushOrderToSupabase(p);
+      if (!ok) keep.push(p);
+    }
   }
-  if (pushed.length) {
-    localStorage.setItem('eatdesi_pending_push', JSON.stringify(
-      pending.filter(function(_, i){ return pushed.indexOf(i) < 0; })
-    ));
-  }
+  // pushStateToSupabase legt bei erneutem Fehler selbst wieder in die Queue -> hier nur Order-Fehler behalten
+  var current = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]');
+  var stateKeysStillPending = current.filter(function(p){ return p && p.key && 'value' in p; });
+  var orderKeep = keep.filter(function(p){ return !(p && p.key && 'value' in p); });
+  localStorage.setItem('eatdesi_pending_push', JSON.stringify(stateKeysStillPending.concat(orderKeep)));
 }
 
 // Tischbestellungen synchronisieren
@@ -20770,18 +20919,23 @@ async function pullStateWithTime(remoteKey) {
 // Keys die als ID-Liste MERGED werden muessen (statt Last-Write-Wins ueberschreiben),
 // damit Eintraege von mehreren Geraeten erhalten bleiben (z.B. Stempel von Abdullah UND Alexy)
 var MERGE_LIST_KEYS = {
-  'zeiterfassung': 1, 'customers': 1, 'expenses': 1, 'reservations': 1
+  'zeiterfassung': 1, 'customers': 1, 'expenses': 1, 'reservations': 1, 'users': 1, 'floors': 1, 'drivers': 1
 };
 
-// Zwei ID-Listen zusammenfuehren: alle Eintraege nach id eindeutig, deleted gewinnt
+// Zwei ID-Listen zusammenfuehren: alle Eintraege nach id (oder name) eindeutig, deleted gewinnt
 function _mergeById(localArr, remoteArr) {
   var byId = {};
-  (Array.isArray(remoteArr) ? remoteArr : []).forEach(function(e){ if(e && e.id != null) byId[e.id] = e; });
+  var keyOf = function(e){ return (e && e.id != null) ? ('id:'+e.id) : (e && e.name != null ? ('nm:'+e.name) : null); };
+  (Array.isArray(remoteArr) ? remoteArr : []).forEach(function(e){ var k=keyOf(e); if(k) byId[k] = e; });
   (Array.isArray(localArr) ? localArr : []).forEach(function(e){
-    if(!e || e.id == null) return;
-    var ex = byId[e.id];
-    if(!ex) { byId[e.id] = e; }
-    else if(e.deleted && !ex.deleted) { byId[e.id] = e; } // Loeschung gewinnt
+    var k = keyOf(e); if(!k) return;
+    var ex = byId[k];
+    if(!ex) { byId[k] = e; }
+    else if(e.deleted && !ex.deleted) { byId[k] = e; } // Loeschung gewinnt
+    else if(!e.deleted && !ex.deleted) {
+      // beide aktiv: neueren behalten (nach time)
+      if(new Date(e.time||0) > new Date(ex.time||0)) byId[k] = e;
+    }
   });
   return Object.keys(byId).map(function(k){ return byId[k]; })
     .sort(function(a,b){ return new Date(a.time||0) - new Date(b.time||0); });
