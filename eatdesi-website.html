@@ -309,6 +309,7 @@ footer .fl:hover{color:var(--gold)}
 .ai-fab:hover{transform:translateY(-2px);background:var(--gold-glow)}
 .ai-fab .pulse{width:9px;height:9px;border-radius:50%;background:var(--ink);animation:pulse 1.8s infinite}
 @keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+.pulse-dot{animation:pulse 1.2s ease-in-out infinite;color:var(--gold-glow)}
 .ai-panel{position:fixed;bottom:0;right:0;z-index:110;width:100%;max-width:420px;height:min(640px,88vh);background:var(--ink-soft);border:1px solid var(--line);border-radius:22px 22px 0 0;display:none;flex-direction:column;box-shadow:var(--shadow);overflow:hidden}
 @media(min-width:640px){.ai-panel{bottom:20px;right:20px;border-radius:22px}}
 .ai-panel.show{display:flex}
@@ -968,9 +969,76 @@ function showDone(bonNr,total,isDeliv){
   $('#drawerTitle').textContent='Bestellt!';
   $('#cartList').innerHTML=`<div class="done"><div class="ic">✓</div><h3>Danke für deine Bestellung!</h3>
     <p>Wir prüfen sie gerade und bestätigen gleich deine ${word}.</p><div class="bn">${bonNr}</div>
-    <p style="color:var(--gold-glow)">⏳ Warte auf Bestätigung…</p>
-    <p style="margin-top:8px">Gesamt: <b style="color:var(--gold-glow)">${eur(total)}</b></p></div>`;
+    <div id="liveStatus" style="margin-top:14px"></div>
+    <p style="margin-top:10px">Gesamt: <b style="color:var(--gold-glow)">${eur(total)}</b></p></div>`;
   $('#drawerFoot').innerHTML=`<button class="checkout" onclick="closeCart()">Fertig</button>`;
+  startStatusTracking(bonNr, isDeliv, isDine);
+}
+
+/* ====================================================================
+   LIVE-STATUS-TRACKING: liest note-Marker aus Supabase eatdesi_orders
+   [NEU] -> wird geprüft | [OK:min] -> bestätigt | [KOCHT] -> Küche
+   [FERTIG] -> fertig | [GELIEFERT]/[ABGELEHNT] -> Ende
+   ==================================================================== */
+let _statusTimer=null;
+function stopStatusTracking(){ if(_statusTimer){clearInterval(_statusTimer);_statusTimer=null;} }
+function renderStatus(stage, prepMin, isDeliv, isDine){
+  const el=document.getElementById('liveStatus'); if(!el) return;
+  const wayWord=isDeliv?'geliefert':(isDine?'serviert':'abholbereit');
+  const steps=[
+    {k:'pruefen', ic:'⏳', t:'Wird geprüft…'},
+    {k:'ok',      ic:'✅', t:'Bestätigt'+(prepMin?(' · in ca. '+prepMin+' Min '+wayWord):'')},
+    {k:'kocht',   ic:'👨‍🍳', t:'Wird zubereitet'},
+    {k:'fertig',  ic:'🍽️', t:(isDeliv?'Unterwegs zu dir':'Fertig – '+(isDine?'wird serviert':'bitte abholen'))},
+  ];
+  // aktuellen Schritt-Index bestimmen
+  const order={pruefen:0,ok:1,kocht:2,fertig:3,ende:4,abgelehnt:-1};
+  const cur=order[stage];
+  if(stage==='abgelehnt'){
+    el.innerHTML='<div style="background:rgba(220,80,80,.12);border:1px solid rgba(220,80,80,.4);border-radius:12px;padding:14px;color:#ffb4b4;font-weight:600">😔 Deine Bestellung konnte leider nicht angenommen werden. Bitte ruf uns kurz an.</div>';
+    stopStatusTracking(); return;
+  }
+  if(stage==='ende'){
+    el.innerHTML='<div style="background:rgba(120,200,120,.12);border:1px solid rgba(120,200,120,.4);border-radius:12px;padding:14px;color:#b6e6b6;font-weight:600">🎉 '+(isDeliv?'Geliefert':'Abgeschlossen')+'. Vielen Dank & guten Appetit!</div>';
+    stopStatusTracking(); return;
+  }
+  let html='<div style="display:flex;flex-direction:column;gap:7px">';
+  steps.forEach((s,i)=>{
+    const done=i<cur, active=i===cur;
+    const col=done?'#8fd18f':active?'var(--gold-glow)':'rgba(255,255,255,.25)';
+    const wt=active?700:done?500:400;
+    html+='<div style="display:flex;align-items:center;gap:9px;font-size:13px;color:'+col+';font-weight:'+wt+'">'
+      +'<span style="font-size:16px">'+(done?'✓':s.ic)+'</span><span>'+s.t+'</span>'
+      +(active?'<span style="margin-left:auto" class="pulse-dot">●</span>':'')+'</div>';
+  });
+  html+='</div>';
+  el.innerHTML=html;
+}
+function stageFromNote(note){
+  const n=String(note||'');
+  if(n.indexOf('[ABGELEHNT]')!==-1) return {stage:'abgelehnt'};
+  if(n.indexOf('[GELIEFERT]')!==-1) return {stage:'ende'};
+  if(n.indexOf('[FERTIG]')!==-1) return {stage:'fertig'};
+  if(n.indexOf('[KOCHT]')!==-1) return {stage:'kocht'};
+  const m=n.match(/\[OK:(\d+)\]/);
+  if(m) return {stage:'ok', prepMin:parseInt(m[1])};
+  if(n.indexOf('[NEU]')!==-1) return {stage:'pruefen'};
+  return {stage:'pruefen'};
+}
+async function pollStatus(bonNr, isDeliv, isDine){
+  try{
+    const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders?location_id=eq.'+LOCATION_ID+'&bon_nr=eq.'+encodeURIComponent(bonNr)+'&select=note&limit=1',
+      {headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
+    if(!r.ok) return;
+    const arr=await r.json();
+    if(arr&&arr[0]){ const s=stageFromNote(arr[0].note); renderStatus(s.stage,s.prepMin,isDeliv,isDine); }
+  }catch(e){}
+}
+function startStatusTracking(bonNr, isDeliv, isDine){
+  stopStatusTracking();
+  renderStatus('pruefen',null,isDeliv,isDine);
+  pollStatus(bonNr,isDeliv,isDine);
+  _statusTimer=setInterval(()=>pollStatus(bonNr,isDeliv,isDine), 8000);
 }
 
 /* ====================================================================
@@ -1032,7 +1100,7 @@ async function pushRequest(p){
    UI PLUMBING
    ==================================================================== */
 function openCart(){renderCartList();$('#drawer').classList.add('show');$('#drawerScrim').classList.add('show');$('#drawerScrim').style.display='block';document.body.style.overflow='hidden';}
-function closeCart(){$('#drawer').classList.remove('show');$('#drawerScrim').classList.remove('show');$('#drawerScrim').style.display='none';document.body.style.overflow='';$('#drawerTitle').textContent='Dein Warenkorb';}
+function closeCart(){stopStatusTracking();$('#drawer').classList.remove('show');$('#drawerScrim').classList.remove('show');$('#drawerScrim').style.display='none';document.body.style.overflow='';$('#drawerTitle').textContent='Dein Warenkorb';}
 function setMode(m){mode=m;document.querySelectorAll('#modePills button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
   $('#modeHint').textContent= m==='lieferung'?('Lieferung ab '+eur(ZONES[0].min)+' · Zonen wählbar an der Kasse'):(m==='dinein'?'Tisch reservieren & vorbestellen – wir bestätigen deine Zeit':'Kostenlos abholen in der Brunnenallee 30');
   renderCartList();}
