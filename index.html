@@ -6,10 +6,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v80</title>
+<title>eatDeSi POS v85</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-behavior:none}
@@ -26,7 +27,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v80';",
+    "var CACHE='eatdesi-v85';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -7339,6 +7340,131 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   }
   printHtml(html);
 }
+
+// ===== Online-Bestellung annehmen -> Küche-Bon + Kunden-Beleg sofort drucken =====
+// items aus Website/Online haben { name, nr, qty, price, options:[{label,value,price}], note }
+function printOnlineBons(order, prepMin, printerCfg) {
+  try {
+    var items = order.items || [];
+    var deliv = isOnlineDeliv(order);
+    var now = new Date();
+    var bonNr = order.bonNr || '?';
+    var label = (deliv ? '🛵 Lieferung' : '🥡 Abholung') + (order.source ? (' · ' + order.source) : '');
+    var delivery = (order.customerName || order.customerStreet) ? {
+      name: order.customerName||'', street: order.customerStreet||'',
+      plz: order.customerPlz||'', city: order.customerCity||'', phone: order.customerPhone||''
+    } : null;
+
+    // Option/Notiz-Zeilen je Artikel
+    function optLines(it){
+      var ex = '';
+      (it.options||[]).forEach(function(o){
+        var val = o.value || o.name || '';
+        if (val) ex += '<div style="font-size:12px;padding-left:12px;color:#333">+ '+(o.label?(o.label+': '):'')+val+'</div>';
+      });
+      if (it.note) ex += '<div style="font-size:12px;padding-left:12px;color:green">→ '+it.note+'</div>';
+      return ex;
+    }
+
+    // 1) KÜCHE-BON (nur Speisen, große Schrift; falls keine Speisen -> alles)
+    var food = items.filter(function(i){ return !isDrink(i); });
+    var kitchenItems = food.length ? food : items;
+    var kLines = kitchenItems.map(function(it){
+      return '<div class="bold" style="font-size:20px;margin:6px 0 2px">'+(it.qty||1)+'× '+(it.nr?it.nr+'. ':'')+it.name+'</div>'+optLines(it)+'<div>&nbsp;</div>';
+    }).join('');
+    kLines += '<div class="line"></div><div class="center bold" style="font-size:14px">⏱️ Fertig in ca. '+prepMin+' Min</div>';
+    printBon('🍳 KÜCHE — '+(deliv?'LIEFERUNG':'ABHOLUNG'), kLines, label, bonNr, now, delivery, printerCfg, null);
+
+    // 2) KUNDEN-BELEG (kompletter Auftrag + Summe)
+    var sub = 0;
+    var cLines = items.map(function(it){
+      var line = (it.finalPrice!=null?it.finalPrice:it.price)||0;
+      // Optionen mit Aufpreis aufaddieren
+      var optSum = 0; (it.options||[]).forEach(function(o){ optSum += (+o.price||0); });
+      var unit = line + optSum;
+      var lineTotal = unit * (it.qty||1);
+      sub += lineTotal;
+      return '<div class="row"><span>'+(it.qty||1)+'× '+(it.nr?it.nr+'. ':'')+it.name+'</span><span>'+fmt(lineTotal)+'</span></div>'+optLines(it);
+    }).join('');
+    cLines += '<div class="line"></div>';
+    var t7 = calcTax7(items), t19 = calcTax19(items);
+    if(t7>0)  cLines += '<div class="row"><span>MwSt. 7% (Speisen)</span><span>'+fmt(t7)+'</span></div>';
+    if(t19>0) cLines += '<div class="row"><span>MwSt. 19% (Getränke)</span><span>'+fmt(t19)+'</span></div>';
+    cLines += '<div class="line"></div><div class="row bold" style="font-size:16px"><span>GESAMT</span><span>'+fmt(order.total!=null?order.total:sub)+'</span></div>';
+    cLines += '<div class="center" style="font-size:12px;margin-top:4px">'+(deliv?'🛵 Lieferung':'🥡 Abholung')+' · in ca. '+prepMin+' Min</div>';
+    cLines += '<div class="center" style="font-size:11px">Zahlung: '+(order.payment||'bei '+(deliv?'Lieferung':'Abholung'))+'</div>';
+    printBon('🧾 BELEG — '+(deliv?'LIEFERUNG':'ABHOLUNG'), cLines, label, bonNr, now, delivery, printerCfg, null);
+  } catch(e){ console.warn('printOnlineBons Fehler:', e.message); }
+}
+
+// ===== Kundenbestätigung: E-Mail (EmailJS, automatisch) + WhatsApp (wa.me, öffnet App) =====
+function buildConfirmText(order, prepMin) {
+  var deliv = isOnlineDeliv(order);
+  var wayWord = deliv ? 'geliefert' : 'abholbereit';
+  var typeLabel = deliv ? 'Lieferung' : 'Abholung';
+  var itemsTxt = (order.items||[]).map(function(it){ return (it.qty||1)+'x '+it.name; }).join(', ');
+  var total = (order.total!=null ? order.total : 0);
+  var name = order.customerName || 'Liebe/r Kunde/in';
+  var lines = [
+    'Hallo '+name+',',
+    '',
+    'vielen Dank fuer deine Bestellung bei eatDeSi! 🙏',
+    'Wir haben sie angenommen und bereiten alles vor.',
+    '',
+    '🧾 Bestell-Nr: '+(order.bonNr||''),
+    '🍽️ '+itemsTxt,
+    '💶 Gesamt: '+(total.toFixed ? total.toFixed(2) : total)+' €',
+    '⏱️ In ca. '+prepMin+' Minuten '+wayWord+' ('+typeLabel+')',
+    '',
+    'Bis gleich!',
+    'eatDeSi · Fusion Kitchen & Grill · Bad Wildungen'
+  ];
+  return lines.join('\n');
+}
+
+// E-Mail via EmailJS (vollautomatisch, kein Server)
+function sendConfirmEmail(order, prepMin, cfg) {
+  try {
+    if (!cfg || !cfg.emailOn) return;
+    if (!cfg.emailServiceId || !cfg.emailTemplateId || !cfg.emailPublicKey) { console.warn('EmailJS: Keys fehlen'); return; }
+    if (!order.customerEmail) { console.warn('Keine Kunden-E-Mail vorhanden'); return; }
+    if (typeof emailjs === 'undefined') { console.warn('EmailJS nicht geladen'); return; }
+    var deliv = isOnlineDeliv(order);
+    var params = {
+      to_email: order.customerEmail,
+      customer_name: order.customerName || 'Kunde',
+      bon_nr: order.bonNr || '',
+      prep_min: String(prepMin),
+      order_type: deliv ? 'Lieferung' : 'Abholung',
+      items: (order.items||[]).map(function(it){ return (it.qty||1)+'x '+it.name; }).join(', '),
+      total: (order.total!=null ? (order.total.toFixed?order.total.toFixed(2):order.total) : '0') + ' €',
+      message: buildConfirmText(order, prepMin)
+    };
+    emailjs.send(cfg.emailServiceId, cfg.emailTemplateId, params, { publicKey: cfg.emailPublicKey })
+      .then(function(){ console.log('✅ Bestätigungs-E-Mail gesendet an '+order.customerEmail); })
+      .catch(function(err){ console.warn('EmailJS Fehler:', err && (err.text||err.message||err)); });
+  } catch(e){ console.warn('sendConfirmEmail Fehler:', e.message); }
+}
+
+// WhatsApp via wa.me: öffnet WhatsApp mit vorgefertigter Nachricht (Kunde-Nr aus Bestellung)
+function openConfirmWhatsApp(order, prepMin, cfg) {
+  try {
+    if (!cfg || !cfg.waOn) return;
+    var phone = (order.customerPhone||'').replace(/[^\d+]/g,'');
+    if (!phone) { console.warn('Keine Telefonnummer fuer WhatsApp'); return; }
+    // Deutsche Nummer normalisieren: 0151... -> 49151...
+    if (phone.indexOf('+') === 0) phone = phone.slice(1);
+    if (phone.indexOf('00') === 0) phone = phone.slice(2);
+    if (phone.indexOf('0') === 0) phone = '49' + phone.slice(1);
+    var text = encodeURIComponent(buildConfirmText(order, prepMin));
+    var url = 'https://wa.me/' + phone + '?text=' + text;
+    // neues Fenster/Tab -> WhatsApp (App oder Web)
+    try { window.open(url, '_blank'); } catch(e){
+      var a=document.createElement('a'); a.href=url; a.target='_blank'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }
+  } catch(e){ console.warn('openConfirmWhatsApp Fehler:', e.message); }
+}
+
 function BonModal({
   label,
   items,
@@ -13596,6 +13722,96 @@ function PrinterSettingsView({
     )
   ),
   /*#__PURE__*/React.createElement("div", {
+    style: { background:"#fff", borderRadius:12, padding:14, marginBottom:12, boxShadow:"0 1px 4px rgba(0,0,0,.06)" }
+  },
+    /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:14, marginBottom:10, color:"#333" } }, "\uD83D\uDD14 Benachrichtigungston (Online-Bestellung)"),
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#777", marginBottom:10 } }, "Lautst\xE4rke des Alarm-Tons, wenn eine neue Online-Bestellung eingeht."),
+    /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:10 } },
+      [["leise","\uD83D\uDD08 Leise",0.4],["mittel","\uD83D\uDD09 Mittel",1.0],["laut","\uD83D\uDD0A Laut",2.0],["sehr_laut","\uD83D\uDCE2 Sehr laut",3.5]].map(function(opt){
+        var key=opt[0], lbl=opt[1];
+        var active=(form.notifVolume||"laut")===key;
+        return /*#__PURE__*/React.createElement("button", {
+          key:key,
+          onClick:function(){ setForm(function(f){return Object.assign({},f,{notifVolume:key});}); },
+          style:{ flex:"1 1 40%", minWidth:120, padding:"12px 8px", borderRadius:10, border: active?"2px solid #C84B31":"2px solid #eee", background: active?"#fff5f0":"#fafafa", color: active?"#C84B31":"#555", fontWeight: active?800:600, fontFamily:"inherit", fontSize:13, cursor:"pointer" }
+        }, lbl);
+      })
+    ),
+    /*#__PURE__*/React.createElement("button", {
+      onClick:function(){
+        try {
+          var Ctx = window.AudioContext || window.webkitAudioContext;
+          if (Ctx) {
+            var ac = new Ctx();
+            var volMap={leise:0.4,mittel:1.0,laut:2.0,sehr_laut:3.5};
+            var peak=volMap[form.notifVolume||"laut"]||2.0;
+            var master=ac.createGain(); master.gain.value=Math.min(1,peak/3.5); master.connect(ac.destination);
+            [0,0.18,0.36].forEach(function(t){
+              var o=ac.createOscillator(), g=ac.createGain();
+              o.type="sine"; o.frequency.value=880; o.connect(g); g.connect(master);
+              g.gain.setValueAtTime(0.001, ac.currentTime+t);
+              g.gain.exponentialRampToValueAtTime(Math.min(1,peak), ac.currentTime+t+0.02);
+              g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+t+0.18);
+              o.start(ac.currentTime+t); o.stop(ac.currentTime+t+0.2);
+            });
+          }
+          if (navigator.vibrate) navigator.vibrate([200,100,200]);
+        } catch(e){}
+      },
+      style:{ width:"100%", padding:"11px", borderRadius:10, border:"2px solid #C84B31", background:"#fff", color:"#C84B31", fontWeight:700, fontFamily:"inherit", fontSize:13, cursor:"pointer" }
+    }, "\u25B6\uFE0F Ton testen"),
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#999", marginTop:8, textAlign:"center" } }, "Tipp: Auch die Medien-Lautst\xE4rke des Tablets/Handys hochdrehen.")
+  ),
+  /*#__PURE__*/React.createElement("div", {
+    style: { background:"#fff", borderRadius:12, padding:14, marginBottom:12, boxShadow:"0 1px 4px rgba(0,0,0,.06)" }
+  },
+    /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:14, marginBottom:4, color:"#333" } }, "\uD83D\uDCAC Kundenbest\xE4tigung (E-Mail & WhatsApp)"),
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#777", marginBottom:14 } }, "Beim Annehmen einer Online-Bestellung wird der Kunde automatisch benachrichtigt."),
+
+    // ── WhatsApp ──
+    /*#__PURE__*/React.createElement("div", { style:{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 12px", background:"#e8f5e9", borderRadius:10, marginBottom:8 } },
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#2e7d32" } }, "\uD83D\uDFE2 WhatsApp"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#558b2f" } }, "\xD6ffnet WhatsApp mit fertiger Nachricht \u2014 nur \u201ESenden\u201C tippen")
+      ),
+      /*#__PURE__*/React.createElement("button", {
+        onClick:function(){ setForm(function(f){return Object.assign({},f,{waOn:!f.waOn});}); },
+        style:{ width:52, height:30, borderRadius:15, border:"none", background: form.waOn?"#2e7d32":"#ccc", position:"relative", cursor:"pointer", transition:"all .2s" }
+      },
+        /*#__PURE__*/React.createElement("div", { style:{ position:"absolute", top:3, left: form.waOn?25:3, width:24, height:24, borderRadius:"50%", background:"#fff", transition:"all .2s" } })
+      )
+    ),
+
+    // ── E-Mail Toggle ──
+    /*#__PURE__*/React.createElement("div", { style:{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 12px", background:"#e3f2fd", borderRadius:10, marginBottom: form.emailOn?8:0 } },
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#1565c0" } }, "\uD83D\uDCE7 E-Mail (automatisch)"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#1976d2" } }, "Vollautomatisch im Hintergrund \u2014 ben\xF6tigt EmailJS-Konto")
+      ),
+      /*#__PURE__*/React.createElement("button", {
+        onClick:function(){ setForm(function(f){return Object.assign({},f,{emailOn:!f.emailOn});}); },
+        style:{ width:52, height:30, borderRadius:15, border:"none", background: form.emailOn?"#1565c0":"#ccc", position:"relative", cursor:"pointer", transition:"all .2s" }
+      },
+        /*#__PURE__*/React.createElement("div", { style:{ position:"absolute", top:3, left: form.emailOn?25:3, width:24, height:24, borderRadius:"50%", background:"#fff", transition:"all .2s" } })
+      )
+    ),
+
+    // ── EmailJS Felder (nur wenn aktiv) ──
+    form.emailOn && /*#__PURE__*/React.createElement("div", { style:{ background:"#f5f9ff", borderRadius:10, padding:12, marginTop:4 } },
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#1976d2", marginBottom:8, lineHeight:1.5 } }, "Kostenlos auf emailjs.com registrieren \u2192 3 Werte hier eintragen:"),
+      [["emailServiceId","Service ID","service_xxxxxxx"],["emailTemplateId","Template ID","template_xxxxxxx"],["emailPublicKey","Public Key","xxxxxxxxxxxxxxx"]].map(function(fld){
+        return /*#__PURE__*/React.createElement("div", { key:fld[0], style:{ marginBottom:8 } },
+          /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#555", marginBottom:3, fontWeight:600 } }, fld[1]),
+          /*#__PURE__*/React.createElement("input", { value:form[fld[0]]||"", placeholder:fld[2],
+            onChange:(function(k){return function(e){ setForm(function(f){var n=Object.assign({},f); n[k]=e.target.value; return n; }); };})(fld[0]),
+            style:{ width:"100%", padding:"9px 11px", borderRadius:8, border:"1.5px solid #90caf9", fontSize:12, fontFamily:"monospace", boxSizing:"border-box" }
+          })
+        );
+      }),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:10, color:"#999", marginTop:4, lineHeight:1.5 } }, "EmailJS Template muss Variablen nutzen: {{to_email}}, {{customer_name}}, {{bon_nr}}, {{prep_min}}, {{order_type}}, {{items}}, {{total}}")
+    )
+  ),
+  /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#fff",
       borderRadius: 12,
@@ -15470,8 +15686,6 @@ var ALL_PERMISSION_VIEWS = [
   { id:"rezeptkosten", l:"Rezeptkosten", i:"💰" },
   { id:"personalplanung", l:"Personalplanung", i:"👥" },
   { id:"printer", l:"Drucker", i:"🖨️" },
-  { id:"online_orders", l:"Online Bestellungen", i:"📱" },
-  { id:"webshop_orders", l:"Webshop", i:"🛒" },
   { id:"kassenbuch", l:"Kassenbuch", i:"🧾" },
   { id:"monatsreport", l:"Monatsstatistik", i:"📊" },
   { id:"backup", l:"Backup", i:"💾" },
@@ -18143,18 +18357,26 @@ function App() {
       var Ctx = window.AudioContext || window.webkitAudioContext;
       if (Ctx) {
         var ac = new Ctx();
+        // Lautstärke aus Einstellungen lesen (direkt aus LS, da printerSettings hier evtl. noch nicht initialisiert)
+        var vol = 'laut';
+        try { var ps = LS.get('eatdesi_printer', {}); if (ps && ps.notifVolume) vol = ps.notifVolume; } catch(e){}
+        var volMap = { leise:0.4, mittel:1.0, laut:2.0, sehr_laut:3.5 };
+        var peak = volMap[vol] || 2.0;
+        var master = ac.createGain();
+        master.gain.value = Math.min(1, peak / 3.5);
+        master.connect(ac.destination);
         [0, 0.18, 0.36].forEach(function(t){
           var o = ac.createOscillator(), g = ac.createGain();
-          o.type = 'sine'; o.frequency.value = 880;
-          o.connect(g); g.connect(ac.destination);
+          o.type = 'square'; o.frequency.value = 880;
+          o.connect(g); g.connect(master);
           g.gain.setValueAtTime(0.001, ac.currentTime + t);
-          g.gain.exponentialRampToValueAtTime(0.4, ac.currentTime + t + 0.02);
-          g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + t + 0.15);
-          o.start(ac.currentTime + t); o.stop(ac.currentTime + t + 0.16);
+          g.gain.exponentialRampToValueAtTime(Math.min(1, peak), ac.currentTime + t + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + t + 0.18);
+          o.start(ac.currentTime + t); o.stop(ac.currentTime + t + 0.2);
         });
       }
     } catch(e){}
-    try { if (navigator.vibrate) navigator.vibrate([200,100,200]); } catch(e){}
+    try { if (navigator.vibrate) navigator.vibrate([300,120,300,120,300]); } catch(e){}
   }, []);
   React.useEffect(() => {
     console.log('🔔 CHECK: ' + (completedOrders||[]).length + ' orders gesamt, davon ' + pendingOnlineOrders.length + ' pending [NEU]', pendingOnlineOrders.map(o=>o.bonNr));
@@ -18275,7 +18497,7 @@ function App() {
   }, []);
   const [loyaltySettings, setLoyaltySettings] = useState(() => LS.get("eatdesi_loyalty_settings", { pointsPerEuro:3, redeemRate:100, minRedeem:100, active:true }));
   const [happyHours, setHappyHours] = useState(() => LS.get("eatdesi_happyhours", []));
-  const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); return Object.assign({ name: "eatDeSi", address: "Brunnenallee 30 · 34537 Bad Wildungen", phone: "05621 9449087", footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: "Belks Direktvertrieb GmbH", firmaZusatz: "eatDeSi – Fusion Kitchen & Grill", firmaStrasse: "Brunnenallee 30", firmaPlzOrt: "34537 Bad Wildungen", firmaStNr: "26/229/25450", firmaUst: "DE361161517", firmaGericht: "Amtsgericht Kassel", firmaEmail: "eatdesi.bw@gmail.com", firmaWeb: "www.eatdesi-bw.de", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal" }, saved); });
+  const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); return Object.assign({ name: "eatDeSi", address: "Brunnenallee 30 · 34537 Bad Wildungen", phone: "05621 9449087", footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: "Belks Direktvertrieb GmbH", firmaZusatz: "eatDeSi – Fusion Kitchen & Grill", firmaStrasse: "Brunnenallee 30", firmaPlzOrt: "34537 Bad Wildungen", firmaStNr: "26/229/25450", firmaUst: "DE361161517", firmaGericht: "Amtsgericht Kassel", firmaEmail: "eatdesi.bw@gmail.com", firmaWeb: "www.eatdesi-bw.de", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal", notifVolume: "laut", emailOn: false, emailServiceId: "", emailTemplateId: "", emailPublicKey: "", waOn: false, waAuto: true }, saved); });
   const [menuOpen, setMenuOpen] = useState(false);
   const [now, setNow] = useState(new Date());
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -18879,10 +19101,6 @@ function App() {
     l: "User Management",
     i: "🔑"
   }, {
-    id: "online_orders",
-    l: "Online Bestellungen",
-    i: "📱"
-  }, {
     id: "kassenbuch",
     l: "Kassenbuch / Z-Bon",
     i: "🧾"
@@ -18898,8 +19116,6 @@ function App() {
     id: "ai_kellnerin",
     l: "AI Kellnerin",
     i: "👩🍳"
-  }, {
-    id: "webshop_orders", l: "Webshop", i: "🛒"
   }, {
     id: "tse_setup", l: "TSE", i: "🔒"
   }, {
@@ -19632,6 +19848,11 @@ function App() {
       });
       // Cloud aktualisieren (Website-Kunde sieht "angenommen, X Min")
       if (typeof updateOrderNoteInSupabase === "function") updateOrderNoteInSupabase(order.bonNr, newNote);
+      // SOFORT Küche-Bon + Kunden-Beleg drucken
+      try { printOnlineBons(order, prepMin, printerSettings); } catch(e){ console.warn("Bondruck Online:", e); }
+      // Kundenbestätigung: E-Mail automatisch + WhatsApp öffnen
+      try { sendConfirmEmail(order, prepMin, printerSettings); } catch(e){ console.warn("Email:", e); }
+      try { openConfirmWhatsApp(order, prepMin, printerSettings); } catch(e){ console.warn("WhatsApp:", e); }
       // direkt zum KDS Pro Monitor wechseln
       setView("kds_pro");
       setPendingOnlinePopup(null);
@@ -19681,14 +19902,13 @@ function App() {
   ), view === "cloud_setup" && React.createElement(CloudSetupView, null
   ), view === "datev_export" && React.createElement(DATEVView, {completedOrders:completedOrders,expenses:expenses}
   ), view === "takeaway" && React.createElement(TakeawayView, {takeaway:takeaway,setTakeaway:setTakeaway,completedOrders:completedOrders,menuData:menuData,printerSettings:printerSettings,loggedInUser:loggedInUser})
-  , view === "webshop_orders" && React.createElement(WebshopOrdersView, {onAccept:function(o){var id=Date.now();setTakeaway(function(t){return t.concat([{id:id,items:o.items||[],time:new Date(),done:false,customerName:o.name||null,customerPhone:o.phone||null,source:'Webshop'}]);});setView("tables");}}
-  ), view === "firmendaten" && React.createElement(FirmendatenView, null
+  , view === "firmendaten" && React.createElement(FirmendatenView, null
   ), view === "menu_import" && React.createElement(MenuImportExportView, {menuData:menuData,onUpdate:setMenuData}
   ), view === "test_center" && React.createElement(TestCenterView, {menuData:menuData,printerSettings:printerSettings,completedOrders:completedOrders}
   ), view === "ai_betriebsleiter" && React.createElement(AiBetriebsleiterView, {completedOrders:completedOrders}
   ), view === "ai_whatsapp" && React.createElement(AiWhatsAppView, {menuData:menuData}
   ), view === "ai_marketing" && React.createElement(AiMarketingView, {completedOrders:completedOrders}
-  ), view === "kds_pro" && React.createElement(KdsProView, {tableOrders:tableOrders,takeaway:takeaway,completedOrders:completedOrders,setCompletedOrders:setCompletedOrders,setTakeaway:setTakeaway}
+  ), view === "kds_pro" && React.createElement(KdsProView, {tableOrders:tableOrders,takeaway:takeaway,setTableOrders:setTableOrders,completedOrders:completedOrders,setCompletedOrders:setCompletedOrders,setTakeaway:setTakeaway}
   ), view === "rezeptkosten" && React.createElement(RezeptkostenView, {menuData:menuData}
   ), view === "lieferfahrer" && React.createElement(LieferfahrerView, null
   ), view === "kiosk" && React.createElement(KioskView, {menuData:menuData}
@@ -20394,39 +20614,16 @@ function AiEinkaufView({ inventory, menuData, completedOrders }) {
 // PHASE 3 - RESTAURANT-AUTOMATISIERUNG
 // ===============================================================
 
-function KdsProView({ tableOrders, takeaway, completedOrders, setCompletedOrders, setTakeaway }) {
+function KdsProView({ tableOrders, takeaway, setTableOrders, completedOrders, setCompletedOrders, setTakeaway }) {
   var R = React;
-  // Online-Aufträge: kommen aus completedOrders mit KDS-Marker (akzeptiert, noch nicht geliefert)
-  // Tische + lokale Takeaways: bleiben weiterhin als Live-Tickets im LS (kein note-Marker nötig)
-  var [localTickets, setLocalTickets] = R.useState(function(){ return LS.get('eatdesi_kds_tickets', []); });
 
-  // Tische + lokale (manuell getippte) Takeaways automatisch als Tickets aufnehmen
-  R.useEffect(function(){
-    var add = [];
-    Object.entries(tableOrders||{}).forEach(function(e){
-      var tableId=e[0], order=e[1];
-      if ((order.items||[]).length > 0) {
-        if (!localTickets.find(function(t){return t.id==='table_'+tableId;})) {
-          add.push({ id:'table_'+tableId, source:'🪑 Tisch '+tableId, items:order.items, status:'new', time:new Date().toISOString(), kind:'local' });
-        }
-      }
-    });
-    (takeaway||[]).filter(function(t){return !t.done;}).forEach(function(ta){
-      if (!localTickets.find(function(t){return t.id==='ta_'+ta.id;})) {
-        var lbl = (ta.source && ta.source!=='Takeaway') ? ta.source : '🥡 Takeaway';
-        add.push({ id:'ta_'+ta.id, source:lbl+' #'+ta.id, items:ta.items, status:'new', time:ta.time||new Date().toISOString(), kind:'local' });
-      }
-    });
-    if (add.length>0) {
-      setLocalTickets(function(prev){ var m=prev.concat(add); LS.set('eatdesi_kds_tickets', m.slice(-60)); return m; });
-    }
-  }, [tableOrders, takeaway]);
+  // ── ALLE Tickets LIVE aus den echten Datenquellen ableiten (kein localStorage-Cache mehr -> keine Ghost-Tickets, Multi-Device sauber) ──
 
-  // Online-Tickets aus completedOrders (note-Marker) ableiten
+  // 1) ONLINE (Website/Lieferando/UberEats): aus completedOrders mit note-Marker
   var onlineTickets = (completedOrders||[]).filter(isKdsActive).map(function(o){
     var deliv = isOnlineDeliv(o);
     var src = (o.source||'Online');
-    var icon = src.indexOf('LIEFER')!==-1 ? '🛵' : src.indexOf('UBER')!==-1 ? '🚗' : src.indexOf('WEBSHOP')!==-1||src.indexOf('WEBSITE')!==-1 ? '🌐' : '🌐';
+    var icon = src.indexOf('LIEFER')!==-1 ? '🛵' : src.indexOf('UBER')!==-1 ? '🚗' : '🌐';
     return {
       id:'online_'+o.bonNr, bonNr:o.bonNr, kind:'online',
       source: icon+' '+src+(o.bonNr?(' '+o.bonNr):'') + (deliv?' · Lieferung':' · Abholung'),
@@ -20438,46 +20635,60 @@ function KdsProView({ tableOrders, takeaway, completedOrders, setCompletedOrders
     };
   });
 
-  var allTickets = onlineTickets.concat(localTickets);
+  // 2) TAKEAWAY (POS Abholung/Lieferung): aus takeaway-Liste, Status im Feld kdsStatus (Default 'new')
+  var taTickets = (takeaway||[]).filter(function(t){ return !t.done && !t.kdsHidden && (t.items||[]).length>0; }).map(function(ta){
+    var deliv = ta.orderType==='Lieferung' || !!ta.customerStreet;
+    var lbl = (ta.source && ta.source!=='Takeaway') ? ta.source : '🥡 Takeaway';
+    return {
+      id:'ta_'+ta.id, kind:'takeaway', taId:ta.id,
+      source: lbl+' #'+ta.id + (deliv?' · Lieferung':' · Abholung'),
+      items: ta.items||[], status: ta.kdsStatus || 'new',
+      time: ta.time||new Date().toISOString(),
+      customerName: ta.customerName, customerPhone: ta.customerPhone
+    };
+  });
 
-  // STATUS WECHSELN
+  // 3) TISCH: aus tableOrders, Status im Feld kdsStatus (Default 'new')
+  var tableTickets = Object.entries(tableOrders||{}).filter(function(e){ return (e[1].items||[]).length>0 && !e[1].kdsHidden; }).map(function(e){
+    var tableId=e[0], order=e[1];
+    return {
+      id:'table_'+tableId, kind:'table', tableId:tableId,
+      source:'🪑 Tisch '+tableId,
+      items: order.items||[], status: order.kdsStatus || 'new',
+      time: order.time||new Date().toISOString()
+    };
+  });
+
+  var allTickets = onlineTickets.concat(taTickets).concat(tableTickets);
+
+  // STATUS WECHSELN (Neu -> In Arbeit -> Fertig -> Ausgeliefert)
   function moveStage(ticket, dir){
     var order = ['new','working','ready','delivered'];
     var idx = order.indexOf(ticket.status);
-    var ni = Math.max(0, Math.min(3, idx + dir));
-    var newStatus = order[ni];
+    var newStatus = order[Math.max(0, Math.min(3, idx + dir))];
 
     if (ticket.kind === 'online') {
-      // note-Marker umschreiben + Supabase sync (Website liest Status mit)
-      var o = ticket._order;
-      var newNote = setKdsMarkerInNote(o.note, newStatus);
-      setCompletedOrders(function(list){
-        return list.map(function(x){ return String(x.bonNr)===String(ticket.bonNr) ? Object.assign({}, x, {note:newNote}) : x; });
-      });
-      if (typeof updateOrderNoteInSupabase === 'function') updateOrderNoteInSupabase(ticket.bonNr, newNote);
-    } else {
-      // lokales Ticket
-      setLocalTickets(function(prev){ var u=prev.map(function(t){return t.id===ticket.id?Object.assign({},t,{status:newStatus}):t;}); LS.set('eatdesi_kds_tickets',u); return u; });
+      var newNote = setKdsMarkerInNote(ticket._order.note, newStatus);
+      setCompletedOrders(function(list){ return list.map(function(x){ return String(x.bonNr)===String(ticket.bonNr)?Object.assign({},x,{note:newNote}):x; }); });
+      if (typeof updateOrderNoteInSupabase==='function') updateOrderNoteInSupabase(ticket.bonNr, newNote);
+    } else if (ticket.kind === 'takeaway') {
+      setTakeaway(function(t){ return t.map(function(x){ return x.id===ticket.taId?Object.assign({},x,{kdsStatus:newStatus}):x; }); });
+    } else if (ticket.kind === 'table' && setTableOrders) {
+      setTableOrders(function(p){ var n=Object.assign({},p); if(n[ticket.tableId]) n[ticket.tableId]=Object.assign({},n[ticket.tableId],{kdsStatus:newStatus}); return n; });
     }
   }
 
-  // ERLEDIGT (Ausgeliefert -> aus KDS raus, Order geschlossen)
+  // ERLEDIGT / Aus KDS entfernen
   function finishTicket(ticket){
     if (ticket.kind === 'online') {
-      // [GELIEFERT] -> Order ist abgeschlossen, verschwindet aus KDS (isKdsActive=false), bleibt in Order-Liste
-      var o = ticket._order;
-      var newNote = setKdsMarkerInNote(o.note, 'delivered');
-      setCompletedOrders(function(list){
-        return list.map(function(x){ return String(x.bonNr)===String(ticket.bonNr) ? Object.assign({}, x, {note:newNote}) : x; });
-      });
-      if (typeof updateOrderNoteInSupabase === 'function') updateOrderNoteInSupabase(ticket.bonNr, newNote);
-    } else {
-      // lokales Ticket: Takeaway als done markieren falls vorhanden, Ticket entfernen
-      if (ticket.id.indexOf('ta_')===0 && setTakeaway) {
-        var taId = parseInt(ticket.id.slice(3));
-        setTakeaway(function(t){ return t.map(function(x){ return x.id===taId?Object.assign({},x,{done:true}):x; }); });
-      }
-      setLocalTickets(function(prev){ var u=prev.filter(function(t){return t.id!==ticket.id;}); LS.set('eatdesi_kds_tickets',u); return u; });
+      var newNote = setKdsMarkerInNote(ticket._order.note, 'delivered');
+      setCompletedOrders(function(list){ return list.map(function(x){ return String(x.bonNr)===String(ticket.bonNr)?Object.assign({},x,{note:newNote}):x; }); });
+      if (typeof updateOrderNoteInSupabase==='function') updateOrderNoteInSupabase(ticket.bonNr, newNote);
+    } else if (ticket.kind === 'takeaway') {
+      // aus KDS ausblenden (Küche fertig); Takeaway bleibt für Bezahlung in der Takeaway-Ansicht
+      setTakeaway(function(t){ return t.map(function(x){ return x.id===ticket.taId?Object.assign({},x,{kdsStatus:'delivered',kdsHidden:true}):x; }); });
+    } else if (ticket.kind === 'table' && setTableOrders) {
+      setTableOrders(function(p){ var n=Object.assign({},p); if(n[ticket.tableId]) n[ticket.tableId]=Object.assign({},n[ticket.tableId],{kdsStatus:'delivered',kdsHidden:true}); return n; });
     }
   }
 
@@ -20487,7 +20698,6 @@ function KdsProView({ tableOrders, takeaway, completedOrders, setCompletedOrders
     {id:'ready',     label:'✅ Fertig',        color:'#2e7d32', bg:'#e8f5e9'},
     {id:'delivered', label:'🚀 Ausgeliefert',  color:'#1565c0', bg:'#e3f2fd'},
   ];
-
   function minsSince(t){ try{ return Math.floor((Date.now()-new Date(t).getTime())/60000); }catch(e){return 0;} }
 
   return R.createElement('div', {style:{padding:12,overflowY:'auto',height:'calc(100vh - 90px)'}},
@@ -20513,7 +20723,7 @@ function KdsProView({ tableOrders, takeaway, completedOrders, setCompletedOrders
                 R.createElement('div', {style:{display:'flex',gap:4,marginTop:8,flexWrap:'wrap'}},
                   st.id!=='new' && R.createElement('button', {onClick:function(){moveStage(ticket,-1);}, style:{flex:1,padding:'5px 6px',borderRadius:5,border:'none',background:'#f5f5f5',cursor:'pointer',fontSize:10,fontFamily:'inherit'}}, '← Zurück'),
                   st.id!=='delivered' && R.createElement('button', {onClick:function(){moveStage(ticket,1);}, style:{flex:1,padding:'5px 6px',borderRadius:5,border:'none',background:st.color,color:'#fff',cursor:'pointer',fontSize:10,fontFamily:'inherit',fontWeight:700}}, 'Weiter →'),
-                  st.id==='delivered' && R.createElement('button', {onClick:function(){finishTicket(ticket);}, style:{flex:1,padding:'5px 6px',borderRadius:5,border:'none',background:'#1565c0',color:'#fff',cursor:'pointer',fontSize:10,fontFamily:'inherit',fontWeight:700}}, '✓ Erledigt (schließen)')
+                  st.id==='delivered' && R.createElement('button', {onClick:function(){finishTicket(ticket);}, style:{flex:1,padding:'5px 6px',borderRadius:5,border:'none',background:'#1565c0',color:'#fff',cursor:'pointer',fontSize:10,fontFamily:'inherit',fontWeight:700}}, ticket.kind==='online'?'✓ Erledigt':'✓ Aus KDS')
                 )
               );
             })
@@ -21145,6 +21355,7 @@ function mergeRemoteOrders(remoteOrders) {
     remoteByBon[String(ro.bon_nr || '')] = {
       bonNr: ro.bon_nr, tableId: ro.table_id, items: items, total: ro.total,
       payMethod: ro.payment, customerName: ro.customer_name, customerPhone: ro.customer_phone,
+      customerEmail: ro.customer_email || (function(){ try{ var m=(ro.note||'').match(/✉️\s*([^\s·]+@[^\s·]+)/); return m?m[1]:null; }catch(e){return null;} })(),
       customerStreet: ro.customer_street || null, note: ro.note || '',
       source: ro.source || 'POS', time: ro.created_at, synced: true,
       storniert: ro.storniert || false, stornoVon: ro.storno_von || null, stornoZeit: ro.storno_zeit || null
