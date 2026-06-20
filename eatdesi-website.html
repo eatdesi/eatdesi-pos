@@ -310,6 +310,15 @@ footer .fl:hover{color:var(--gold)}
 .ai-fab .pulse{width:9px;height:9px;border-radius:50%;background:var(--ink);animation:pulse 1.8s infinite}
 @keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
 .pulse-dot{animation:pulse 1.2s ease-in-out infinite;color:var(--gold-glow)}
+.order-track{position:fixed;left:12px;right:12px;bottom:14px;z-index:9999;display:flex;align-items:center;gap:12px;
+  background:linear-gradient(135deg,#1a1712,#2a241a);border:1.5px solid var(--gold,#c8a04e);border-radius:16px;
+  padding:13px 15px;box-shadow:0 8px 30px rgba(0,0,0,.5);cursor:pointer;max-width:560px;margin:0 auto;animation:trackIn .35s ease}
+@keyframes trackIn{from{transform:translateY(80px);opacity:0}to{transform:translateY(0);opacity:1}}
+.order-track .ot-ic{font-size:26px;flex-shrink:0}
+.order-track .ot-txt{flex:1;min-width:0}
+.order-track .ot-bon{font-size:11px;color:var(--paper-2,#a89a82);font-weight:600}
+.order-track .ot-stat{font-size:14px;color:var(--gold-glow,#e8c87a);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.order-track .ot-close{font-size:16px;color:var(--paper-2,#a89a82);padding:4px 8px;flex-shrink:0}
 .ai-panel{position:fixed;bottom:0;right:0;z-index:110;width:100%;max-width:420px;height:min(640px,88vh);background:var(--ink-soft);border:1px solid var(--line);border-radius:22px 22px 0 0;display:none;flex-direction:column;box-shadow:var(--shadow);overflow:hidden}
 @media(min-width:640px){.ai-panel{bottom:20px;right:20px;border-radius:22px}}
 .ai-panel.show{display:flex}
@@ -597,6 +606,13 @@ footer .fl:hover{color:var(--gold)}
 </div>
 <div class="scrim" id="drawerScrim" style="background:rgba(8,7,5,.55)" onclick="closeCart()"></div>
 
+<!-- Schwebendes Bestell-Status-Banner (bleibt sichtbar, auch wenn Warenkorb zu) -->
+<div id="orderTrack" class="order-track" style="display:none" onclick="reopenTrack()">
+  <div class="ot-ic" id="otIc">⏳</div>
+  <div class="ot-txt"><div class="ot-bon" id="otBon"></div><div class="ot-stat" id="otStat">Wird geprüft…</div></div>
+  <div class="ot-close" onclick="event.stopPropagation();dismissTrack()">✕</div>
+</div>
+
 <!-- ===================== ADMIN ===================== -->
 <button class="admin-fab" onclick="openAdmin()" title="Admin">⚙</button>
 <div class="admin" id="admin">
@@ -879,6 +895,7 @@ function goCheckout(){
   $('#cartList').innerHTML=`
     <div class="field"><label>Name *</label><input id="f_name" placeholder="Dein Name"><div class="err">Bitte Namen angeben</div></div>
     <div class="field"><label>Telefon *</label><input id="f_phone" inputmode="tel" placeholder="Für Rückfragen"><div class="err">Bitte Telefonnummer angeben</div></div>
+    <div class="field"><label>E-Mail (optional)</label><input id="f_email" inputmode="email" placeholder="für Bestätigung per E-Mail"></div>
     ${isDeliv?`<div class="field"><label>Straße & Hausnummer *</label><input id="f_street" placeholder="z.B. Brunnenallee 12"><div class="err">Bitte Adresse angeben</div></div>
       <div class="row2"><div class="field"><label>PLZ *</label><input id="f_zip" inputmode="numeric" placeholder="34537"><div class="err">PLZ</div></div>
       <div class="field"><label>Ort *</label><input id="f_city" value="Bad Wildungen"><div class="err">Ort</div></div></div>`
@@ -936,6 +953,7 @@ async function placeOrder(){
 
   const btn=$('#placeBtn');btn.disabled=true;btn.textContent='Wird gesendet…';
   const pay=$('#f_pay').value, note=$('#f_note').value.trim();
+  const email=($('#f_email')?$('#f_email').value.trim():'')||'';
   const z=ZONES[activeZone]||{name:'',fee:0};
   const bonNr='W'+Date.now().toString().slice(-8);
   const items=cart.map(c=>({name:c.name,nr:c.nr,qty:c.qty,price:c.unit,taxRate:c.taxRate||'food',options:c.opts.map(o=>({label:o.label,value:o.name,price:o.price})),note:''}));
@@ -943,11 +961,14 @@ async function placeOrder(){
   const addr=isDeliv?`${street}, ${zip} ${city}`:'';
   // Bestellweg-Text
   const wayText = isDeliv ? ('🛵 LIEFERUNG · '+z.name) : (isDine ? ('🍽️ VOR ORT · '+guests+' Pers.') : '🥡 ABHOLUNG');
+  // E-Mail in die Notiz einbetten (POS liest sie aus), falls keine eigene Spalte existiert
+  const emailTag = email ? ('✉️ '+email) : '';
   // [NEU] = wartet auf Annahme im POS. Wird nach Annahme zu [OK:Minuten] geändert.
-  const orderNote=['[NEU]',wayText,'⏰ '+wishLabel,addr,note].filter(Boolean).join(' · ');
+  const orderNote=['[NEU]',wayText,'⏰ '+wishLabel,addr,emailTag,note].filter(Boolean).join(' · ');
 
   const body={location_id:LOCATION_ID,bon_nr:bonNr,table_id:isDeliv?('Lieferung '+z.name):(isDine?('Vor Ort '+guests+'P'):'Abholung'),
     items:JSON.stringify(items),total,payment:pay,customer_name:name,customer_phone:phone,
+    customer_email:email||null,
     customer_street:addr||null,note:orderNote,source:'WEBSHOP',created_at:new Date().toISOString(),storniert:false};
   try{
     const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr',{method:'POST',
@@ -981,8 +1002,48 @@ function showDone(bonNr,total,isDeliv){
    [FERTIG] -> fertig | [GELIEFERT]/[ABGELEHNT] -> Ende
    ==================================================================== */
 let _statusTimer=null;
+let _trackBon=null, _trackDeliv=false, _trackDine=false;
 function stopStatusTracking(){ if(_statusTimer){clearInterval(_statusTimer);_statusTimer=null;} }
+
+// Banner unten aktualisieren
+function renderTrackBanner(stage, prepMin){
+  const bar=document.getElementById('orderTrack'); if(!bar) return;
+  const ic={pruefen:'⏳',ok:'✅',kocht:'👨‍🍳',fertig:(_trackDeliv?'🛵':'🍽️'),ende:'🎉',abgelehnt:'😔'}[stage]||'⏳';
+  const wayWord=_trackDeliv?'geliefert':(_trackDine?'serviert':'abholbereit');
+  const txt={
+    pruefen:'Wird geprüft…',
+    ok:'Bestätigt'+(prepMin?(' · ca. '+prepMin+' Min'):''),
+    kocht:'Wird zubereitet 👨‍🍳',
+    fertig:(_trackDeliv?'Unterwegs zu dir 🛵':'Fertig – bitte abholen'),
+    ende:(_trackDeliv?'Geliefert ✓':'Abgeschlossen ✓'),
+    abgelehnt:'Leider abgelehnt – bitte anrufen'
+  }[stage]||'…';
+  document.getElementById('otIc').textContent=ic;
+  document.getElementById('otBon').textContent='Bestellung '+(_trackBon||'');
+  document.getElementById('otStat').textContent=txt;
+  bar.style.display='flex';
+}
+// Tippt der Kunde aufs Banner -> Warenkorb wieder auf mit voller Statusansicht
+function reopenTrack(){
+  if(!_trackBon) return;
+  $('#drawer').classList.add('show');$('#drawerScrim').classList.add('show');$('#drawerScrim').style.display='block';
+  document.body.style.overflow='hidden';$('#drawerTitle').textContent='Deine Bestellung';
+  $('#cartList').innerHTML=`<div class="done"><div class="ic">✓</div><h3>Deine Bestellung läuft</h3>
+    <div class="bn">${_trackBon}</div><div id="liveStatus" style="margin-top:14px"></div></div>`;
+  $('#drawerFoot').innerHTML=`<button class="checkout" onclick="closeCart()">Schließen</button>`;
+  pollStatus(_trackBon,_trackDeliv,_trackDine);
+}
+// Kunde schließt Banner manuell
+function dismissTrack(){
+  const bar=document.getElementById('orderTrack'); if(bar) bar.style.display='none';
+  stopStatusTracking(); _trackBon=null;
+  try{ localStorage.removeItem('eatdesi_track'); }catch(e){}
+}
+
 function renderStatus(stage, prepMin, isDeliv, isDine){
+  // Banner immer aktualisieren
+  renderTrackBanner(stage, prepMin);
+  // Falls Warenkorb-Statusansicht offen ist, auch dort die Schritte zeichnen
   const el=document.getElementById('liveStatus'); if(!el) return;
   const wayWord=isDeliv?'geliefert':(isDine?'serviert':'abholbereit');
   const steps=[
@@ -991,16 +1052,15 @@ function renderStatus(stage, prepMin, isDeliv, isDine){
     {k:'kocht',   ic:'👨‍🍳', t:'Wird zubereitet'},
     {k:'fertig',  ic:'🍽️', t:(isDeliv?'Unterwegs zu dir':'Fertig – '+(isDine?'wird serviert':'bitte abholen'))},
   ];
-  // aktuellen Schritt-Index bestimmen
   const order={pruefen:0,ok:1,kocht:2,fertig:3,ende:4,abgelehnt:-1};
   const cur=order[stage];
   if(stage==='abgelehnt'){
     el.innerHTML='<div style="background:rgba(220,80,80,.12);border:1px solid rgba(220,80,80,.4);border-radius:12px;padding:14px;color:#ffb4b4;font-weight:600">😔 Deine Bestellung konnte leider nicht angenommen werden. Bitte ruf uns kurz an.</div>';
-    stopStatusTracking(); return;
+    return;
   }
   if(stage==='ende'){
     el.innerHTML='<div style="background:rgba(120,200,120,.12);border:1px solid rgba(120,200,120,.4);border-radius:12px;padding:14px;color:#b6e6b6;font-weight:600">🎉 '+(isDeliv?'Geliefert':'Abgeschlossen')+'. Vielen Dank & guten Appetit!</div>';
-    stopStatusTracking(); return;
+    return;
   }
   let html='<div style="display:flex;flex-direction:column;gap:7px">';
   steps.forEach((s,i)=>{
@@ -1031,14 +1091,34 @@ async function pollStatus(bonNr, isDeliv, isDine){
       {headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
     if(!r.ok) return;
     const arr=await r.json();
-    if(arr&&arr[0]){ const s=stageFromNote(arr[0].note); renderStatus(s.stage,s.prepMin,isDeliv,isDine); }
+    if(arr&&arr[0]){
+      const s=stageFromNote(arr[0].note);
+      renderStatus(s.stage,s.prepMin,isDeliv,isDine);
+      // Endzustände: Polling stoppen, Banner nach kurzer Zeit ausblenden
+      if(s.stage==='ende'||s.stage==='abgelehnt'){
+        stopStatusTracking();
+        setTimeout(()=>{ const b=document.getElementById('orderTrack'); if(b)b.style.display='none'; try{localStorage.removeItem('eatdesi_track');}catch(e){} }, 15000);
+      }
+    }
   }catch(e){}
 }
 function startStatusTracking(bonNr, isDeliv, isDine){
   stopStatusTracking();
+  _trackBon=bonNr; _trackDeliv=isDeliv; _trackDine=isDine;
+  try{ localStorage.setItem('eatdesi_track', JSON.stringify({bon:bonNr,deliv:isDeliv,dine:isDine,ts:Date.now()})); }catch(e){}
   renderStatus('pruefen',null,isDeliv,isDine);
   pollStatus(bonNr,isDeliv,isDine);
   _statusTimer=setInterval(()=>pollStatus(bonNr,isDeliv,isDine), 8000);
+}
+// Bei Seitenaufruf: falls noch eine laufende Bestellung gespeichert ist, Tracking fortsetzen
+function resumeTracking(){
+  try{
+    const raw=localStorage.getItem('eatdesi_track'); if(!raw) return;
+    const t=JSON.parse(raw);
+    // älter als 4 Stunden -> verwerfen
+    if(!t||!t.bon||(Date.now()-(t.ts||0))>4*3600*1000){ localStorage.removeItem('eatdesi_track'); return; }
+    startStatusTracking(t.bon, !!t.deliv, !!t.dine);
+  }catch(e){}
 }
 
 /* ====================================================================
@@ -1100,7 +1180,7 @@ async function pushRequest(p){
    UI PLUMBING
    ==================================================================== */
 function openCart(){renderCartList();$('#drawer').classList.add('show');$('#drawerScrim').classList.add('show');$('#drawerScrim').style.display='block';document.body.style.overflow='hidden';}
-function closeCart(){stopStatusTracking();$('#drawer').classList.remove('show');$('#drawerScrim').classList.remove('show');$('#drawerScrim').style.display='none';document.body.style.overflow='';$('#drawerTitle').textContent='Dein Warenkorb';}
+function closeCart(){$('#drawer').classList.remove('show');$('#drawerScrim').classList.remove('show');$('#drawerScrim').style.display='none';document.body.style.overflow='';$('#drawerTitle').textContent='Dein Warenkorb';}
 function setMode(m){mode=m;document.querySelectorAll('#modePills button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
   $('#modeHint').textContent= m==='lieferung'?('Lieferung ab '+eur(ZONES[0].min)+' · Zonen wählbar an der Kasse'):(m==='dinein'?'Tisch reservieren & vorbestellen – wir bestätigen deine Zeit':'Kostenlos abholen in der Brunnenallee 30');
   renderCartList();}
@@ -1719,6 +1799,7 @@ checkOpen(); setInterval(checkOpen,60000);
 indexMenu(); renderMenu(); updateCart(); drawReq(); renderGallery();
 loadConfig();
 loadMenuFromCloud();
+resumeTracking();
 </script>
 </body>
 </html>
