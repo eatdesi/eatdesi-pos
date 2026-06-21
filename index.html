@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v85</title>
+<title>eatDeSi POS v87</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -27,7 +27,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v85';",
+    "var CACHE='eatdesi-v87';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -18071,7 +18071,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
   const todayTips = todayOrders.reduce((s,o) => s + (o.trinkgeld||0), 0);
   const todayExpenses = (expenses||[]).filter(e => new Date(e.date||e.time||0).toLocaleDateString("de-DE") === todayStr).reduce((s,e) => s+(parseFloat(e.amount)||0),0);
   const openTables = Object.keys(tableOrders).filter(k => !String(k).startsWith("ta_") && tableOrders[k]?.items?.length > 0);
-  const activeTakeaway = (takeaway||[]).filter(t => !t.done);
+  const activeTakeaway = (takeaway||[]).filter(t => !t.done && !t.bezahlt);
   const hour = today.getHours();
   const greeting = hour < 12 ? "Guten Morgen" : hour < 18 ? "Guten Tag" : "Guten Abend";
 
@@ -18164,8 +18164,8 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
         // Liste aller Takeaways
         React.createElement("div", { style:{ padding:"10px 14px" } },
           // Offene
-          (takeaway||[]).filter(t=>!t.done).length > 0 && React.createElement("div", { style:{ fontWeight:700, fontSize:11, color:"#888", textTransform:"uppercase", marginBottom:6 } }, "🟠 Offen"),
-          (takeaway||[]).filter(t=>!t.done).map(ta =>
+          (takeaway||[]).filter(t=>!t.done && !t.bezahlt).length > 0 && React.createElement("div", { style:{ fontWeight:700, fontSize:11, color:"#888", textTransform:"uppercase", marginBottom:6 } }, "🟠 Offen"),
+          (takeaway||[]).filter(t=>!t.done && !t.bezahlt).map(ta =>
             React.createElement("div", {
               key: ta.id,
               style:{ background:"#fff8e1", border:"2px solid #f57f17", borderRadius:12, padding:"11px 14px", marginBottom:8, display:"flex", alignItems:"center", gap:10 }
@@ -18497,7 +18497,7 @@ function App() {
   }, []);
   const [loyaltySettings, setLoyaltySettings] = useState(() => LS.get("eatdesi_loyalty_settings", { pointsPerEuro:3, redeemRate:100, minRedeem:100, active:true }));
   const [happyHours, setHappyHours] = useState(() => LS.get("eatdesi_happyhours", []));
-  const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); return Object.assign({ name: "eatDeSi", address: "Brunnenallee 30 · 34537 Bad Wildungen", phone: "05621 9449087", footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: "Belks Direktvertrieb GmbH", firmaZusatz: "eatDeSi – Fusion Kitchen & Grill", firmaStrasse: "Brunnenallee 30", firmaPlzOrt: "34537 Bad Wildungen", firmaStNr: "26/229/25450", firmaUst: "DE361161517", firmaGericht: "Amtsgericht Kassel", firmaEmail: "eatdesi.bw@gmail.com", firmaWeb: "www.eatdesi-bw.de", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal", notifVolume: "laut", emailOn: false, emailServiceId: "", emailTemplateId: "", emailPublicKey: "", waOn: false, waAuto: true }, saved); });
+  const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); const merged = Object.assign({ name: "eatDeSi", address: "Brunnenallee 30 · 34537 Bad Wildungen", phone: "05621 9449087", footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: "Belks Direktvertrieb GmbH", firmaZusatz: "eatDeSi – Fusion Kitchen & Grill", firmaStrasse: "Brunnenallee 30", firmaPlzOrt: "34537 Bad Wildungen", firmaStNr: "26/229/25450", firmaUst: "DE361161517", firmaGericht: "Amtsgericht Kassel", firmaEmail: "eatdesi.bw@gmail.com", firmaWeb: "www.eatdesi-bw.de", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal", notifVolume: "laut", emailOn: true, emailServiceId: "service_b27x5h9", emailTemplateId: "template_6d8or1d", emailPublicKey: "eYBKtltVeOaq9pa0B", waOn: true, waAuto: true }, saved); if (!merged.emailServiceId) merged.emailServiceId = "service_b27x5h9"; if (!merged.emailTemplateId) merged.emailTemplateId = "template_6d8or1d"; if (!merged.emailPublicKey) merged.emailPublicKey = "eYBKtltVeOaq9pa0B"; return merged; });
   const [menuOpen, setMenuOpen] = useState(false);
   const [now, setNow] = useState(new Date());
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -18867,7 +18867,14 @@ function App() {
           if (cIdx >= 0) setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts} : c));
         }
       }
-      setTakeaway(t => t.filter(x => x.id !== taId));
+      // NICHT löschen! Takeaway bleibt im KDS Pro bis "Ausgeliefert".
+      // bezahlt=true -> aus "Offene Takeaways" raus, aber Küchen-Prozess (KDS) läuft weiter.
+      // Falls Küche schon fertig war (kdsHidden), jetzt ganz entfernen.
+      setTakeaway(t => t.map(x => {
+        if (x.id !== taId) return x;
+        if (x.kdsHidden) return null; // Küche bereits fertig -> komplett raus
+        return Object.assign({}, x, { bezahlt:true, bonNr: (x.bonNr||genNr()) });
+      }).filter(Boolean));
     } else {
       const o = tableOrders[tid];
       if (o) {
@@ -20641,7 +20648,8 @@ function KdsProView({ tableOrders, takeaway, setTableOrders, completedOrders, se
     var lbl = (ta.source && ta.source!=='Takeaway') ? ta.source : '🥡 Takeaway';
     return {
       id:'ta_'+ta.id, kind:'takeaway', taId:ta.id,
-      source: lbl+' #'+ta.id + (deliv?' · Lieferung':' · Abholung'),
+      source: lbl+' #'+ta.id + (deliv?' · Lieferung':' · Abholung') + (ta.bezahlt?' · 💶 BEZAHLT':' · ⏳ offen'),
+      bezahlt: !!ta.bezahlt,
       items: ta.items||[], status: ta.kdsStatus || 'new',
       time: ta.time||new Date().toISOString(),
       customerName: ta.customerName, customerPhone: ta.customerPhone
@@ -20685,8 +20693,13 @@ function KdsProView({ tableOrders, takeaway, setTableOrders, completedOrders, se
       setCompletedOrders(function(list){ return list.map(function(x){ return String(x.bonNr)===String(ticket.bonNr)?Object.assign({},x,{note:newNote}):x; }); });
       if (typeof updateOrderNoteInSupabase==='function') updateOrderNoteInSupabase(ticket.bonNr, newNote);
     } else if (ticket.kind === 'takeaway') {
-      // aus KDS ausblenden (Küche fertig); Takeaway bleibt für Bezahlung in der Takeaway-Ansicht
-      setTakeaway(function(t){ return t.map(function(x){ return x.id===ticket.taId?Object.assign({},x,{kdsStatus:'delivered',kdsHidden:true}):x; }); });
+      // Ausgeliefert: wenn schon bezahlt -> komplett aus Liste (ist bereits in geschlossener Order-Liste).
+      // Wenn noch nicht bezahlt -> nur aus KDS ausblenden, bleibt in Takeaway-Ansicht zur Bezahlung.
+      setTakeaway(function(t){ return t.map(function(x){
+        if (x.id!==ticket.taId) return x;
+        if (x.bezahlt) return null; // bezahlt + ausgeliefert -> ganz raus
+        return Object.assign({}, x, { kdsStatus:'delivered', kdsHidden:true }); // noch offen -> nur KDS aus
+      }).filter(Boolean); });
     } else if (ticket.kind === 'table' && setTableOrders) {
       setTableOrders(function(p){ var n=Object.assign({},p); if(n[ticket.tableId]) n[ticket.tableId]=Object.assign({},n[ticket.tableId],{kdsStatus:'delivered',kdsHidden:true}); return n; });
     }
