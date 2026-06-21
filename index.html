@@ -2,11 +2,12 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v93</title>
+<title>eatDeSi POS v95</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -35,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v93';",
+    "var CACHE='eatdesi-v95';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6574,30 +6575,24 @@ var EposWiFi = {
   print: function(ip, html, kitchen){
     var self = this;
     var lines = self.htmlToLines(html);
-    // Reihenfolge wie Gloria Food: zuerst SSL 8043, dann 443, dann unverschlüsselt 8008/80
     var attempts = [
       { port: 8043, ssl: true },
       { port: 443,  ssl: true },
       { port: 8008, ssl: false },
       { port: 80,   ssl: false }
     ];
+    var errs = [];
     return new Promise(function(resolve, reject){
       var i = 0;
       var next = function(){
-        if(i >= attempts.length){ reject(new Error('Drucker nicht erreichbar (alle Ports versucht)')); return; }
+        if(i >= attempts.length){ reject(new Error('Nicht erreichbar. Versucht: '+errs.join(' | '))); return; }
         var a = attempts[i++];
         self._printVia(ip, a.port, a.ssl, lines, kitchen).then(function(r){
           try { window._eposLastPort = a; } catch(e){}
           resolve(r);
-        }).catch(function(){ next(); });
+        }).catch(function(e){ errs.push(a.port+':'+(e&&e.message||e)); next(); });
       };
-      // Bekannten funktionierenden Port zuerst
-      if(window._eposLastPort){
-        var a = window._eposLastPort;
-        self._printVia(ip, a.port, a.ssl, lines, kitchen).then(resolve).catch(function(){ i=0; next(); });
-      } else {
-        next();
-      }
+      next();
     });
   }
 };
@@ -6715,30 +6710,23 @@ const BTPrint = {
     var qrUrl = '';
     var qm = /data-qr=["']([^"']+)["']/.exec(html||'');
     if(qm){ qrUrl = qm[1]; }
-    // Native Plugin-Methoden EINZELN nacheinander aufrufen (kein builder-chain noetig).
-    // Jede Methode gibt ein Promise zurueck; wir warten der Reihe nach.
+    // Plugin ist CHAINABLE: begin().align().text()....write()
+    // Jede Methode gibt den Builder zurueck, .write() gibt das Promise.
     var doPrint = function(){
-      var chain = Promise.resolve()
-        .then(function(){ return P.begin(); })
-        .then(function(){ return P.align({ alignment: 'left' }); })
-        .then(function(){ return P.doubleHeight({ enabled: dblH }); })
-        .then(function(){ return P.doubleWidth({ enabled: dblW }); })
-        .then(function(){ return P.bold({ enabled: true }); })
-        .then(function(){ return P.text({ text: text + '\n' }); });
-      // QR-Code zentriert drucken (falls vorhanden)
-      if(qrUrl){
-        chain = chain
-          .then(function(){ return P.doubleHeight({ enabled: false }); })
-          .then(function(){ return P.doubleWidth({ enabled: false }); })
-          .then(function(){ return P.align({ alignment: 'center' }); })
-          .then(function(){ return P.qr({ data: qrUrl }); })
-          .then(function(){ return P.text({ text: '\n' }); })
-          .then(function(){ return P.align({ alignment: 'left' }); });
+      var builder = P.begin();
+      builder = builder.align('left');
+      if(dblH || dblW){
+        if(dblH && builder.doubleHeight) builder = builder.doubleHeight();
+        if(dblW && builder.doubleWidth) builder = builder.doubleWidth();
       }
-      chain = chain
-        .then(function(){ return P.cutPaper({}); })
-        .then(function(){ return P.write(); });
-      return chain;
+      if(builder.bold) builder = builder.bold();
+      builder = builder.text(text + '\n');
+      if(builder.clearFormatting) builder = builder.clearFormatting();
+      if(qrUrl && builder.qr){
+        builder = builder.align('center').qr(qrUrl).text('\n').align('left');
+      }
+      builder = builder.cutPaper();
+      return builder.write();
     };
     // sicherstellen dass verbunden
     if(self._connectedAddr === address){
@@ -14248,6 +14236,20 @@ function PrinterSettingsView({
       marginBottom: 8
     }
   }, /*#__PURE__*/React.createElement("button", {
+    onClick: function(){ if(form.ip){ try{ window.open('https://'+form.ip,'_blank'); }catch(e){} } else { setWifiStatus('⚠️ Bitte zuerst IP eingeben.'); } },
+    style: {
+      flex: 1,
+      padding: 10,
+      borderRadius: 8,
+      border: "2px solid "+C.blue,
+      background: "#fff",
+      color: C.blue,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      fontWeight: 700,
+      fontSize: 12
+    }
+  }, "\uD83D\uDD13 Zertifikat \u00F6ffnen"), /*#__PURE__*/React.createElement("button", {
     onClick: testWiFiPrint,
     style: {
       flex: 1,
@@ -14278,7 +14280,7 @@ function PrinterSettingsView({
       background: "#e1f5fe",
       borderRadius: 8
     }
-  }, "\uD83D\uDCA1 Drucker muss im gleichen WLAN sein. ", /*#__PURE__*/React.createElement("b", null, "ePOS-Print Service"), " am Drucker aktivieren (EpsonNet Config / WebConfig). Funktioniert mit TM-m30 / TM-m30III \u2014 mehrere Tablets gleichzeitig, kein Dialog.")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCA1 ", /*#__PURE__*/React.createElement("b", null, "Erster Schritt:"), " Auf \u201E\uD83D\uDD13 Zertifikat \u00F6ffnen\u201C tippen \u2192 \u201EAdvanced\u201C \u2192 \u201EProceed\u201C, damit der Browser dem Drucker vertraut. Danach Testdruck. Drucker muss im gleichen WLAN sein. Mehrere Tablets gleichzeitig m\u00F6glich.")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: "#888",
