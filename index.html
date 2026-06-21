@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v87</title>
+<title>eatDeSi POS v89</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -27,7 +27,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v87';",
+    "var CACHE='eatdesi-v89';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6453,6 +6453,99 @@ const DRINK_CATS = ["Cocktails","Alkoholfrei","Softdrinks","Bier","Weine","Long 
 // === NATIVE BLUETOOTH DRUCK (Capacitor BLE Plugin) =========================
 // Druckt direkt auf JEDEN Bluetooth-Thermodrucker (ESC/POS), ohne RawBT.
 // Funktioniert in der APK (nicht im normalen Browser).
+// ===== Epson ePOS-Print WiFi/LAN Helper (direkter Druck über IP, kein Dialog) =====
+// Nutzt die ePOS-Print Service der TM-m30/TM-m30III (muss am Drucker aktiviert sein).
+// Wandelt unser Bon-HTML in ePOS-Print XML und sendet es per HTTP POST an den Drucker.
+var EposWiFi = {
+  esc: function(s){ return String(s==null?"":s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&apos;"); },
+  // HTML -> Zeilen-Objekte {text, align, bold, big}
+  htmlToLines: function(html){
+    var tmp = document.createElement('div'); tmp.innerHTML = html;
+    var lines = [];
+    var walk = function(node){
+      for(var i=0;i<node.childNodes.length;i++){
+        var c = node.childNodes[i];
+        if(c.nodeType===1){
+          var cls = (c.className||"")+"";
+          var st = (c.getAttribute&&c.getAttribute('style')||"")+"";
+          var isCenter = /center/.test(cls);
+          var isBold = /bold/.test(cls) || /font-weight\s*:\s*(700|800|900|bold)/.test(st);
+          var fsMatch = st.match(/font-size\s*:\s*(\d+)/);
+          var fs = fsMatch ? parseInt(fsMatch[1]) : 0;
+          var big = fs >= 18;
+          var isRow = /(^|\s)row(\s|$)/.test(cls);
+          var isLine = /(^|\s)line(\s|$)/.test(cls);
+          if(isLine){ lines.push({text:"--------------------------------", align:"left", bold:false, big:false}); continue; }
+          if(isRow){
+            var sp = c.querySelectorAll('span');
+            if(sp.length>=2){
+              var l=(sp[0].textContent||"").trim(), r=(sp[1].textContent||"").trim();
+              var pad=Math.max(1, 42 - l.length - r.length);
+              lines.push({text:l+Array(pad+1).join(' ')+r, align:"left", bold:isBold, big:big});
+              continue;
+            }
+          }
+          // Block-Elemente -> eigene Zeile
+          if(/^(DIV|P|H1|H2|H3|TR)$/.test(c.tagName)){
+            var txt = (c.textContent||"").replace(/\s+/g,' ').trim();
+            if(txt) lines.push({text:txt, align:isCenter?"center":"left", bold:isBold, big:big});
+            else walk(c);
+          } else { walk(c); }
+        }
+      }
+    };
+    walk(tmp);
+    return lines;
+  },
+  buildXml: function(lines, kitchen){
+    var x = '<epos-print xmlns="http://www.epson-pos.com/schemas/2011/03/epos-print">';
+    for(var i=0;i<lines.length;i++){
+      var ln = lines[i];
+      x += '<text align="'+(ln.align||'left')+'"/>';
+      // Küche/Bar: alles etwas groesser; ansonsten nur "big"-Zeilen doppelt
+      var dh = kitchen ? true : !!ln.big;
+      var dw = (kitchen && ln.big) ? true : false;
+      x += '<text dw="'+(dw?'true':'false')+'" dh="'+(dh?'true':'false')+'"/>';
+      x += '<text em="'+(ln.bold?'true':'false')+'"/>';
+      x += '<text>'+this.esc(ln.text)+'&#10;</text>';
+      x += '<text dw="false" dh="false" em="false"/>';
+    }
+    x += '<feed line="3"/><cut type="feed"/></epos-print>';
+    return x;
+  },
+  print: function(ip, html, kitchen){
+    return new Promise(function(resolve, reject){
+      try{
+        var lines = EposWiFi.htmlToLines(html);
+        var xml = EposWiFi.buildXml(lines, kitchen);
+        var soap = '<?xml version="1.0" encoding="utf-8"?>'+
+          '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>'+
+          xml + '</s:Body></s:Envelope>';
+        var url = 'http://'+ip+'/cgi-bin/epos/service.cgi?devid=local_printer&timeout=10000';
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', url, true);
+        xhr.setRequestHeader('Content-Type','text/xml; charset=utf-8');
+        xhr.setRequestHeader('SOAPAction','""');
+        xhr.timeout = 10000;
+        xhr.onreadystatechange = function(){
+          if(xhr.readyState===4){
+            if(xhr.status===200 && /success\s*=\s*"\s*(1|true)\s*"/.test(xhr.responseText)){
+              resolve(true);
+            } else {
+              reject(new Error('Drucker antwortet nicht ('+(xhr.status||'keine Antwort')+')'));
+            }
+          }
+        };
+        xhr.onerror = function(){ reject(new Error('Verbindung zum Drucker fehlgeschlagen')); };
+        xhr.ontimeout = function(){ reject(new Error('Zeitüberschreitung')); };
+        xhr.send(soap);
+      }catch(e){ reject(e); }
+    });
+  }
+};
+
 const BTPrint = {
   // capacitor-thermal-printer plugin (findet Bluetooth Classic + LE Thermodrucker)
   _plugin: function(){
@@ -7295,7 +7388,7 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   ` : "";
   const qrOn = printerCfg?.qrEnabled !== false;
   const qrLink = printerCfg?.qrUrl || "https://beacons.ai/eatdesi.bw";
-  const html = `<html><head><style>body{font-family:monospace;font-size:13px;width:${printerCfg?.width||280}px;margin:0 auto;padding:8px}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:700}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}</style></head><body${qrOn?` data-qr="${qrLink}"`:""}>
+  const html = `<html><head><meta name="viewport" content="width=device-width"><style>body{font-family:monospace;font-size:15px;font-weight:600;width:${printerCfg?.width||384}px;margin:0 auto;padding:8px;line-height:1.35}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:800}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}</style></head><body${qrOn?` data-qr="${qrLink}"`:""}>
     <div class="center bold" style="font-size:16px">${printerCfg?.name||"eatDeSi"}</div>
     <div class="center bold">${printerCfg?.firmaZusatz||"Fusion Kitchen & Grill"}</div>
     <div class="center bold">${printerCfg?.street||"Brunnenallee 30"}</div>
@@ -7315,8 +7408,9 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   </body></html>`;
   if (printerCfg?.method === "bluetooth") {
     const devId = printerCfg?.btAddress;
-    // Zahlungs-Beleg = Kunden-Beleg: 12pt (normal), damit alles sauber & komplett passt
-    const fsz = 0x00;
+    // Küche/Bar-Bon = 14pt (0x01) damit gut lesbar; Kunden-Beleg/Zahlung = 12pt (0x00)
+    const isKitchen = /KÜCHE|KUECHE|BAR/i.test(title||"");
+    const fsz = isKitchen ? 0x01 : 0x00;
     if (devId && BTPrint.isNative()) {
       BTPrint.printHtml(devId, html, fsz).catch(e => { printHtml(html); });
       return;
@@ -7331,17 +7425,24 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
       tmp.querySelectorAll('.center').forEach(c=>{const t=c.textContent.trim(),p=Math.max(0,Math.floor((32-t.length)/2));c.textContent=' '.repeat(p)+t;});
       const text = tmp.innerText||tmp.textContent||'';
       const ESC='\x1B',GS='\x1D';
-      const fsz=0x00; // Zahlungs-Beleg 12pt
+      const isKitchen = /KÜCHE|KUECHE|BAR/i.test(title||"");
+      const fsz = isKitchen ? 0x01 : 0x00; // Küche/Bar 14pt, Beleg 12pt
       const raw=ESC+'@'+GS+'!'+String.fromCharCode(fsz)+text+'\n\n\n'+GS+'V\x41\x03';
       const a=document.createElement('a'); a.href='rawbt://'+encodeURIComponent(raw); a.target='_blank';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       return;
     } catch(e) {}
   }
+  if (printerCfg?.method === "wifi" && printerCfg?.ip) {
+    var isKitchenW = /KÜCHE|KUECHE|BAR/i.test(title||"");
+    EposWiFi.print(printerCfg.ip, html, isKitchenW).catch(function(e){
+      // Fehlschlag -> Browser-Druck als Fallback, damit nichts verloren geht
+      printHtml(html);
+    });
+    return;
+  }
   printHtml(html);
 }
-
-// ===== Online-Bestellung annehmen -> Küche-Bon + Kunden-Beleg sofort drucken =====
 // items aus Website/Online haben { name, nr, qty, price, options:[{label,value,price}], note }
 function printOnlineBons(order, prepMin, printerCfg) {
   try {
@@ -7593,14 +7694,19 @@ function BonModal({
         // fallback to browser print
         printHtml(html);
       }
+    } else if (method === "wifi" && printerSettings?.ip) {
+      // Direkter WLAN-Druck über ePOS-Print (kein Dialog)
+      var isKitchenD = (typeof fontOverride !== 'number') || fontOverride >= 0x01;
+      EposWiFi.print(printerSettings.ip, html, isKitchenD).catch(function(e){
+        printHtml(html);
+      });
     } else {
       // Browser print (default)
       printHtml(html);
-    }
-  };
-  const bonHtml = (title, lines) => `<html><head><style>
-    body{font-family:monospace;font-size:13px;width:${printerSettings?.width || 280}px;margin:0 auto;padding:8px}
-    .row{display:flex;justify-content:space-between;margin:2px 0}.bold{font-weight:700}
+    }  };
+  const bonHtml = (title, lines) => `<html><head><meta name="viewport" content="width=device-width"><style>
+    body{font-family:monospace;font-size:15px;font-weight:600;width:${printerSettings?.width || 384}px;margin:0 auto;padding:8px;line-height:1.35}
+    .row{display:flex;justify-content:space-between;margin:2px 0}.bold{font-weight:800}
     .line{border-top:1px dashed #999;margin:5px 0}.center{text-align:center}
   </style></head><body>
     <div class="center bold" style="font-size:15px">${printerSettings?.name || "eatDeSi"}</div>
@@ -7622,9 +7728,9 @@ function BonModal({
   // Schlanker Bon NUR fuer Kueche/Bar: nur Tisch/Kunde + Speisen/Getraenke, grosse Schrift
   const kvBonHtml = (title, lines) => {
     const kundeInfo = customerName ? `<div class="center bold" style="font-size:20px;margin:2px 0">${customerName}</div>` : "";
-    return `<html><head><style>
-    body{font-family:monospace;font-size:18px;width:${printerSettings?.width || 280}px;margin:0 auto;padding:8px}
-    .row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:700}
+    return `<html><head><meta name="viewport" content="width=device-width"><style>
+    body{font-family:monospace;font-size:18px;font-weight:700;width:${printerSettings?.width || 384}px;margin:0 auto;padding:8px;line-height:1.4}
+    .row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:800}
     .line{border-top:2px solid #000;margin:6px 0}.center{text-align:center}
   </style></head><body>
     <div class="center bold" style="font-size:22px;margin:4px 0">${title}</div>
@@ -8297,7 +8403,7 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
       { t: "line" },
       { t: "sub", v: "Danke & bis bald! 🙏" }
     ];
-    const html = `<html><head><style>body{font-family:monospace;font-size:13px;width:280px;margin:0 auto;padding:8px}.h{font-weight:900;font-size:15px;text-align:center}.s{text-align:center;font-size:11px;color:#666}.ln{border-top:1px dashed #999;margin:5px 0}.row{display:flex;justify-content:space-between;margin:2px 0}.tot{display:flex;justify-content:space-between;font-weight:900;font-size:15px;margin:4px 0}</style></head><body>${
+    const html = `<html><head><style>body{font-family:monospace;font-size:15px;font-weight:600;width:384px;margin:0 auto;padding:8px}.h{font-weight:900;font-size:15px;text-align:center}.s{text-align:center;font-size:11px;color:#666}.ln{border-top:1px dashed #999;margin:5px 0}.row{display:flex;justify-content:space-between;margin:2px 0}.tot{display:flex;justify-content:space-between;font-weight:900;font-size:15px;margin:4px 0}</style></head><body>${
       lines.map(l => {
         if(l.t==="header") return `<div class="h">${l.v}</div>`;
         if(l.t==="sub") return `<div class="s">${l.v}</div>`;
@@ -8644,7 +8750,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
         `<div class="row"><span>${i.qty}× ${i.name}</span><span>${fmt(i.finalPrice*i.qty)}</span></div>`
       ).join("");
       const html = `<html><head><meta charset="UTF-8"><style>
-        body{font-family:monospace;font-size:13px;width:280px;margin:0 auto;padding:8px}
+        body{font-family:monospace;font-size:15px;font-weight:600;width:384px;margin:0 auto;padding:8px}
         .row{display:flex;justify-content:space-between;margin:3px 0}
         .b{font-weight:700}.c{text-align:center}.l{border-top:1px dashed #999;margin:6px 0}
         </style></head><body>
@@ -9113,7 +9219,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
                 // Print Rest-Bon if there's remaining balance
                 if(restGuthaben > 0) {
                   setTimeout(() => {
-                    const html = "<html><head><style>body{font-family:monospace;font-size:13px;width:280px;margin:0 auto;padding:10px}.c{text-align:center}.b{font-weight:700}.l{border-top:1px dashed #999;margin:6px 0}.big{font-size:16px;font-weight:900;letter-spacing:2px;color:#C84B31}</style></head><body>"
+                    const html = "<html><head><style>body{font-family:monospace;font-size:15px;font-weight:600;width:384px;margin:0 auto;padding:10px}.c{text-align:center}.b{font-weight:700}.l{border-top:1px dashed #999;margin:6px 0}.big{font-size:16px;font-weight:900;letter-spacing:2px;color:#C84B31}</style></head><body>"
                       +"<div class=\"c b\" style=\"font-size:15px\">eatDeSi POS</div>"
                       +"<div class=\"l\"></div>"
                       +"<div class=\"c b\" style=\"color:#f57f17;font-size:13px\">🎫 GUTSCHEIN REST-BON</div>"
@@ -13641,16 +13747,28 @@ function PrinterSettingsView({
     }
   };
 
-  // -- WiFi/Network Printer ----------------------------------------------------
+  // -- WiFi/Network Printer (Epson ePOS-Print, direkter Druck) -----------------
   const testWiFiPrint = () => {
     if (!form.ip) {
       setWifiStatus("⚠️ Bitte IP-Adresse eingeben.");
       return;
     }
-    setWifiStatus("📤 Sende Testdruck über WLAN...");
-    // Browser can't directly TCP connect - show instruction
-    setTimeout(() => setWifiStatus(`ℹ️ Drucker ${form.ip}:9100 — Browser kann keine direkte TCP-Verbindung öffnen. Bitte PrintNode, CUPS oder Epson ePOS SDK verwenden. Für Test: Browser-Druck wird geöffnet.`), 500);
-    testBrowserPrint();
+    setWifiStatus("📤 Sende Testdruck über WLAN an " + form.ip + "...");
+    var testHtml = '<html><body>'+
+      '<div class="center bold" style="font-size:18px">'+(form.name||"eatDeSi")+'</div>'+
+      '<div class="center">'+(form.address||"")+'</div>'+
+      '<div class="line"></div>'+
+      '<div class="center bold" style="font-size:18px">WLAN TESTDRUCK</div>'+
+      '<div class="row"><span>Drucker:</span><span>'+form.ip+'</span></div>'+
+      '<div class="row"><span>Status:</span><span>OK</span></div>'+
+      '<div class="line"></div>'+
+      '<div class="center">ePOS-Print funktioniert! ✓</div>'+
+      '</body></html>';
+    EposWiFi.print(form.ip, testHtml, false).then(function(){
+      setWifiStatus("✅ Testdruck erfolgreich an " + form.ip + " gesendet!");
+    }).catch(function(e){
+      setWifiStatus("❌ " + (e.message||e) + ". Prüfe: 1) Drucker im gleichen WLAN, 2) ePOS-Print Service am Drucker aktiviert, 3) IP korrekt.");
+    });
   };
   const testBrowserPrint = () => {
     const html = `<html><head><style>body{font-family:monospace;font-size:13px;width:${form.width}px;margin:0 auto;padding:8px}.center{text-align:center}.line{border-top:1px dashed #999;margin:5px 0}</style></head><body>
@@ -14103,7 +14221,7 @@ function PrinterSettingsView({
       background: "#e1f5fe",
       borderRadius: 8
     }
-  }, "\uD83D\uDCA1 Drucker muss im gleichen WLAN sein. Port: 9100.", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("b", null, "F\xFCr direkten Druck:"), " Epson ePOS SDK, PrintNode oder CUPS Druckserver empfohlen.")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCA1 Drucker muss im gleichen WLAN sein. ", /*#__PURE__*/React.createElement("b", null, "ePOS-Print Service"), " am Drucker aktivieren (EpsonNet Config / WebConfig). Funktioniert mit TM-m30 / TM-m30III \u2014 mehrere Tablets gleichzeitig, kein Dialog.")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: "#888",
@@ -17894,7 +18012,7 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
   };
 
   const printGutschein = (g, printerSettings) => {
-    const html = "<html><head><style>body{font-family:monospace;font-size:13px;width:280px;margin:0 auto;padding:10px}.c{text-align:center}.b{font-weight:700}.l{border-top:1px dashed #999;margin:6px 0}.big{font-size:18px;font-weight:900;letter-spacing:2px;color:#C84B31}</style></head><body>"
+    const html = "<html><head><style>body{font-family:monospace;font-size:15px;font-weight:600;width:384px;margin:0 auto;padding:10px}.c{text-align:center}.b{font-weight:700}.l{border-top:1px dashed #999;margin:6px 0}.big{font-size:18px;font-weight:900;letter-spacing:2px;color:#C84B31}</style></head><body>"
       +"<div class=\"c b\" style=\"font-size:15px\">" + (printerSettings?.name||"eatDeSi POS") + "</div>"
       +"<div class=\"c\" style=\"font-size:11px\">" + (printerSettings?.address||"") + "</div>"
       +"<div class=\"l\"></div>"
@@ -18497,7 +18615,7 @@ function App() {
   }, []);
   const [loyaltySettings, setLoyaltySettings] = useState(() => LS.get("eatdesi_loyalty_settings", { pointsPerEuro:3, redeemRate:100, minRedeem:100, active:true }));
   const [happyHours, setHappyHours] = useState(() => LS.get("eatdesi_happyhours", []));
-  const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); const merged = Object.assign({ name: "eatDeSi", address: "Brunnenallee 30 · 34537 Bad Wildungen", phone: "05621 9449087", footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: "Belks Direktvertrieb GmbH", firmaZusatz: "eatDeSi – Fusion Kitchen & Grill", firmaStrasse: "Brunnenallee 30", firmaPlzOrt: "34537 Bad Wildungen", firmaStNr: "26/229/25450", firmaUst: "DE361161517", firmaGericht: "Amtsgericht Kassel", firmaEmail: "eatdesi.bw@gmail.com", firmaWeb: "www.eatdesi-bw.de", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal", notifVolume: "laut", emailOn: true, emailServiceId: "service_b27x5h9", emailTemplateId: "template_6d8or1d", emailPublicKey: "eYBKtltVeOaq9pa0B", waOn: true, waAuto: true }, saved); if (!merged.emailServiceId) merged.emailServiceId = "service_b27x5h9"; if (!merged.emailTemplateId) merged.emailTemplateId = "template_6d8or1d"; if (!merged.emailPublicKey) merged.emailPublicKey = "eYBKtltVeOaq9pa0B"; return merged; });
+  const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); const merged = Object.assign({ name: "eatDeSi", address: "Brunnenallee 30 · 34537 Bad Wildungen", phone: "05621 9449087", footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: "Belks Direktvertrieb GmbH", firmaZusatz: "eatDeSi – Fusion Kitchen & Grill", firmaStrasse: "Brunnenallee 30", firmaPlzOrt: "34537 Bad Wildungen", firmaStNr: "26/229/25450", firmaUst: "DE361161517", firmaGericht: "Amtsgericht Kassel", firmaEmail: "eatdesi.bw@gmail.com", firmaWeb: "www.eatdesi-bw.de", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal", notifVolume: "laut", emailOn: true, emailServiceId: "service_b27x5h9", emailTemplateId: "template_6d8or1d", emailPublicKey: "eYBKtltVeOaq9pa0B", waOn: true, waAuto: true }, saved); if (!merged.emailServiceId) merged.emailServiceId = "service_b27x5h9"; if (!merged.emailTemplateId) merged.emailTemplateId = "template_6d8or1d"; if (!merged.emailPublicKey) merged.emailPublicKey = "eYBKtltVeOaq9pa0B"; if (!merged.width || merged.width < 384) merged.width = 384; return merged; });
   const [menuOpen, setMenuOpen] = useState(false);
   const [now, setNow] = useState(new Date());
   const [isOnline, setIsOnline] = useState(navigator.onLine);
