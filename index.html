@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v95</title>
+<title>eatDeSi POS v98</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v95';",
+    "var CACHE='eatdesi-v98';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6696,41 +6696,53 @@ const BTPrint = {
     var P=this._plugin();
     var self=this;
     if(!P) return Promise.reject(new Error('Drucker-Plugin nicht verfügbar'));
-    // Bon-Breite aus dem HTML (body{width:XXXpx}) lesen -> Zeichen pro Zeile
-    var W = 32;
-    var m = /width\s*:\s*(\d+)px/.exec(html||'');
-    if(m){ var px=parseInt(m[1],10); if(px>=384) W=46; else if(px>=304) W=40; else W=32; }
-    var text = this.htmlToText(html, W);
-    // Schriftgroesse aus fontCmd ableiten:
-    // 0x00=12pt normal, 0x01=14pt (nur Hoehe verdoppelt), 0x11/0x33=16pt (Hoehe+Breite)
     var fc = fontCmd || 0;
-    var dblH = (fc & 0x01) !== 0;      // Hoehe verdoppeln
-    var dblW = (fc & 0x10) !== 0;      // Breite verdoppeln
-    // QR-Code aus dem HTML lesen (data-qr Attribut)
+    var dblH = (fc & 0x01) !== 0;
+    var dblW = (fc & 0x10) !== 0;
+    // Zeichen pro Zeile: hängt von Papierbreite UND Schriftbreite ab.
+    // 80mm Drucker: 48 Zeichen normal. Bei doppelter Breite (dblW) halbiert sich das.
+    // Doppelte Höhe (dblH) ändert die Zeichenzahl pro Zeile NICHT.
+    var baseW = 32;
+    var m = /width\s*:\s*(\d+)px/.exec(html||'');
+    if(m){ var px=parseInt(m[1],10); if(px>=384) baseW=48; else if(px>=304) baseW=42; else baseW=32; }
+    var W = dblW ? Math.floor(baseW/2) : baseW;
+    var text = this.htmlToText(html, W);
     var qrUrl = '';
     var qm = /data-qr=["']([^"']+)["']/.exec(html||'');
     if(qm){ qrUrl = qm[1]; }
-    // Plugin ist CHAINABLE: begin().align().text()....write()
-    // Jede Methode gibt den Builder zurueck, .write() gibt das Promise.
+    // Plugin-Aufruf: unterstützt sowohl die neue Chain-API (begin().text().write())
+    // als auch ältere Plugin-Versionen, bei denen begin() evtl. kein Builder ist.
     var doPrint = function(){
-      var builder = P.begin();
-      builder = builder.align('left');
-      if(dblH || dblW){
-        if(dblH && builder.doubleHeight) builder = builder.doubleHeight();
-        if(dblW && builder.doubleWidth) builder = builder.doubleWidth();
+      var b = P.begin ? P.begin() : null;
+      // Prüfen, ob es ein echter Chain-Builder ist (hat .text und .write als Funktionen)
+      var isChain = b && typeof b.text === 'function' && typeof b.write === 'function';
+      if(isChain){
+        if(dblH && typeof b.doubleHeight === 'function') b = b.doubleHeight();
+        if(dblW && typeof b.doubleWidth === 'function') b = b.doubleWidth();
+        if(typeof b.bold === 'function') b = b.bold();
+        if(typeof b.align === 'function') b = b.align('left');
+        b = b.text(text + '\n');
+        if(qrUrl && typeof b.qr === 'function'){
+          if(typeof b.clearFormatting === 'function') b = b.clearFormatting();
+          if(typeof b.align === 'function') b = b.align('center');
+          b = b.qr(qrUrl).text('\n');
+        }
+        if(typeof b.cutPaper === 'function') b = b.cutPaper();
+        return b.write();
       }
-      if(builder.bold) builder = builder.bold();
-      builder = builder.text(text + '\n');
-      if(builder.clearFormatting) builder = builder.clearFormatting();
-      if(qrUrl && builder.qr){
-        builder = builder.align('center').qr(qrUrl).text('\n').align('left');
-      }
-      builder = builder.cutPaper();
-      return builder.write();
+      // Fallback: ältere API mit Einzelaufrufen (Objekt-Parameter)
+      return Promise.resolve()
+        .then(function(){ return P.begin ? P.begin() : null; })
+        .then(function(){ return P.text ? P.text({ text: text + '\n' }) : null; })
+        .then(function(){ if(qrUrl && P.qr) return P.qr({ value: qrUrl }); })
+        .then(function(){ return P.cutPaper ? P.cutPaper() : null; })
+        .then(function(){ return P.write ? P.write() : null; });
     };
-    // sicherstellen dass verbunden
     if(self._connectedAddr === address){
-      return doPrint();
+      return doPrint().catch(function(e){
+        self._connectedAddr = null;
+        return self.connect(address).then(doPrint);
+      });
     }
     return self.connect(address).then(doPrint);
   }
@@ -7452,9 +7464,8 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   </body></html>`;
   if (printerCfg?.method === "bluetooth") {
     const devId = printerCfg?.btAddress;
-    // Küche/Bar-Bon = 14pt (0x01) damit gut lesbar; Kunden-Beleg/Zahlung = 12pt (0x00)
-    const isKitchen = /KÜCHE|KUECHE|BAR/i.test(title||"");
-    const fsz = isKitchen ? 0x01 : 0x00;
+    // Alle Bons 14pt (0x01) für gute Lesbarkeit
+    const fsz = 0x01;
     if (devId && BTPrint.isNative()) {
       BTPrint.printHtml(devId, html, fsz).catch(e => { printHtml(html); });
       return;
@@ -7469,8 +7480,7 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
       tmp.querySelectorAll('.center').forEach(c=>{const t=c.textContent.trim(),p=Math.max(0,Math.floor((32-t.length)/2));c.textContent=' '.repeat(p)+t;});
       const text = tmp.innerText||tmp.textContent||'';
       const ESC='\x1B',GS='\x1D';
-      const isKitchen = /KÜCHE|KUECHE|BAR/i.test(title||"");
-      const fsz = isKitchen ? 0x01 : 0x00; // Küche/Bar 14pt, Beleg 12pt
+      const fsz = 0x01; // alle Bons 14pt
       const raw=ESC+'@'+GS+'!'+String.fromCharCode(fsz)+text+'\n\n\n'+GS+'V\x41\x03';
       const a=document.createElement('a'); a.href='rawbt://'+encodeURIComponent(raw); a.target='_blank';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -7511,20 +7521,10 @@ function printOnlineBons(order, prepMin, printerCfg) {
       return ex;
     }
 
-    // 1) KÜCHE-BON (nur Speisen, große Schrift; falls keine Speisen -> alles)
-    var food = items.filter(function(i){ return !isDrink(i); });
-    var kitchenItems = food.length ? food : items;
-    var kLines = kitchenItems.map(function(it){
-      return '<div class="bold" style="font-size:20px;margin:6px 0 2px">'+(it.qty||1)+'× '+(it.nr?it.nr+'. ':'')+it.name+'</div>'+optLines(it)+'<div>&nbsp;</div>';
-    }).join('');
-    kLines += '<div class="line"></div><div class="center bold" style="font-size:14px">⏱️ Fertig in ca. '+prepMin+' Min</div>';
-    printBon('🍳 KÜCHE — '+(deliv?'LIEFERUNG':'ABHOLUNG'), kLines, label, bonNr, now, delivery, printerCfg, null);
-
-    // 2) KUNDEN-BELEG (kompletter Auftrag + Summe)
+    // EIN kompletter Beleg: Artikel + Preise + Summe + Fertig-Zeit (Küche & Kunde zusammen)
     var sub = 0;
     var cLines = items.map(function(it){
       var line = (it.finalPrice!=null?it.finalPrice:it.price)||0;
-      // Optionen mit Aufpreis aufaddieren
       var optSum = 0; (it.options||[]).forEach(function(o){ optSum += (+o.price||0); });
       var unit = line + optSum;
       var lineTotal = unit * (it.qty||1);
@@ -7535,9 +7535,9 @@ function printOnlineBons(order, prepMin, printerCfg) {
     var t7 = calcTax7(items), t19 = calcTax19(items);
     if(t7>0)  cLines += '<div class="row"><span>MwSt. 7% (Speisen)</span><span>'+fmt(t7)+'</span></div>';
     if(t19>0) cLines += '<div class="row"><span>MwSt. 19% (Getränke)</span><span>'+fmt(t19)+'</span></div>';
-    cLines += '<div class="line"></div><div class="row bold" style="font-size:16px"><span>GESAMT</span><span>'+fmt(order.total!=null?order.total:sub)+'</span></div>';
-    cLines += '<div class="center" style="font-size:12px;margin-top:4px">'+(deliv?'🛵 Lieferung':'🥡 Abholung')+' · in ca. '+prepMin+' Min</div>';
-    cLines += '<div class="center" style="font-size:11px">Zahlung: '+(order.payment||'bei '+(deliv?'Lieferung':'Abholung'))+'</div>';
+    cLines += '<div class="line"></div><div class="row bold"><span>GESAMT</span><span>'+fmt(order.total!=null?order.total:sub)+'</span></div>';
+    cLines += '<div class="line"></div><div class="center bold">⏱️ Fertig in ca. '+prepMin+' Min</div>';
+    cLines += '<div class="center">'+(deliv?'🛵 Lieferung':'🥡 Abholung')+' · Zahlung: '+(order.payment||'bei '+(deliv?'Lieferung':'Abholung'))+'</div>';
     printBon('🧾 BELEG — '+(deliv?'LIEFERUNG':'ABHOLUNG'), cLines, label, bonNr, now, delivery, printerCfg, null);
   } catch(e){ console.warn('printOnlineBons Fehler:', e.message); }
 }
@@ -20023,6 +20023,14 @@ function App() {
   }), view === "online_orders" && /*#__PURE__*/React.createElement(OnlineOrdersLive, {
     pendingOrders: pendingOnlineOrders,
     onAccept: (order, prepMin) => {
+      // Schutz vor Doppel-Klick: wenn schon angenommen ([OK:..]) -> nichts tun, nicht erneut drucken
+      if (typeof order.note === 'string' && order.note.indexOf('[OK:') !== -1) {
+        setPendingOnlinePopup(null);
+        return;
+      }
+      if (window._acceptingBon === order.bonNr) { return; }
+      window._acceptingBon = order.bonNr;
+      setTimeout(function(){ if(window._acceptingBon===order.bonNr) window._acceptingBon=null; }, 4000);
       // EINHEITLICHER FLOW: Annehmen -> direkt in KDS Pro "Neu" (NICHT mehr Takeaway!)
       // note-Marker [NEU] -> [OK:min]. Das ist KDS-Stage 'new'. Sync zu Supabase -> Website liest Status mit.
       var cleanNote = String(order.note||'').replace('[NEU]','').replace(/^[\s·]+/,'').trim();
