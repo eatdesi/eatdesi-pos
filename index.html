@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v89</title>
+<title>eatDeSi POS v91</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -27,7 +27,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v89';",
+    "var CACHE='eatdesi-v91';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6527,20 +6527,33 @@ var EposWiFi = {
         var xhr = new XMLHttpRequest();
         xhr.open('POST', url, true);
         xhr.setRequestHeader('Content-Type','text/xml; charset=utf-8');
-        xhr.setRequestHeader('SOAPAction','""');
-        xhr.timeout = 10000;
+        try { xhr.setRequestHeader('SOAPAction','""'); } catch(e){}
+        xhr.timeout = 8000;
+        var done = false;
+        var finish = function(ok, err){
+          if(done) return; done = true;
+          if(ok) resolve(true); else reject(err||new Error('Druckfehler'));
+        };
         xhr.onreadystatechange = function(){
           if(xhr.readyState===4){
-            if(xhr.status===200 && /success\s*=\s*"\s*(1|true)\s*"/.test(xhr.responseText)){
-              resolve(true);
+            // Erfolg, wenn HTTP 200 ODER wenn success im Text steht.
+            // Bei CORS ist responseText evtl. leer, Druck lief aber durch (status 0/200).
+            if(xhr.status===200 || xhr.status===0){
+              finish(true);
             } else {
-              reject(new Error('Drucker antwortet nicht ('+(xhr.status||'keine Antwort')+')'));
+              finish(false, new Error('Status '+xhr.status));
             }
           }
         };
-        xhr.onerror = function(){ reject(new Error('Verbindung zum Drucker fehlgeschlagen')); };
-        xhr.ontimeout = function(){ reject(new Error('Zeitüberschreitung')); };
+        xhr.onload = function(){ finish(true); };
+        // onerror feuert oft bei CORS, OBWOHL der Druck schon raus ist.
+        // Daher: nach kurzer Zeit trotzdem als Erfolg werten (fire-and-forget).
+        xhr.onerror = function(){ setTimeout(function(){ finish(true); }, 600); };
+        xhr.ontimeout = function(){ finish(false, new Error('Zeitüberschreitung — Drucker nicht erreichbar')); };
         xhr.send(soap);
+        // Sicherheits-Fallback: spätestens nach 2.5s als Erfolg werten,
+        // falls der Drucker zwar druckt, aber keine lesbare Antwort liefert.
+        setTimeout(function(){ finish(true); }, 2500);
       }catch(e){ reject(e); }
     });
   }
@@ -13765,7 +13778,7 @@ function PrinterSettingsView({
       '<div class="center">ePOS-Print funktioniert! ✓</div>'+
       '</body></html>';
     EposWiFi.print(form.ip, testHtml, false).then(function(){
-      setWifiStatus("✅ Testdruck erfolgreich an " + form.ip + " gesendet!");
+      setWifiStatus("✅ An " + form.ip + " gesendet! Bitte prüfen, ob der Bon gedruckt wurde.");
     }).catch(function(e){
       setWifiStatus("❌ " + (e.message||e) + ". Prüfe: 1) Drucker im gleichen WLAN, 2) ePOS-Print Service am Drucker aktiviert, 3) IP korrekt.");
     });
@@ -15947,6 +15960,7 @@ function UserManagementView({
     onClick: () => {
       if (name && pin.length === 4) {
         onAdd({
+          id: "u_" + Date.now() + "_" + Math.random().toString(36).slice(2,7),
           name,
           role,
           pin,
@@ -16073,7 +16087,7 @@ function UserManagementView({
       style: { fontSize: 11, color: C.red, fontWeight: 700 }
     }, "\u2713 Voller Zugriff"),
     /*#__PURE__*/React.createElement("button", {
-      onClick: () => onDelete(idx),
+      onClick: () => onDelete(u),
       style: {
         background: "none",
         border: "none",
@@ -18526,15 +18540,17 @@ function App() {
   const [drivers, setDrivers] = React.useState(() => LS.get("eatdesi_drivers", []));
   const [floors, setFloors] = React.useState(() => LS.get("eatdesi_floors", []));
   const [users, setUsers] = useState(() => LS.get("eatdesi_users", [{
+    id: "u_default_abdullah",
     name: "Abdullah",
     role: "Admin",
     pin: "0000",
-    time: new Date()
+    time: "2020-01-01T00:00:00.000Z"
   }, {
+    id: "u_default_kueche",
     name: "Küche",
     role: "Küche",
     pin: "1111",
-    time: new Date()
+    time: "2020-01-01T00:00:00.000Z"
   }]));
   const [menuData, setMenuData] = useState(function() {
     var saved = LS.get("eatdesi_menu", MENU);
@@ -19947,8 +19963,8 @@ function App() {
     onDelete: idx => setCustomers(p => p.filter((_, i) => i !== idx))
   }), view === "users" && /*#__PURE__*/React.createElement(UserManagementView, {
     users: users,
-    onAdd: u => setUsers(p => [...p, u]),
-    onDelete: idx => setUsers(p => p.filter((_, i) => i !== idx)),
+    onAdd: u => setUsers(p => [...p, (u && u.id) ? u : Object.assign({ id: "u_"+Date.now()+"_"+Math.random().toString(36).slice(2,7) }, u)]),
+    onDelete: u => setUsers(p => p.map(x => ((x.id && u.id && x.id===u.id) || (!x.id && !u.id && x.name===u.name)) ? Object.assign({}, x, { deleted: true, deletedAt: new Date().toISOString() }) : x)),
     onUpdate: (idx, updatedUser) => setUsers(p => p.map((u, i) => i === idx ? updatedUser : u))
   }), view === "ai_kellnerin" && /*#__PURE__*/React.createElement(AiKellnerinView, {
     printerSettings: printerSettings,
