@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v102</title>
+<title>eatDeSi POS v103</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v102';",
+    "var CACHE='eatdesi-v103';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6745,6 +6745,109 @@ const BTPrint = {
       });
     }
     return self.connect(address).then(doPrint);
+  },
+  // === NEU v103: Strukturierter Druck mit pro-Zeile Schriftgröße ===
+  // blocks = Array von { type, ... }:
+  //   {type:'center', text, size}         -> zentriert (size: 'n'=normal12, 'h'=hoch14, 'xl'=hoch+breit)
+  //   {type:'lr', left, right, size}       -> links/rechts, Preis bricht NIE um
+  //   {type:'text', text, size}            -> linksbündig
+  //   {type:'line'}                        -> Trennlinie ---
+  //   {type:'feed', n}                     -> n Leerzeilen
+  //   {type:'qr', value}                   -> QR-Code zentriert
+  // Zeichenbreite je Schrift (80mm Drucker):
+  //   normal(12pt)=48, hoch(14pt,doubleHeight)=48 (Breite gleich!), xl(doubleW)=24
+  _btWidth: function(size){
+    if(size==='xl') return 24;      // doppelte Breite -> halbe Zeichen
+    return 48;                      // 80mm: normal & doppelte Höhe = 48 Zeichen
+  },
+  _padLR: function(left, right, W){
+    left = this._toAscii(String(left||''));
+    right = this._toAscii(String(right||''));
+    // Preis (rechts) hat IMMER Vorrang -> Name (links) wird gekürzt
+    var maxLeft = W - right.length - 1;
+    if(maxLeft < 1) maxLeft = 1;
+    if(left.length > maxLeft){ left = left.slice(0, maxLeft); }
+    var pad = W - left.length - right.length;
+    if(pad < 1) pad = 1;
+    return left + ' '.repeat(pad) + right;
+  },
+  _padCenter: function(text, W){
+    text = this._toAscii(String(text||''));
+    if(text.length >= W) return text.slice(0,W);
+    var p = Math.floor((W - text.length)/2);
+    return ' '.repeat(p) + text;
+  },
+  printStructured: function(address, blocks, qrValue){
+    var self=this;
+    var P=this._plugin();
+    if(!P) return Promise.reject(new Error('Drucker-Plugin nicht verfügbar'));
+    var doPrint = function(){
+      var b = P.begin ? P.begin() : null;
+      var isChain = b && typeof b.text === 'function' && typeof b.write === 'function';
+      if(!isChain){
+        // Fallback: alles als ein Text-Block (ohne pro-Zeile Schrift)
+        var flat = blocks.map(function(bl){
+          if(bl.type==='line') return Array(49).join('-');
+          if(bl.type==='feed') return Array((bl.n||1)+1).join('\n');
+          if(bl.type==='center') return self._padCenter(bl.text, 48);
+          if(bl.type==='lr') return self._padLR(bl.left, bl.right, 48);
+          if(bl.type==='text') return self._toAscii(bl.text||'');
+          return '';
+        }).join('\n');
+        return Promise.resolve()
+          .then(function(){ return P.begin ? P.begin() : null; })
+          .then(function(){ return P.text ? P.text({text: flat+'\n'}) : null; })
+          .then(function(){ if(qrValue && P.qr) return P.qr({value:qrValue}); })
+          .then(function(){ return P.cutPaper ? P.cutPaper() : null; })
+          .then(function(){ return P.write ? P.write() : null; });
+      }
+      // Chain-API: pro Block Schrift setzen, dann Text
+      var curSize=null, curAlign=null, curBold=null;
+      var setSize=function(size){
+        if(size===curSize) return;
+        if(typeof b.clearFormatting==='function') b=b.clearFormatting();
+        curBold=null; curAlign=null; // clearFormatting setzt alles zurück
+        if(size==='xl'){ if(b.doubleHeight)b=b.doubleHeight(); if(b.doubleWidth)b=b.doubleWidth(); }
+        else if(size==='h'){ if(b.doubleHeight)b=b.doubleHeight(); }
+        // 'n' = normal, keine Vergrößerung
+        curSize=size;
+      };
+      var setAlign=function(a){ if(a!==curAlign && typeof b.align==='function'){ b=b.align(a); curAlign=a; } };
+      var setBold=function(on){ if(on!==curBold && typeof b.bold==='function'){ b=b.bold(on); curBold=on; } };
+      blocks.forEach(function(bl){
+        if(bl.type==='line'){
+          setSize('n'); setAlign('left'); setBold(false);
+          b=b.text(Array(49).join('-')+'\n');
+        } else if(bl.type==='feed'){
+          setSize('n'); b=b.text(Array((bl.n||1)+1).join('\n'));
+        } else if(bl.type==='center'){
+          setSize(bl.size||'n'); setAlign('center'); setBold(bl.bold!==false);
+          b=b.text(self._toAscii(bl.text||'')+'\n');
+        } else if(bl.type==='lr'){
+          var sz=bl.size||'n';
+          setSize(sz); setAlign('left'); setBold(!!bl.bold);
+          b=b.text(self._padLR(bl.left, bl.right, self._btWidth(sz))+'\n');
+        } else if(bl.type==='text'){
+          setSize(bl.size||'n'); setAlign('left'); setBold(!!bl.bold);
+          b=b.text(self._toAscii(bl.text||'')+'\n');
+        }
+      });
+      // QR am Ende
+      if(qrValue && typeof b.qr==='function'){
+        if(typeof b.clearFormatting==='function') b=b.clearFormatting();
+        if(typeof b.align==='function') b=b.align('center');
+        b=b.qr(qrValue).text('\n');
+      }
+      if(typeof b.cutPaper==='function') b=b.cutPaper();
+      return b.write();
+    };
+    if(self._connectedAddr === address){
+      return doPrint().catch(function(e){
+        self._connectedAddr = null;
+        return self.connect(address).then(doPrint);
+      });
+    }
+    return self.connect(address).then(doPrint);
   }
 };
 
@@ -7424,6 +7527,86 @@ function OptionModal({
     }
   }, "+ Hinzuf\xFCgen \xB7 ", fmt(getPrice())))));
 }
+// === v103: HTML-Beleg -> strukturierte Blöcke für Bluetooth-Druck ===
+// Wandelt den fertigen Bon-HTML in eine Block-Liste mit pro-Zeile Schriftgröße.
+// Schriftgrößen-Schema je bonType:
+//   'kunde'/'bewirtung': Kopf+GESAMT zentriert fett, Artikel normal(12), Preis normal(12)
+//   'webshop': Kopf+GESAMT zentriert, Artikel 14pt(hoch), Preis 12pt
+//   'kueche': alles 14pt(hoch)
+// Größen-Codes: 'n'=normal12, 'h'=hoch14(doubleHeight), 'xl'=hoch+breit(GESAMT)
+function htmlToBlocks(html, bonType){
+  var scheme = bonType || 'kunde';
+  // Artikel-Größe: webshop & kueche -> 'h' (14pt), sonst 'n' (12pt)
+  var itemSize = (scheme==='webshop' || scheme==='kueche') ? 'h' : 'n';
+  var kuecheAll = (scheme==='kueche');
+  var tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  tmp.querySelectorAll('style,script').forEach(function(el){ el.parentNode && el.parentNode.removeChild(el); });
+  var blocks = [];
+  function fontPx(el){
+    var s = el.getAttribute && el.getAttribute('style') || '';
+    var m = /font-size\s*:\s*(\d+)px/.exec(s);
+    return m ? parseInt(m[1],10) : null;
+  }
+  function isBold(el){
+    if(el.classList && el.classList.contains('bold')) return true;
+    var s = el.getAttribute && el.getAttribute('style') || '';
+    return /font-weight\s*:\s*([7-9]00|bold)/.test(s);
+  }
+  function walk(node){
+    for(var i=0;i<node.childNodes.length;i++){
+      var ch = node.childNodes[i];
+      if(ch.nodeType!==1) continue;
+      var cls = (ch.className && (''+ch.className)) || '';
+      if(/\bline\b/.test(cls)){ blocks.push({type:'line'}); continue; }
+      if(/\brow\b/.test(cls)){
+        var sp = ch.querySelectorAll('span');
+        if(sp.length>=2){
+          var left = sp[0].textContent.trim();
+          var right = sp[1].textContent.trim();
+          var bold = isBold(ch);
+          var px = fontPx(ch);
+          var sz;
+          // GESAMT (große Schrift / fett) -> xl; sonst itemSize bzw. kueche=h
+          var isGesamt = /GESAMT/i.test(left) || (px && px>=16);
+          if(kuecheAll){ sz='h'; }
+          else if(isGesamt){ sz='xl'; bold=true; }
+          else if(/^(Bon-Nr|Datum|Tisch|MwSt|Netto|Trinkgeld|Zahlung|Zahlart|Beleg-Nr|Liefergeb)/i.test(left)){ sz='n'; }
+          else { sz=itemSize; }
+          blocks.push({type:'lr', left:left, right:right, size:sz, bold:bold});
+        } else {
+          var t = ch.textContent.trim();
+          if(t) blocks.push({type:'text', text:t, size:kuecheAll?'h':'n', bold:isBold(ch)});
+        }
+        continue;
+      }
+      if(/\bcenter\b/.test(cls)){
+        var ct = ch.textContent.trim();
+        if(ct){
+          // Firmen-Daten & Titel: immer 12pt zentriert fett.
+          // Nur beim Küche/Bar-Bon werden Titel/Tisch groß (14pt) gedruckt.
+          var csz = kuecheAll ? 'h' : 'n';
+          blocks.push({type:'center', text:ct, size:csz, bold:true});
+        }
+        continue;
+      }
+      // verschachtelte Container (z.B. tseBlock, deliveryBlock) -> rekursiv,
+      // aber Blattknoten mit eigenem Text als linksbündige Zeile ausgeben
+      if(ch.querySelector && ch.querySelector('.row,.center,.line,div')){
+        walk(ch);
+      } else {
+        var tt = ch.textContent.trim();
+        if(tt){
+          var tpx = fontPx(ch);
+          blocks.push({type:'text', text:tt, size: kuecheAll?'h':(tpx&&tpx<=10?'n':'n'), bold:isBold(ch)});
+        }
+      }
+    }
+  }
+  walk(tmp.querySelector('body') || tmp);
+  blocks.push({type:'feed', n:3});
+  return blocks;
+}
 function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse, bonType) {
   // Bon-Editor Konfiguration lesen (kunde/webshop). Fallback: alles an.
   var _bc = { logo:true, phone:true, qr:true, footer:true, mwst:true, width:80, footerText:null };
@@ -7472,10 +7655,16 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   </body></html>`;
   if (printerCfg?.method === "bluetooth") {
     const devId = printerCfg?.btAddress;
-    // Alle Bons 14pt (0x01) für gute Lesbarkeit
-    const fsz = 0x01;
     if (devId && BTPrint.isNative()) {
-      BTPrint.printHtml(devId, html, fsz).catch(e => { printHtml(html); });
+      try {
+        // v103: HTML -> strukturierte Blöcke, pro Zeile richtige Schriftgröße.
+        // bonType bestimmt Schriftgrößen-Schema (kunde/webshop/kueche).
+        const blocks = htmlToBlocks(html, bonType);
+        const qrVal = qrOn ? qrLink : null;
+        BTPrint.printStructured(devId, blocks, qrVal).catch(e => { printHtml(html); });
+      } catch(e) {
+        BTPrint.printHtml(devId, html, 0x01).catch(e2 => { printHtml(html); });
+      }
       return;
     }
     printHtml(html); return;
@@ -7719,10 +7908,14 @@ function BonModal({
       // Native Bluetooth (Capacitor BLE) — direkt an Thermodrucker
       const devId = printerSettings?.btAddress;
       if (devId && BTPrint.isNative()) {
-        BTPrint.printHtml(devId, html, fc).catch(e => {
-          // bei Fehler: Browser-Druck als Notfall
-          printHtml(html);
-        });
+        try {
+          // v103: Küche/Bar-Bon = 'kueche' (alles 14pt), Gästebon = 'kunde'
+          var _bt = /KÜCHE|KUECHE|BAR|SPEISEN|GETRÄNKE|GETRAENKE/i.test(html) ? 'kueche' : 'kunde';
+          var _blocks = htmlToBlocks(html, _bt);
+          BTPrint.printStructured(devId, _blocks, null).catch(e => { printHtml(html); });
+        } catch(e) {
+          BTPrint.printHtml(devId, html, fc).catch(e2 => { printHtml(html); });
+        }
       } else {
         // kein Gerät gespeichert ODER nicht in APK -> Browser-Druck
         printHtml(html);
