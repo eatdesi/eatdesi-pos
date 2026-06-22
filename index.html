@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v98</title>
+<title>eatDeSi POS v99</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v98';",
+    "var CACHE='eatdesi-v99';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -18529,6 +18529,10 @@ function App() {
   // ONLINE-BESTELLUNG: Popup wenn neue Web-Bestellung wartet (nach completedOrders definiert!)
   const [pendingOnlinePopup, setPendingOnlinePopup] = React.useState(null);
   const _seenOnlineRef = React.useRef(null);
+  // ANFRAGE (Catering/Reservierung von Website): eigene Pop-up-Logik
+  const [webRequests, setWebRequests] = React.useState(() => LS.get("eatdesi_webrequests", []));
+  const [pendingAnfragePopup, setPendingAnfragePopup] = React.useState(null);
+  const _seenAnfrageRef = React.useRef(null);
   const pendingOnlineOrders = (completedOrders||[]).filter(isPendingOnline);
   const playNotifySound = React.useCallback(() => {
     try {
@@ -18572,6 +18576,20 @@ function App() {
       setView("online_orders");
     }
   }, [completedOrders]);
+  // ANFRAGE-Erkennung: neue Web-Anfrage (status 'neu') -> Ton + Pop-up
+  React.useEffect(() => {
+    var neue = (webRequests||[]).filter(r => r && r.status === 'neu');
+    if (_seenAnfrageRef.current === null) {
+      _seenAnfrageRef.current = new Set(neue.map(r => String(r.id)));
+      return;
+    }
+    var frisch = neue.filter(r => !_seenAnfrageRef.current.has(String(r.id)));
+    if (frisch.length > 0) {
+      frisch.forEach(r => _seenAnfrageRef.current.add(String(r.id)));
+      playNotifySound();
+      setPendingAnfragePopup(frisch[0]);
+    }
+  }, [webRequests]);
   const [expenses, setExpenses] = useState(() => LS.get("eatdesi_expenses", []));
   const [gutscheine, setGutscheine] = useState(() => LS.get("eatdesi_gutscheine", []));
   const [customers, setCustomers] = React.useState(() => {
@@ -18678,8 +18696,66 @@ function App() {
   const [loyaltySettings, setLoyaltySettings] = useState(() => LS.get("eatdesi_loyalty_settings", { pointsPerEuro:3, redeemRate:100, minRedeem:100, active:true }));
   const [happyHours, setHappyHours] = useState(() => LS.get("eatdesi_happyhours", []));
   const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); const merged = Object.assign({ name: "eatDeSi", address: "Brunnenallee 30 · 34537 Bad Wildungen", phone: "05621 9449087", footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: "Belks Direktvertrieb GmbH", firmaZusatz: "eatDeSi – Fusion Kitchen & Grill", firmaStrasse: "Brunnenallee 30", firmaPlzOrt: "34537 Bad Wildungen", firmaStNr: "26/229/25450", firmaUst: "DE361161517", firmaGericht: "Amtsgericht Kassel", firmaEmail: "eatdesi.bw@gmail.com", firmaWeb: "www.eatdesi-bw.de", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal", notifVolume: "laut", emailOn: true, emailServiceId: "service_b27x5h9", emailTemplateId: "template_6d8or1d", emailPublicKey: "eYBKtltVeOaq9pa0B", waOn: true, waAuto: true }, saved); if (!merged.emailServiceId) merged.emailServiceId = "service_b27x5h9"; if (!merged.emailTemplateId) merged.emailTemplateId = "template_6d8or1d"; if (!merged.emailPublicKey) merged.emailPublicKey = "eYBKtltVeOaq9pa0B"; if (!merged.width || merged.width < 384) merged.width = 384; return merged; });
+  // ANFRAGE-Pull: Setter global verfügbar machen + alle 8s aus Cloud holen
+  React.useEffect(() => {
+    window._setWebRequests = setWebRequests;
+    async function pullAnfragen() {
+      try {
+        const resp = await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_webrequests&select=value', { headers:{ 'apikey':SUPA_KEY, 'Authorization':'Bearer '+SUPA_KEY } });
+        if (!resp.ok) return;
+        const j = await resp.json();
+        if (j && j[0] && j[0].value) {
+          const list = JSON.parse(j[0].value);
+          if (Array.isArray(list)) {
+            setWebRequests(prev => JSON.stringify(prev) === JSON.stringify(list) ? prev : list);
+            try { LS.set("eatdesi_webrequests", list); } catch(e){}
+          }
+        }
+      } catch(e){}
+    }
+    pullAnfragen();
+    const t = setInterval(pullAnfragen, 8000);
+    return () => clearInterval(t);
+  }, []);
   const [menuOpen, setMenuOpen] = useState(false);
   const [now, setNow] = useState(new Date());
+  // ===== ANFRAGE: Akzeptieren (Status -> akzeptiert, lokal + Cloud) =====
+  const anfrageTypLabel = (t) => ({ catering:"🍽️ Catering", buffet:"🍱 Buffet", feier:"🎉 Feier", reservierung:"📅 Reservierung" }[t] || "📩 Anfrage");
+  const acceptAnfrage = React.useCallback((req) => {
+    if (!req) return;
+    setWebRequests(prev => {
+      const next = (prev||[]).map(r => r && r.id === req.id ? { ...r, status: 'akzeptiert' } : r);
+      try { LS.set("eatdesi_webrequests", next); } catch(e){}
+      // Cloud aktualisieren
+      try {
+        fetch(SUPA_URL + '/rest/v1/pos_state?on_conflict=key', {
+          method:'POST',
+          headers:{ 'apikey':SUPA_KEY, 'Authorization':'Bearer '+SUPA_KEY, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates' },
+          body: JSON.stringify({ key: LOCATION_ID+'_webrequests', value: JSON.stringify(next), updated_at: new Date().toISOString() })
+        }).catch(()=>{});
+      } catch(e){}
+      return next;
+    });
+    setPendingAnfragePopup(null);
+  }, []);
+  // ===== ANFRAGE: Bon drucken =====
+  const printAnfrageBon = React.useCallback((req) => {
+    if (!req) return;
+    try {
+      let body = '';
+      body += '<div class="row"><span>Typ:</span><span>'+anfrageTypLabel(req.type).replace(/^[^ ]+ /,'')+'</span></div>';
+      body += '<div class="row"><span>Name:</span><span>'+(req.name||'-')+'</span></div>';
+      body += '<div class="row"><span>Telefon:</span><span>'+(req.phone||'-')+'</span></div>';
+      if (req.email) body += '<div class="row"><span>E-Mail:</span><span>'+req.email+'</span></div>';
+      body += '<div class="row"><span>Datum:</span><span>'+(req.date||'-')+'</span></div>';
+      if (req.guests) body += '<div class="row"><span>Personen:</span><span>'+req.guests+'</span></div>';
+      body += '<div class="line"></div>';
+      if (req.message) body += '<div style="font-size:13px;padding:4px 0"><b>Nachricht:</b><br>'+req.message+'</div>';
+      body += '<div class="line"></div><div class="center bold">📞 Bitte Kunde zurückrufen</div>';
+      printBon('🔔 ANFRAGE — '+anfrageTypLabel(req.type), body, req.name||'Anfrage', (req.id||'').replace('req',''), new Date(req.created_at||Date.now()), null, printerSettings, null);
+    } catch(e){ console.warn('Anfrage-Bon Fehler:', e.message); }
+  }, [printerSettings]);
+
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [manualMode, setManualMode] = useState(() => LS.get("eatdesi_mode", "auto")); // "auto" | "online" | "offline"
   const [showModeModal, setShowModeModal] = useState(false);
@@ -20130,6 +20206,38 @@ function App() {
     }, "Jetzt ansehen & annehmen"),
     React.createElement("button", {
       onClick: () => setPendingOnlinePopup(null),
+      style: { width:"100%", padding:11, borderRadius:12, border:"2px solid #ddd", background:"#fff", color:"#888", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }
+    }, "Später")
+  )),
+  // ===== 🔔 POPUP: Neue Anfrage (Catering/Reservierung von Website) =====
+  pendingAnfragePopup && /*#__PURE__*/React.createElement("div", {
+    style: { position:"fixed", inset:0, zIndex:9999, background:"rgba(0,0,0,.55)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 },
+    onClick: () => setPendingAnfragePopup(null)
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: (e)=>e.stopPropagation(),
+    style: { background:"#fff", borderRadius:20, padding:"26px 22px", maxWidth:380, width:"100%", textAlign:"center", boxShadow:"0 20px 60px #0006" }
+  },
+    React.createElement("div", { style:{ fontSize:54, marginBottom:6 } }, "🔔"),
+    React.createElement("div", { style:{ fontWeight:900, fontSize:20, color:"#C84B31", marginBottom:4 } }, "Neue Anfrage!"),
+    React.createElement("div", { style:{ display:"inline-block", background:"#fff3e0", color:"#e65100", fontSize:14, fontWeight:800, padding:"4px 14px", borderRadius:20, margin:"6px 0 10px" } }, anfrageTypLabel(pendingAnfragePopup.type)),
+    React.createElement("div", { style:{ textAlign:"left", fontSize:14, color:"#333", lineHeight:1.7, background:"#f7f7f7", borderRadius:12, padding:"12px 14px", marginBottom:14 } },
+      React.createElement("div", null, React.createElement("b", null, "👤 Name: "), (pendingAnfragePopup.name||"-")),
+      React.createElement("div", null, React.createElement("b", null, "📞 Telefon: "), (pendingAnfragePopup.phone||"-")),
+      pendingAnfragePopup.email && React.createElement("div", null, React.createElement("b", null, "✉️ E-Mail: "), pendingAnfragePopup.email),
+      React.createElement("div", null, React.createElement("b", null, "📅 Datum: "), (pendingAnfragePopup.date||"-")),
+      pendingAnfragePopup.guests && React.createElement("div", null, React.createElement("b", null, "👥 Personen: "), pendingAnfragePopup.guests),
+      pendingAnfragePopup.message && React.createElement("div", { style:{ marginTop:6, paddingTop:6, borderTop:"1px dashed #ccc" } }, React.createElement("b", null, "💬 "), pendingAnfragePopup.message)
+    ),
+    React.createElement("button", {
+      onClick: () => acceptAnfrage(pendingAnfragePopup),
+      style: { width:"100%", padding:14, borderRadius:12, border:"none", background:"#2e7d32", color:"#fff", fontWeight:800, fontSize:16, cursor:"pointer", fontFamily:"inherit", marginBottom:8 }
+    }, "✅ Akzeptieren"),
+    React.createElement("button", {
+      onClick: () => printAnfrageBon(pendingAnfragePopup),
+      style: { width:"100%", padding:13, borderRadius:12, border:"2px solid #2e7d32", background:"#fff", color:"#2e7d32", fontWeight:800, fontSize:15, cursor:"pointer", fontFamily:"inherit", marginBottom:8 }
+    }, "🧾 Bon drücken"),
+    React.createElement("button", {
+      onClick: () => setPendingAnfragePopup(null),
       style: { width:"100%", padding:11, borderRadius:12, border:"2px solid #ddd", background:"#fff", color:"#888", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }
     }, "Später")
   )),
@@ -21655,7 +21763,8 @@ var SYNC_BLACKLIST = [
   'eatdesi_orders',        // wird separat ueber eatdesi_orders-Logik gesynct
   'eatdesi_tableorders',   // wird separat ueber syncTableOrders gesynct
   'eatdesi_orders_updated', // nur ein Event-Flag
-  'eatdesi_abschluss_seen' // welchen Abschluss dieses Geraet schon verarbeitet hat (lokal)
+  'eatdesi_abschluss_seen', // welchen Abschluss dieses Geraet schon verarbeitet hat (lokal)
+  'eatdesi_webrequests'    // Anfragen: Website ist Master, POS holt nur (eigene Pull-Logik)
 ];
 // TSE bleibt IMMER lokal (gesetzlich: eigener Zaehler/Schluessel pro Kasse)
 function _isLocalOnlyKey(k) {
