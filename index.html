@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v99</title>
+<title>eatDeSi POS v102</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v99';",
+    "var CACHE='eatdesi-v102';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -7424,7 +7424,11 @@ function OptionModal({
     }
   }, "+ Hinzuf\xFCgen \xB7 ", fmt(getPrice())))));
 }
-function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse) {
+function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse, bonType) {
+  // Bon-Editor Konfiguration lesen (kunde/webshop). Fallback: alles an.
+  var _bc = { logo:true, phone:true, qr:true, footer:true, mwst:true, width:80, footerText:null };
+  try { if(bonType){ var _all=getBonConfig(); if(_all && _all[bonType]) _bc = Object.assign(_bc, _all[bonType]); } } catch(e){}
+  var _bonW = (_bc.width===58) ? 304 : ((printerCfg && printerCfg.width) || 384);
   const tseBlock = tse ? `
     <div class="line"></div>
     <div style="font-size:10px;line-height:1.5">
@@ -7442,15 +7446,19 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     ${(deliveryInfo.plz || deliveryInfo.city) ? `<div>${[deliveryInfo.plz, deliveryInfo.city].filter(Boolean).join(" ")}</div>` : ""}
     ${deliveryInfo.phone ? `<div>📞 ${deliveryInfo.phone}</div>` : ""}
   ` : "";
-  const qrOn = printerCfg?.qrEnabled !== false;
+  const qrOn = (_bc.qr !== false) && (printerCfg?.qrEnabled !== false);
   const qrLink = printerCfg?.qrUrl || "https://beacons.ai/eatdesi.bw";
-  const html = `<html><head><meta name="viewport" content="width=device-width"><style>body{font-family:monospace;font-size:15px;font-weight:600;width:${printerCfg?.width||384}px;margin:0 auto;padding:8px;line-height:1.35}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:800}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}</style></head><body${qrOn?` data-qr="${qrLink}"`:""}>
-    <div class="center bold" style="font-size:16px">${printerCfg?.name||"eatDeSi"}</div>
-    <div class="center bold">${printerCfg?.firmaZusatz||"Fusion Kitchen & Grill"}</div>
-    <div class="center bold">${printerCfg?.street||"Brunnenallee 30"}</div>
-    <div class="center bold">${printerCfg?.cityLine||"34537 Bad Wildungen"}</div>
-    <div class="center bold">${printerCfg?.phone||"05621 9449087"}</div>
-    <div class="line"></div>
+  const _footerOn = _bc.footer !== false;
+  const _footerTxt = (_bc.footerText!=null && _bc.footerText!=='') ? _bc.footerText : (printerCfg?.footer||"Danke & bis bald! 🙏");
+  const _kopf = (_bc.logo !== false) ? `
+    <div class="center bold" style="font-size:16px">${printerCfg?.firmaName||printerCfg?.name||"eatDeSi"}</div>
+    <div class="center bold">${printerCfg?.firmaZusatz||"eatDeSi – Fusion Kitchen & Grill"}</div>
+    <div class="center bold">${printerCfg?.firmaStrasse||printerCfg?.street||"Brunnenallee 30"}</div>
+    <div class="center bold">${printerCfg?.firmaPlzOrt||printerCfg?.cityLine||"34537 Bad Wildungen"}</div>
+    ${(_bc.phone !== false) ? `<div class="center bold">${printerCfg?.firmaPhone||printerCfg?.phone||"05621 9449087"}</div>` : ""}
+    <div class="line"></div>` : "";
+  const html = `<html><head><meta name="viewport" content="width=device-width"><style>body{font-family:monospace;font-size:15px;font-weight:600;width:${_bonW}px;margin:0 auto;padding:8px;line-height:1.35}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:800}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}</style></head><body${qrOn?` data-qr="${qrLink}"`:""}>
+    ${_kopf}
     <div class="center bold" style="font-size:14px;margin:4px 0">${title}</div>
     <div class="row"><span>Bon-Nr:</span><span>${bonNr}</span></div>
     <div class="row"><span>Datum:</span><span>${fmtD(now)} ${fmtT(now)}</span></div>
@@ -7458,7 +7466,7 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     ${deliveryBlock}
     <div class="line"></div>${lines}
     ${tseBlock}
-    <div class="center" style="margin-top:8px;font-size:11px">${printerCfg?.footer||"Danke & bis bald! 🙏"}</div>
+    ${_footerOn?`<div class="center" style="margin-top:8px;font-size:11px">${_footerTxt}</div>`:""}
     ${qrOn?`<div class="center" style="font-size:11px;margin-top:4px">📱 ${qrLink}</div>`:""}
     <div>&nbsp;</div><div>&nbsp;</div><div>&nbsp;</div>
   </body></html>`;
@@ -7533,12 +7541,13 @@ function printOnlineBons(order, prepMin, printerCfg) {
     }).join('');
     cLines += '<div class="line"></div>';
     var t7 = calcTax7(items), t19 = calcTax19(items);
-    if(t7>0)  cLines += '<div class="row"><span>MwSt. 7% (Speisen)</span><span>'+fmt(t7)+'</span></div>';
-    if(t19>0) cLines += '<div class="row"><span>MwSt. 19% (Getränke)</span><span>'+fmt(t19)+'</span></div>';
+    var _wsMwst = true; try { var _wc=getBonConfig(); if(_wc && _wc.webshop) _wsMwst = _wc.webshop.mwst !== false; } catch(e){}
+    if(_wsMwst && t7>0)  cLines += '<div class="row"><span>MwSt. 7% (Speisen)</span><span>'+fmt(t7)+'</span></div>';
+    if(_wsMwst && t19>0) cLines += '<div class="row"><span>MwSt. 19% (Getränke)</span><span>'+fmt(t19)+'</span></div>';
     cLines += '<div class="line"></div><div class="row bold"><span>GESAMT</span><span>'+fmt(order.total!=null?order.total:sub)+'</span></div>';
     cLines += '<div class="line"></div><div class="center bold">⏱️ Fertig in ca. '+prepMin+' Min</div>';
     cLines += '<div class="center">'+(deliv?'🛵 Lieferung':'🥡 Abholung')+' · Zahlung: '+(order.payment||'bei '+(deliv?'Lieferung':'Abholung'))+'</div>';
-    printBon('🧾 BELEG — '+(deliv?'LIEFERUNG':'ABHOLUNG'), cLines, label, bonNr, now, delivery, printerCfg, null);
+    printBon('🧾 BELEG — '+(deliv?'LIEFERUNG':'ABHOLUNG'), cLines, label, bonNr, now, delivery, printerCfg, null, 'webshop');
   } catch(e){ console.warn('printOnlineBons Fehler:', e.message); }
 }
 
@@ -7771,9 +7780,10 @@ function BonModal({
   </body></html>`;
   // Schlanker Bon NUR fuer Kueche/Bar: nur Tisch/Kunde + Speisen/Getraenke, grosse Schrift
   const kvBonHtml = (title, lines) => {
+    var _kbW = (printerSettings?.width || 384); try { var _kc=getBonConfig(); if(_kc && _kc.kueche && _kc.kueche.width===58) _kbW=304; } catch(e){}
     const kundeInfo = customerName ? `<div class="center bold" style="font-size:20px;margin:2px 0">${customerName}</div>` : "";
     return `<html><head><meta name="viewport" content="width=device-width"><style>
-    body{font-family:monospace;font-size:18px;font-weight:700;width:${printerSettings?.width || 384}px;margin:0 auto;padding:8px;line-height:1.4}
+    body{font-family:monospace;font-size:18px;font-weight:700;width:${_kbW}px;margin:0 auto;padding:8px;line-height:1.4}
     .row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:800}
     .line{border-top:2px solid #000;margin:6px 0}.center{text-align:center}
   </style></head><body>
@@ -7791,8 +7801,8 @@ function BonModal({
     `).join("") + `
       <div class="line"></div>
       <div class="row"><span>Netto</span><span>${fmt(netto)}</span></div>
-      ${tax7 > 0 ? `<div class="row"><span>MwSt. 7% (Speisen)</span><span>${fmt(tax7)}</span></div>` : ""}
-      ${tax19 > 0 ? `<div class="row"><span>MwSt. 19% (Getränke)</span><span>${fmt(tax19)}</span></div>` : ""}
+      ${(()=>{var _gm=true;try{var _gc=getBonConfig();if(_gc&&_gc.kunde)_gm=_gc.kunde.mwst!==false;}catch(e){}return _gm;})() ? `${tax7 > 0 ? `<div class="row"><span>MwSt. 7% (Speisen)</span><span>${fmt(tax7)}</span></div>` : ""}
+      ${tax19 > 0 ? `<div class="row"><span>MwSt. 19% (Getränke)</span><span>${fmt(tax19)}</span></div>` : ""}` : ""}
       ${fee > 0 ? `<div class="row" style="color:#1565c0"><span>Liefergebühr</span><span>${fmt(fee)}</span></div>` : ""}
       <div class="line"></div>
       <div class="row bold" style="font-size:22px"><span>GESAMT</span><span>${fmt(total)}</span></div>
@@ -12422,7 +12432,7 @@ function OrderListView({
             if(o.payMethod) bonLines += "<div class=\"row bold\"><span>Zahlung:</span><span>"+o.payMethod+"</span></div>";
             const title = "💳 ZAHLUNG — " + (o.tableId ? "Tisch "+o.tableId : "Takeaway");
             const delivery = o.customerName ? {name:o.customerName,phone:o.customerPhone,street:o.customerStreet,city:o.customerCity} : null;
-            printBon(title, bonLines, o.label||(o.tableId?"Tisch "+o.tableId:"Takeaway"), o.bonNr||"?", new Date(o.time), delivery, printerSettings, o.tse);
+            printBon(title, bonLines, o.label||(o.tableId?"Tisch "+o.tableId:"Takeaway"), o.bonNr||"?", new Date(o.time), delivery, printerSettings, o.tse, 'kunde');
           },
           style:{padding:"10px 4px",borderRadius:10,border:"2px solid #C84B31",background:"#fff5f0",color:"#C84B31",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12}
         }, "\uD83D\uDDA8\uFE0F Drucken"),
@@ -18560,6 +18570,13 @@ function App() {
     } catch(e){}
     try { if (navigator.vibrate) navigator.vibrate([300,120,300,120,300]); } catch(e){}
   }, []);
+  // 🔔 DAUER-KLINGELN: solange ein Online- oder Anfrage-Popup offen ist (noch nicht angenommen),
+  // wiederholt sich der Ton alle 2,5s wie ein Telefon-Klingeln. Stoppt automatisch beim Schließen/Annehmen.
+  React.useEffect(() => {
+    if (!pendingOnlinePopup && !pendingAnfragePopup) return;
+    var iv = setInterval(function(){ try { playNotifySound(); } catch(e){} }, 2500);
+    return function(){ clearInterval(iv); };
+  }, [pendingOnlinePopup, pendingAnfragePopup, playNotifySound]);
   React.useEffect(() => {
     console.log('🔔 CHECK: ' + (completedOrders||[]).length + ' orders gesamt, davon ' + pendingOnlineOrders.length + ' pending [NEU]', pendingOnlineOrders.map(o=>o.bonNr));
     if (_seenOnlineRef.current === null) {
@@ -18752,7 +18769,7 @@ function App() {
       body += '<div class="line"></div>';
       if (req.message) body += '<div style="font-size:13px;padding:4px 0"><b>Nachricht:</b><br>'+req.message+'</div>';
       body += '<div class="line"></div><div class="center bold">📞 Bitte Kunde zurückrufen</div>';
-      printBon('🔔 ANFRAGE — '+anfrageTypLabel(req.type), body, req.name||'Anfrage', (req.id||'').replace('req',''), new Date(req.created_at||Date.now()), null, printerSettings, null);
+      printBon('🔔 ANFRAGE — '+anfrageTypLabel(req.type), body, req.name||'Anfrage', (req.id||'').replace('req',''), new Date(req.created_at||Date.now()), null, printerSettings, null, 'kunde');
     } catch(e){ console.warn('Anfrage-Bon Fehler:', e.message); }
   }, [printerSettings]);
 
@@ -19114,7 +19131,7 @@ function App() {
         try {
           const bonLines = buildZahlungLines(ta.items||[], orderTotal, trinkgeld, payMethod);
           const delivery = ta.customerName ? {name:ta.customerName,phone:ta.customerPhone,street:ta.customerStreet,city:ta.customerCity} : null;
-          printBon("💳 ZAHLUNG — Takeaway", bonLines, ta.label||"Takeaway", _bonNr, new Date(), delivery, printerSettings, _tse);
+          printBon("💳 ZAHLUNG — Takeaway", bonLines, ta.label||"Takeaway", _bonNr, new Date(), delivery, printerSettings, _tse, 'kunde');
         } catch(e){ console.warn("Bondruck:", e); }
         // Auto Loyalty Points
         if (ta.customerPhone && loyaltySettings?.active !== false) {
@@ -19143,7 +19160,7 @@ function App() {
         try {
           const bonLines = buildZahlungLines(o.items||[], orderTotal, trinkgeld, payMethod);
           const delivery = o.customerName ? {name:o.customerName,phone:o.customerPhone,street:o.customerStreet,city:o.customerCity} : null;
-          printBon("💳 ZAHLUNG — Tisch " + tid, bonLines, o.label||("Tisch "+tid), _bonNr, new Date(), delivery, printerSettings, _tse);
+          printBon("💳 ZAHLUNG — Tisch " + tid, bonLines, o.label||("Tisch "+tid), _bonNr, new Date(), delivery, printerSettings, _tse, 'kunde');
         } catch(e){ console.warn("Bondruck:", e); }
         // Auto Loyalty Points: Eingabe kann Telefon ODER Kundennummer (KD-xxxx) sein
         const lookup = (loyaltyPhone || o.customerPhone || "").trim();
@@ -19385,6 +19402,8 @@ function App() {
     id: "cloud_setup", l: "Cloud Sync", i: "☁️"
   }, {
     id: "datev_export", l: "DATEV", i: "🧾"
+  }, {
+    id: "bon_editor", l: "Bon-Editor", i: "🧾"
   }, {
     id: "firmendaten", l: "Firmendaten", i: "🏢"
   }, {
@@ -20173,7 +20192,8 @@ function App() {
   ), view === "cloud_setup" && React.createElement(CloudSetupView, null
   ), view === "datev_export" && React.createElement(DATEVView, {completedOrders:completedOrders,expenses:expenses}
   ), view === "takeaway" && React.createElement(TakeawayView, {takeaway:takeaway,setTakeaway:setTakeaway,completedOrders:completedOrders,menuData:menuData,printerSettings:printerSettings,loggedInUser:loggedInUser})
-  , view === "firmendaten" && React.createElement(FirmendatenView, null
+  , view === "bon_editor" && React.createElement(BonEditorView, null
+  ), view === "firmendaten" && React.createElement(FirmendatenView, null
   ), view === "menu_import" && React.createElement(MenuImportExportView, {menuData:menuData,onUpdate:setMenuData}
   ), view === "test_center" && React.createElement(TestCenterView, {menuData:menuData,printerSettings:printerSettings,completedOrders:completedOrders}
   ), view === "ai_betriebsleiter" && React.createElement(AiBetriebsleiterView, {completedOrders:completedOrders}
@@ -20511,6 +20531,70 @@ function WebshopOrdersView({ onAccept }) {
             R.createElement('button',{onClick:function(){onAccept(o);},style:{width:'100%',padding:9,borderRadius:8,border:'none',background:'#2e7d32',color:'#fff',fontWeight:700,cursor:'pointer',fontFamily:'inherit',marginTop:8}},'Als Takeaway annehmen')
           );
         })
+  );
+}
+
+// ===== Bon-Editor: getrennte Einstellungen für Kunden-Beleg, Webshop-Beleg, Küche/Bar-Bon =====
+function getBonConfig(){
+  var def = {
+    kunde:   { width:80, logo:true,  phone:true,  mwst:true,  qr:true,  footer:true,  footerText:'Danke & bis bald! 🙏' },
+    webshop: { width:80, logo:true,  phone:true,  mwst:true,  qr:true,  footer:true,  footerText:'Danke & bis bald! 🙏' },
+    kueche:  { width:80, logo:false, phone:false, mwst:false, qr:false, footer:false, footerText:'' }
+  };
+  try {
+    var saved = LS.get('eatdesi_bonconfig', null);
+    if(saved){ ['kunde','webshop','kueche'].forEach(function(k){ saved[k] = Object.assign({}, def[k], saved[k]||{}); }); return saved; }
+  } catch(e){}
+  return def;
+}
+function BonEditorView() {
+  var R = React;
+  var [cfg, setCfg] = R.useState(getBonConfig);
+  var [tab, setTab] = R.useState('kunde');
+  var [saved, setSaved] = R.useState(false);
+  var save = function(){ LS.set('eatdesi_bonconfig', cfg); setSaved(true); setTimeout(function(){ setSaved(false); }, 1800); };
+  var upd = function(field, val){ setCfg(function(p){ var n=Object.assign({}, p); n[tab]=Object.assign({}, n[tab]); n[tab][field]=val; return n; }); };
+  var c = cfg[tab] || {};
+  var tabs = [['kunde','🧾 Kunden-Beleg'],['webshop','🌐 Webshop-Beleg'],['kueche','👨‍🍳 Küche & Bar']];
+  var toggles = [['logo','🏢 Firmen-Kopf (Name/Adresse)'],['phone','📞 Telefonnummer'],['mwst','💶 MwSt-Zeilen'],['qr','📱 QR-Code'],['footer','✍️ Fußzeile']];
+  var Toggle = function(field, label){
+    var on = !!c[field];
+    return R.createElement('div',{key:field,onClick:function(){ upd(field,!on); },style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'11px 13px',background:'#fff',borderRadius:10,border:'1px solid #eee',marginBottom:8,cursor:'pointer'}},
+      R.createElement('span',{style:{fontSize:14,fontWeight:600,color:'#333'}},label),
+      R.createElement('div',{style:{width:46,height:26,borderRadius:13,background:on?'#2e7d32':'#ccc',position:'relative',transition:'background .2s',flexShrink:0}},
+        R.createElement('div',{style:{width:20,height:20,borderRadius:10,background:'#fff',position:'absolute',top:3,left:on?23:3,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,.3)'}})
+      )
+    );
+  };
+  return R.createElement('div',{style:{padding:16,overflowY:'auto',height:'calc(100vh - 90px)'}},
+    R.createElement('div',{style:{fontWeight:800,fontSize:17,color:'#C84B31',marginBottom:6}},'🧾 Bon-Editor'),
+    R.createElement('div',{style:{fontSize:12,color:'#888',marginBottom:14}},'Stelle für jeden Bon getrennt ein, was gedruckt wird. Firmendaten kommen aus „Firmendaten“.'),
+    // Tab-Auswahl
+    R.createElement('div',{style:{display:'flex',gap:6,marginBottom:16,flexWrap:'wrap'}},
+      tabs.map(function(t){
+        var act = tab===t[0];
+        return R.createElement('button',{key:t[0],onClick:function(){ setTab(t[0]); },style:{flex:'1 1 30%',padding:'9px 6px',borderRadius:9,border:act?'2px solid #C84B31':'1.5px solid #ddd',background:act?'#C84B31':'#fff',color:act?'#fff':'#666',fontWeight:800,fontSize:12,cursor:'pointer',fontFamily:'inherit'}},t[1]);
+      })
+    ),
+    // Breite
+    R.createElement('div',{style:{background:'#fff',borderRadius:12,padding:14,border:'1px solid #eee',marginBottom:12}},
+      R.createElement('div',{style:{fontWeight:700,fontSize:13,marginBottom:10,color:'#555'}},'📐 Papierbreite'),
+      R.createElement('div',{style:{display:'flex',gap:8}},
+        [[58,'58 mm'],[80,'80 mm']].map(function(w){
+          var act = (c.width||80)===w[0];
+          return R.createElement('button',{key:w[0],onClick:function(){ upd('width',w[0]); },style:{flex:1,padding:'11px 0',borderRadius:9,border:act?'2px solid #2e7d32':'1.5px solid #ddd',background:act?'#e8f5e9':'#fff',color:act?'#2e7d32':'#666',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},w[1]);
+        })
+      )
+    ),
+    // Toggles
+    R.createElement('div',{style:{fontWeight:700,fontSize:13,marginBottom:8,color:'#555'}},'👁️ Was soll gedruckt werden?'),
+    toggles.map(function(t){ return Toggle(t[0],t[1]); }),
+    // Footer-Text (nur wenn footer an)
+    c.footer && R.createElement('div',{style:{background:'#fff',borderRadius:12,padding:14,border:'1px solid #eee',marginTop:4,marginBottom:12}},
+      R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:4}},'Fußzeilen-Text'),
+      R.createElement('input',{value:c.footerText||'',onChange:function(e){ upd('footerText',e.target.value); },style:{width:'100%',padding:'9px 10px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit',boxSizing:'border-box'}})
+    ),
+    R.createElement('button',{onClick:save,style:{width:'100%',padding:13,borderRadius:10,border:'none',background:saved?'#2e7d32':'#C84B31',color:'#fff',fontWeight:800,fontSize:15,cursor:'pointer',fontFamily:'inherit',marginTop:8}}, saved?'✓ Gespeichert!':'Speichern')
   );
 }
 
@@ -21661,6 +21745,19 @@ function mergeRemoteOrders(remoteOrders) {
   remoteOrders.forEach(function(ro) {
     var items = [];
     try { items = JSON.parse(ro.items || '[]'); } catch(e) {}
+    // FIX: Web-Shop/Online-Items haben nur "price" — POS rechnet/druckt mit "finalPrice".
+    // Daher finalPrice aus price (inkl. Optionen) befuellen, wenn nicht vorhanden.
+    try {
+      items = (items || []).map(function(it){
+        if (it && (it.finalPrice == null || it.finalPrice === 0)) {
+          var base = (it.finalPrice != null && it.finalPrice !== 0) ? it.finalPrice : (it.price || 0);
+          var optSum = 0;
+          (it.options || []).forEach(function(o){ optSum += (parseFloat(o && o.price) || 0); });
+          it.finalPrice = base + optSum;
+        }
+        return it;
+      });
+    } catch(e){}
     remoteByBon[String(ro.bon_nr || '')] = {
       bonNr: ro.bon_nr, tableId: ro.table_id, items: items, total: ro.total,
       payMethod: ro.payment, customerName: ro.customer_name, customerPhone: ro.customer_phone,
