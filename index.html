@@ -6700,12 +6700,16 @@ const BTPrint = {
     var dblH = (fc & 0x01) !== 0;
     var dblW = (fc & 0x10) !== 0;
     // Zeichen pro Zeile: hängt von Papierbreite UND Schriftbreite ab.
-    // 80mm Drucker: 48 Zeichen normal. Bei doppelter Breite (dblW) halbiert sich das.
-    // Doppelte Höhe (dblH) ändert die Zeichenzahl pro Zeile NICHT.
+    // 80mm Drucker: 48 Zeichen normal.
+    // WICHTIG (TM-m30): doubleHeight (dblH) macht die Zeichen AUCH breiter,
+    // daher passen dann nur ~halb so viele Zeichen pro Zeile -> sonst bricht "EUR" um.
     var baseW = 32;
     var m = /width\s*:\s*(\d+)px/.exec(html||'');
     if(m){ var px=parseInt(m[1],10); if(px>=384) baseW=48; else if(px>=304) baseW=42; else baseW=32; }
-    var W = dblW ? Math.floor(baseW/2) : baseW;
+    var W = baseW;
+    if(dblW) W = Math.floor(W/2);
+    else if(dblH) W = Math.floor(W/2);   // doubleHeight -> ebenfalls halbe Zeichenzahl
+    if(W < 16) W = 16;
     var text = this.htmlToText(html, W);
     var qrUrl = '';
     var qm = /data-qr=["']([^"']+)["']/.exec(html||'');
@@ -6757,8 +6761,10 @@ const BTPrint = {
   // Zeichenbreite je Schrift (80mm Drucker):
   //   normal(12pt)=48, hoch(14pt,doubleHeight)=48 (Breite gleich!), xl(doubleW)=24
   _btWidth: function(size){
-    if(size==='xl') return 24;      // doppelte Breite -> halbe Zeichen
-    return 48;                      // 80mm: normal & doppelte Höhe = 48 Zeichen
+    // TM-m30: doubleHeight macht Zeichen AUCH breiter -> halbe Zeichenzahl.
+    // Nur normale Schrift (n) bekommt volle 48 Zeichen auf 80mm.
+    if(size==='xl' || size==='h') return 24;
+    return 48;
   },
   _padLR: function(left, right, W){
     left = this._toAscii(String(left||''));
@@ -6785,7 +6791,8 @@ const BTPrint = {
       var b = P.begin ? P.begin() : null;
       var isChain = b && typeof b.text === 'function' && typeof b.write === 'function';
       if(!isChain){
-        // Fallback: alles als ein Text-Block (ohne pro-Zeile Schrift)
+        // Fallback: alles als ein Text-Block. Schrift kann hier nicht pro Zeile
+        // gesetzt werden -> wir drucken in normaler Schrift mit voller Breite (48).
         var flat = blocks.map(function(bl){
           if(bl.type==='line') return Array(49).join('-');
           if(bl.type==='feed') return Array((bl.n||1)+1).join('\n');
@@ -7656,15 +7663,12 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   if (printerCfg?.method === "bluetooth") {
     const devId = printerCfg?.btAddress;
     if (devId && BTPrint.isNative()) {
-      try {
-        // v103: HTML -> strukturierte Blöcke, pro Zeile richtige Schriftgröße.
-        // bonType bestimmt Schriftgrößen-Schema (kunde/webshop/kueche).
-        const blocks = htmlToBlocks(html, bonType);
-        const qrVal = qrOn ? qrLink : null;
-        BTPrint.printStructured(devId, blocks, qrVal).catch(e => { printHtml(html); });
-      } catch(e) {
-        BTPrint.printHtml(devId, html, 0x01).catch(e2 => { printHtml(html); });
-      }
+      // v103: Schriftgröße je Bon-Typ.
+      //  kueche -> 0x01 (doppelte Höhe, 14pt) für gute Küchen-Lesbarkeit
+      //  kunde/webshop/bewirtung -> 0x00 (normal, 12pt) -> volle 48 Zeichen,
+      //    dadurch bricht der Preis ("EUR") NICHT mehr in die nächste Zeile um.
+      const fsz = (bonType === 'kueche') ? 0x01 : 0x00;
+      BTPrint.printHtml(devId, html, fsz).catch(e => { printHtml(html); });
       return;
     }
     printHtml(html); return;
@@ -7908,16 +7912,9 @@ function BonModal({
       // Native Bluetooth (Capacitor BLE) — direkt an Thermodrucker
       const devId = printerSettings?.btAddress;
       if (devId && BTPrint.isNative()) {
-        try {
-          // v103: Küche/Bar-Bon = 'kueche' (alles 14pt), Gästebon = 'kunde'
-          var _bt = /KÜCHE|KUECHE|BAR|SPEISEN|GETRÄNKE|GETRAENKE/i.test(html) ? 'kueche' : 'kunde';
-          var _blocks = htmlToBlocks(html, _bt);
-          BTPrint.printStructured(devId, _blocks, null).catch(e => { printHtml(html); });
-        } catch(e) {
-          BTPrint.printHtml(devId, html, fc).catch(e2 => { printHtml(html); });
-        }
+        // fc kommt vom Aufrufer: Küche/Bar = 0x01 (14pt), Gästebon = 0x00 (12pt)
+        BTPrint.printHtml(devId, html, fc).catch(e => { printHtml(html); });
       } else {
-        // kein Gerät gespeichert ODER nicht in APK -> Browser-Druck
         printHtml(html);
       }
     } else if (method === "rawbt") {
