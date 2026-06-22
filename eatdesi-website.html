@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- eatDeSi Website · Update 2026-06-22b: Artikelnamen groesser+fetter · Preise kleiner+dezenter · Beliebt-Badge (27 Top-Artikel ⭐) · alle Beschreibungen · Anfrage-Benachrichtigung · Oeffnungszeiten · Ort-Liefergebuehr -->
+<!-- eatDeSi Website · Update 2026-06-22c: Beliebt-Badge bleibt auch bei Cloud-Menue (top per nr gemerged) · Artikelnamen groesser · Preise dezenter · 27 Top-Artikel · alle Beschreibungen -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -1363,11 +1363,16 @@ function applyCompany(){
 /* ---- LIVE-MENÜ aus Supabase (vom POS gepflegt) ---- */
 async function loadMenuFromCloud(){
   try{
+    // code-MENU ਦੇ "top" (Beliebt) artikel ਦੇ nr ਯਾਦ ਰੱਖੋ — cloud ਪੁਰਾਣਾ ਹੋਵੇ ਤਾਂ ਵੀ Beliebt ਰਹੇ
+    const TOPNRS=new Set();
+    try{ Object.values(MENU).forEach(arr=>arr.forEach(it=>{ if(it&&it.top) TOPNRS.add(String(it.nr)); })); }catch(_){}
     const r=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_menu&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
     if(r.ok){const j=await r.json();
       if(j&&j[0]&&j[0].value){
         const m=JSON.parse(j[0].value);
         if(m&&typeof m==='object'&&Object.keys(m).length){
+          // cloud-menu ਵਿੱਚ "top" flag wieder setzen (nach nr)
+          try{ Object.values(m).forEach(arr=>{ if(Array.isArray(arr)) arr.forEach(it=>{ if(it&&TOPNRS.has(String(it.nr))) it.top=true; }); }); }catch(_){}
           MENU=m; indexMenu(); renderMenu();
         }
       }
