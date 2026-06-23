@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v112</title>
+<title>eatDeSi POS v115</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v112';",
+    "var CACHE='eatdesi-v115';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6667,6 +6667,10 @@ const BTPrint = {
   // HTML -> Plain Text Zeilen (fuer plugin .text())
   htmlToText: function(html, width){
     var W = width || 32;
+    var self = this;
+    var A = function(s){ return self._toAscii(s); };  // ASCII VOR dem Ausrichten,
+    // damit ä->ae / ü->ue / ß->ss die Spaltenbreite nicht NACH dem Padding sprengt
+    // (sonst bricht z.B. "MwSt. 19% (Getraenke)  2.24" um 1-2 Zeichen um).
     var tmp = document.createElement('div'); tmp.innerHTML = html;
     // style + script Tags entfernen (sonst wird CSS mitgedruckt!)
     tmp.querySelectorAll('style,script').forEach(function(el){ el.parentNode && el.parentNode.removeChild(el); });
@@ -6674,7 +6678,7 @@ const BTPrint = {
     // kein rechtsbündiges Auffüllen -> Wert kann nicht nach unten umbrechen.
     tmp.querySelectorAll('.row.info-row').forEach(function(r){
       var s=r.querySelectorAll('span');
-      if(s.length>=2){ r.textContent = s[0].textContent.trim()+' '+s[1].textContent.trim(); }
+      if(s.length>=2){ r.textContent = A(s[0].textContent.trim())+' '+A(s[1].textContent.trim()); }
     });
     // normale Preis-Zeilen: " EUR"/"€" aus dem Preis entfernen -> nur die Zahl
     // (EUR steht einmal oben rechts im Kopf). Name wird gekürzt, falls zu lang,
@@ -6682,8 +6686,8 @@ const BTPrint = {
     tmp.querySelectorAll('.row:not(.info-row)').forEach(function(r){
       var s=r.querySelectorAll('span');
       if(s.length>=2){
-        var l=s[0].textContent.trim();
-        var ri=s[1].textContent.trim().replace(/\s*(€|EUR)\s*$/i,'').trim();
+        var l=A(s[0].textContent.trim());
+        var ri=A(s[1].textContent.trim()).replace(/\s*(€|EUR)\s*$/i,'').trim();
         // mindestens 1 Leerzeichen zwischen Name und Preis -> Name max. (W - Preislänge - 1)
         var maxName = W - ri.length - 1;
         if(maxName < 1) maxName = 1;
@@ -6693,13 +6697,17 @@ const BTPrint = {
         r.textContent = l + ' '.repeat(p) + ri;
       }
     });
-    // EUR-Kopf: rechtsbündig "EUR" -> steht genau über der Preis-Spalte
+    // EUR-Kopf: als Zeile "Artikel ... EUR" -> EUR steht rechts über der Preisspalte.
+    // Links steht "Artikel" (kein reiner Leerraum), damit der Drucker die Zeile
+    // nicht linksbündig trimmt und "EUR" tatsächlich rechts landet.
     tmp.querySelectorAll('.eur-note').forEach(function(c){
-      var t=c.textContent.trim(); var p=Math.max(0,W-t.length);
-      c.textContent=' '.repeat(p)+t;
+      var t=A(c.textContent.trim());           // "EUR"
+      var left='Artikel';
+      var p=W-left.length-t.length; if(p<1)p=1;
+      c.textContent=left+' '.repeat(p)+t;
     });
     tmp.querySelectorAll('.line').forEach(function(l){ var n=Math.max(8,Math.floor(W/2)); var dash=Array(n+1).join('-'); var pad=Math.floor((W-n)/2); l.textContent=' '.repeat(pad)+dash; });
-    tmp.querySelectorAll('.center').forEach(function(c){var t=c.textContent.trim(),p=Math.max(0,Math.floor((W-t.length)/2));c.textContent=' '.repeat(p)+t;});
+    tmp.querySelectorAll('.center').forEach(function(c){var t=A(c.textContent.trim()),p=Math.max(0,Math.floor((W-t.length)/2));c.textContent=' '.repeat(p)+t;});
     // Block-Elemente mit Zeilenumbruch trennen (nicht auf innerText verlassen)
     var out='';
     var kids = tmp.childNodes;
@@ -6750,33 +6758,36 @@ const BTPrint = {
       // Prüfen, ob es ein echter Chain-Builder ist (hat .text und .write als Funktionen)
       var isChain = b && typeof b.text === 'function' && typeof b.write === 'function';
       if(isChain){
-        // Fett IMMER aus (ESC E 0) — kein Bon soll fett gedruckt werden (normal).
-        if(typeof b.raw === 'function'){ try { b = b.raw([0x1B, 0x45, 0x00]); } catch(e){} }
-        // Schriftgröße per raw ESC/POS GS ! n setzen — sicherer als doubleHeight(),
-        // das auf TM-m30 nicht zuverlässig greift. fc 0x01=14pt(hoch), 0x11=hoch+breit.
-        if((dblH || dblW) && typeof b.raw === 'function'){
-          try { b = b.raw([0x1D, 0x21, fc]); } catch(e){}
-        }
-        if(dblH && typeof b.doubleHeight === 'function') b = b.doubleHeight();
-        if(dblW && typeof b.doubleWidth === 'function') b = b.doubleWidth();
-        // KEIN globales bold mehr — fett machte die Zeichen breiter und ließ
-        // "EUR" umbrechen. Normaler Druck, volle Zeichenzahl passt.
+        // TM-m30: die Chain-API setzt Schriftgröße per b.raw()/b.doubleHeight()
+        // NICHT zuverlässig um. Deshalb die ESC/POS-Befehle DIREKT in den Text-String
+        // einbetten — so wie es im RawBT-Pfad funktioniert.
+        //   ESC E 0  = fett aus
+        //   GS ! n   = Schriftgröße (0x00=normal 12pt, 0x01=hoch 14pt, 0x11=hoch+breit)
+        var ESC='\x1B', GS='\x1D';
+        var fontPrefix = ESC+'E'+'\x00' + GS+'!'+String.fromCharCode(fc||0);
+        var fontReset  = GS+'!'+'\x00';   // vor Feed/Cut zurück auf normal
         if(typeof b.align === 'function') b = b.align('left');
-        b = b.text(text + '\n');
+        b = b.text(fontPrefix + text + '\n');
         if(qrUrl && typeof b.qr === 'function'){
-          if(typeof b.raw === 'function'){ try { b = b.raw([0x1D, 0x21, 0x00]); } catch(e){} }
           if(typeof b.clearFormatting === 'function') b = b.clearFormatting();
           if(typeof b.align === 'function') b = b.align('center');
           b = b.qr(qrUrl).text('\n');
         }
+        // WICHTIG (TM-m30): vor dem Schneiden genug Papier vorschieben, sonst
+        // schneidet der Cutter mitten in den letzten Zeilen / der nächste Bon
+        // klebt am vorherigen. Schriftgröße vor dem Feed auf normal zurücksetzen.
+        if(typeof b.text === 'function') b = b.text(fontReset + '\n\n\n\n');
         if(typeof b.cutPaper === 'function') b = b.cutPaper();
         return b.write();
       }
       // Fallback: ältere API mit Einzelaufrufen (Objekt-Parameter)
+      var ESC2='\x1B', GS2='\x1D';
+      var fontPrefix2 = ESC2+'E'+'\x00' + GS2+'!'+String.fromCharCode(fc||0);
       return Promise.resolve()
         .then(function(){ return P.begin ? P.begin() : null; })
-        .then(function(){ return P.text ? P.text({ text: text + '\n' }) : null; })
+        .then(function(){ return P.text ? P.text({ text: fontPrefix2 + text + '\n' }) : null; })
         .then(function(){ if(qrUrl && P.qr) return P.qr({ value: qrUrl }); })
+        .then(function(){ return P.text ? P.text({ text: GS2+'!'+'\x00' + '\n\n\n\n' }) : null; })
         .then(function(){ return P.cutPaper ? P.cutPaper() : null; })
         .then(function(){ return P.write ? P.write() : null; });
     };
