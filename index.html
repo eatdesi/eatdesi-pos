@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v104</title>
+<title>eatDeSi POS v106</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v104';",
+    "var CACHE='eatdesi-v106';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6670,7 +6670,23 @@ const BTPrint = {
     var tmp = document.createElement('div'); tmp.innerHTML = html;
     // style + script Tags entfernen (sonst wird CSS mitgedruckt!)
     tmp.querySelectorAll('style,script').forEach(function(el){ el.parentNode && el.parentNode.removeChild(el); });
-    tmp.querySelectorAll('.row').forEach(function(r){ var s=r.querySelectorAll('span'); if(s.length>=2){var l=s[0].textContent.trim(),ri=s[1].textContent.trim(); var avail=W-ri.length-1; if(l.length>avail){ l=l.slice(0,avail); } var p=Math.max(1,W-l.length-ri.length); r.textContent=l+' '.repeat(p)+ri;} });
+    // info-row (Bon-Nr/Datum/Tisch): linksbündig "Label Wert" in EINER Zeile,
+    // kein rechtsbündiges Auffüllen -> Wert kann nicht nach unten umbrechen.
+    tmp.querySelectorAll('.row.info-row').forEach(function(r){
+      var s=r.querySelectorAll('span');
+      if(s.length>=2){ r.textContent = s[0].textContent.trim()+' '+s[1].textContent.trim(); }
+    });
+    // normale Preis-Zeilen: " EUR"/"€" aus dem Preis entfernen -> nur die Zahl
+    // (EUR steht einmal oben im Kopf). So bricht "EUR" nie in die nächste Zeile um.
+    tmp.querySelectorAll('.row:not(.info-row)').forEach(function(r){
+      var s=r.querySelectorAll('span');
+      if(s.length>=2){
+        var l=s[0].textContent.trim();
+        var ri=s[1].textContent.trim().replace(/\s*(€|EUR)\s*$/i,'').trim();
+        var avail=W-ri.length-1; if(l.length>avail){ l=l.slice(0,avail); }
+        var p=Math.max(1,W-l.length-ri.length); r.textContent=l+' '.repeat(p)+ri;
+      }
+    });
     tmp.querySelectorAll('.line').forEach(function(l){ var n=Math.max(8,Math.floor(W/2)); var dash=Array(n+1).join('-'); var pad=Math.floor((W-n)/2); l.textContent=' '.repeat(pad)+dash; });
     tmp.querySelectorAll('.center').forEach(function(c){var t=c.textContent.trim(),p=Math.max(0,Math.floor((W-t.length)/2));c.textContent=' '.repeat(p)+t;});
     // Block-Elemente mit Zeilenumbruch trennen (nicht auf innerText verlassen)
@@ -7653,11 +7669,12 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   const html = `<html><head><meta name="viewport" content="width=device-width"><style>body{font-family:monospace;font-size:15px;font-weight:600;width:${_bonW}px;margin:0 auto;padding:8px;line-height:1.35}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:800}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}</style></head><body${qrOn?` data-qr="${qrLink}"`:""}>
     ${_kopf}
     <div class="center bold" style="font-size:14px;margin:4px 0">${title}</div>
-    <div class="row"><span>Bon-Nr:</span><span>${bonNr}</span></div>
-    <div class="row"><span>Datum:</span><span>${fmtD(now)} ${fmtT(now)}</span></div>
-    <div class="row"><span>Tisch:</span><span>${label}</span></div>
+    <div class="row info-row"><span>Bon-Nr:</span><span>${bonNr}</span></div>
+    <div class="row info-row"><span>Datum:</span><span>${fmtD(now)} ${fmtT(now)}</span></div>
+    <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
     ${deliveryBlock}
-    <div class="line"></div>${lines}
+    <div class="line"></div>
+    <div class="center eur-note" style="display:none">Preise in EUR</div>${lines}
     ${tseBlock}
     ${_footerOn?`<div class="center" style="margin-top:8px;font-size:11px">${_footerTxt}</div>`:""}
     ${qrOn?`<div class="center" style="font-size:11px;margin-top:4px">📱 ${qrLink}</div>`:""}
@@ -7960,11 +7977,12 @@ function BonModal({
     <div class="center" style="font-size:11px">${printerSettings?.phone || "05621 9449087"}</div>
     <div class="line"></div>
     <div class="center bold" style="margin:3px 0">${title}</div>
-    <div class="row"><span>Bon-Nr:</span><span>${bonNr}</span></div>
-    <div class="row"><span>Datum:</span><span>${fmtD(now)} ${fmtT(now)}</span></div>
-    <div class="row"><span>Tisch:</span><span>${label}</span></div>
+    <div class="row info-row"><span>Bon-Nr:</span><span>${bonNr}</span></div>
+    <div class="row info-row"><span>Datum:</span><span>${fmtD(now)} ${fmtT(now)}</span></div>
+    <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
     ${deliveryBlock}
-    <div class="line"></div>${lines}
+    <div class="line"></div>
+    <div class="center eur-note" style="display:none">Preise in EUR</div>${lines}
     <div class="center" style="font-size:11px;margin-top:8px">${printerSettings?.footer || "Danke & bis bald! 🙏"}</div>
     ${printerSettings?.googleLink ? `<div class="center" style="font-size:10px;color:#4285f4;margin-top:4px">⭐ Google: ${printerSettings.googleLink.slice(0,35)}...</div>` : ""}
     ${printerSettings?.firmaPhone ? `<div class="center" style="font-size:10px;color:#25d366">💬 WhatsApp: wa.me/${(printerSettings.firmaPhone||"").replace(/[^0-9]/g,"")}</div>` : ""}
@@ -22269,8 +22287,19 @@ localStorage.setItem = function(key, valueStr) {
 // Sync starten
 localStorage.setItem('eatdesi_sb_url', SUPA_URL);
 localStorage.setItem('eatdesi_sb_key', SUPA_KEY);
-setTimeout(runSync, 3000);
-setInterval(runSync, 8000);
+setTimeout(runSync, 800);          // schneller erster Sync (statt 3s)
+setInterval(runSync, 5000);        // alle 5s (statt 8s)
+
+// Android WebView pausiert setInterval im Hintergrund -> bei Rueckkehr sofort syncen
+document.addEventListener('visibilitychange', function(){
+  if (document.visibilityState === 'visible') {
+    try { runSync(); } catch(e) {}
+  }
+});
+// Auch bei Fokus (App nach vorne geholt) sofort syncen
+window.addEventListener('focus', function(){ try { runSync(); } catch(e) {} });
+// Wenn Geraet wieder online geht -> sofort syncen
+window.addEventListener('online', function(){ try { runSync(); } catch(e) {} });
 
 console.log('Sync Engine gestartet - Geraet: ' + window._deviceId);
 
