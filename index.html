@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v106</title>
+<title>eatDeSi POS v108</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v106';",
+    "var CACHE='eatdesi-v108';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6677,15 +6677,26 @@ const BTPrint = {
       if(s.length>=2){ r.textContent = s[0].textContent.trim()+' '+s[1].textContent.trim(); }
     });
     // normale Preis-Zeilen: " EUR"/"€" aus dem Preis entfernen -> nur die Zahl
-    // (EUR steht einmal oben im Kopf). So bricht "EUR" nie in die nächste Zeile um.
+    // (EUR steht einmal oben rechts im Kopf). Name wird gekürzt, falls zu lang,
+    // damit der Preis IMMER vollständig rechtsbündig steht und nie umbricht.
     tmp.querySelectorAll('.row:not(.info-row)').forEach(function(r){
       var s=r.querySelectorAll('span');
       if(s.length>=2){
         var l=s[0].textContent.trim();
         var ri=s[1].textContent.trim().replace(/\s*(€|EUR)\s*$/i,'').trim();
-        var avail=W-ri.length-1; if(l.length>avail){ l=l.slice(0,avail); }
-        var p=Math.max(1,W-l.length-ri.length); r.textContent=l+' '.repeat(p)+ri;
+        // mindestens 1 Leerzeichen zwischen Name und Preis -> Name max. (W - Preislänge - 1)
+        var maxName = W - ri.length - 1;
+        if(maxName < 1) maxName = 1;
+        if(l.length > maxName){ l = l.slice(0, maxName); }
+        var p = W - l.length - ri.length;   // Füll-Leerzeichen
+        if(p < 1) p = 1;
+        r.textContent = l + ' '.repeat(p) + ri;
       }
+    });
+    // EUR-Kopf: rechtsbündig "EUR" -> steht genau über der Preis-Spalte
+    tmp.querySelectorAll('.eur-note').forEach(function(c){
+      var t=c.textContent.trim(); var p=Math.max(0,W-t.length);
+      c.textContent=' '.repeat(p)+t;
     });
     tmp.querySelectorAll('.line').forEach(function(l){ var n=Math.max(8,Math.floor(W/2)); var dash=Array(n+1).join('-'); var pad=Math.floor((W-n)/2); l.textContent=' '.repeat(pad)+dash; });
     tmp.querySelectorAll('.center').forEach(function(c){var t=c.textContent.trim(),p=Math.max(0,Math.floor((W-t.length)/2));c.textContent=' '.repeat(p)+t;});
@@ -7674,7 +7685,7 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
     ${deliveryBlock}
     <div class="line"></div>
-    <div class="center eur-note" style="display:none">Preise in EUR</div>${lines}
+    <div class="eur-note" style="display:none">EUR</div>${lines}
     ${tseBlock}
     ${_footerOn?`<div class="center" style="margin-top:8px;font-size:11px">${_footerTxt}</div>`:""}
     ${qrOn?`<div class="center" style="font-size:11px;margin-top:4px">📱 ${qrLink}</div>`:""}
@@ -7683,11 +7694,12 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   if (printerCfg?.method === "bluetooth") {
     const devId = printerCfg?.btAddress;
     if (devId && BTPrint.isNative()) {
-      // v103: Schriftgröße je Bon-Typ.
-      //  kueche -> 0x01 (doppelte Höhe, 14pt) für gute Küchen-Lesbarkeit
-      //  kunde/webshop/bewirtung -> 0x00 (normal, 12pt) -> volle 48 Zeichen,
-      //    dadurch bricht der Preis ("EUR") NICHT mehr in die nächste Zeile um.
-      const fsz = (bonType === 'kueche') ? 0x01 : 0x00;
+      // Schriftgröße je Bon-Typ (ganze Bon, EINE Größe — TM-m30 kann nicht
+      // zwei Größen in einer Zeile):
+      //  kueche  -> 0x01 (14pt) für gute Küchen-Lesbarkeit
+      //  webshop -> 0x01 (14pt) große Artikel, gut lesbar
+      //  kunde/bewirtung -> 0x00 (12pt) kompakt, volle Zeichenzahl
+      const fsz = (bonType === 'kueche' || bonType === 'webshop') ? 0x01 : 0x00;
       BTPrint.printHtml(devId, html, fsz).catch(e => { printHtml(html); });
       return;
     }
@@ -7982,7 +7994,7 @@ function BonModal({
     <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
     ${deliveryBlock}
     <div class="line"></div>
-    <div class="center eur-note" style="display:none">Preise in EUR</div>${lines}
+    <div class="eur-note" style="display:none">EUR</div>${lines}
     <div class="center" style="font-size:11px;margin-top:8px">${printerSettings?.footer || "Danke & bis bald! 🙏"}</div>
     ${printerSettings?.googleLink ? `<div class="center" style="font-size:10px;color:#4285f4;margin-top:4px">⭐ Google: ${printerSettings.googleLink.slice(0,35)}...</div>` : ""}
     ${printerSettings?.firmaPhone ? `<div class="center" style="font-size:10px;color:#25d366">💬 WhatsApp: wa.me/${(printerSettings.firmaPhone||"").replace(/[^0-9]/g,"")}</div>` : ""}
