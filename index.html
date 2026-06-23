@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v108</title>
+<title>eatDeSi POS v112</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v108';",
+    "var CACHE='eatdesi-v112';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6750,6 +6750,13 @@ const BTPrint = {
       // Prüfen, ob es ein echter Chain-Builder ist (hat .text und .write als Funktionen)
       var isChain = b && typeof b.text === 'function' && typeof b.write === 'function';
       if(isChain){
+        // Fett IMMER aus (ESC E 0) — kein Bon soll fett gedruckt werden (normal).
+        if(typeof b.raw === 'function'){ try { b = b.raw([0x1B, 0x45, 0x00]); } catch(e){} }
+        // Schriftgröße per raw ESC/POS GS ! n setzen — sicherer als doubleHeight(),
+        // das auf TM-m30 nicht zuverlässig greift. fc 0x01=14pt(hoch), 0x11=hoch+breit.
+        if((dblH || dblW) && typeof b.raw === 'function'){
+          try { b = b.raw([0x1D, 0x21, fc]); } catch(e){}
+        }
         if(dblH && typeof b.doubleHeight === 'function') b = b.doubleHeight();
         if(dblW && typeof b.doubleWidth === 'function') b = b.doubleWidth();
         // KEIN globales bold mehr — fett machte die Zeichen breiter und ließ
@@ -6757,6 +6764,7 @@ const BTPrint = {
         if(typeof b.align === 'function') b = b.align('left');
         b = b.text(text + '\n');
         if(qrUrl && typeof b.qr === 'function'){
+          if(typeof b.raw === 'function'){ try { b = b.raw([0x1D, 0x21, 0x00]); } catch(e){} }
           if(typeof b.clearFormatting === 'function') b = b.clearFormatting();
           if(typeof b.align === 'function') b = b.align('center');
           b = b.qr(qrUrl).text('\n');
@@ -9547,6 +9555,44 @@ function OnlineOrdersLive({ pendingOrders, onAccept, onReject }) {
     onAccept(o, min);
     setAccepting(null); setCustomMin("");
   }
+  // --- Wunschzeit aus note lesen: "⏰ Schnellstmöglich" | "⏰ um 15:25 Uhr" | "⏰ 25.06. um 15:25 Uhr"
+  function wishLabel(o){
+    try{
+      var m = String(o.note||'').match(/⏰\s*([^·]+)/);
+      return m ? m[1].trim() : '';
+    }catch(e){ return ''; }
+  }
+  // Ist es eine echte Vorbestellung mit fester Uhrzeit (nicht "Schnellstmöglich")?
+  function isPreorder(o){
+    var w = wishLabel(o);
+    return !!w && /\d{1,2}:\d{2}/.test(w) && !/schnellst/i.test(w);
+  }
+  // Wunschzeit -> Date-Objekt (für heute oder mit Datum DD.MM.)
+  function wishDate(o){
+    try{
+      var w = wishLabel(o);
+      var tm = w.match(/(\d{1,2}):(\d{2})/); if(!tm) return null;
+      var hh = parseInt(tm[1],10), mm = parseInt(tm[2],10);
+      var d = new Date();
+      var dm = w.match(/(\d{1,2})\.(\d{1,2})\./);
+      if(dm){ d.setMonth(parseInt(dm[2],10)-1); d.setDate(parseInt(dm[1],10)); }
+      d.setHours(hh, mm, 0, 0);
+      return d;
+    }catch(e){ return null; }
+  }
+  // Differenz von jetzt bis Wunschzeit in Minuten (min. 1)
+  function wishMinutes(o){
+    var d = wishDate(o); if(!d) return null;
+    var diff = Math.round((d.getTime() - Date.now())/60000);
+    return diff < 1 ? 1 : diff;
+  }
+  // Vorbestellung mit Wunschzeit direkt bestätigen
+  function doAcceptWish(o){
+    var min = wishMinutes(o);
+    if(!min || min<1) min = 1;
+    onAccept(o, min);
+    setAccepting(null); setCustomMin("");
+  }
 
   return R.createElement('div',{style:{padding:14,overflowY:'auto',height:'calc(100vh - 90px)'}},
     R.createElement('div',{style:{fontWeight:800,fontSize:17,color:C.orange,marginBottom:4}},'📱 Online-Bestellungen'),
@@ -9584,7 +9630,23 @@ function OnlineOrdersLive({ pendingOrders, onAccept, onReject }) {
         ),
 
         // prep-time chooser
-        isAcc && R.createElement('div',{style:{marginTop:6,background:'#e8f5e9',borderRadius:12,padding:12}},
+        isAcc && (isPreorder(o)
+        ? // ===== VORBESTELLUNG mit fester Wunschzeit -> bestätigen =====
+          R.createElement('div',{style:{marginTop:6,background:'#fff8e1',borderRadius:12,padding:12,border:'2px solid #ffd54f'}},
+            R.createElement('div',{style:{fontWeight:800,fontSize:14,color:'#e65100',marginBottom:4}},'📅 Vorbestellung — feste Wunschzeit'),
+            R.createElement('div',{style:{fontSize:20,fontWeight:800,color:'#bf360c',marginBottom:2}},'⏰ '+wishLabel(o)),
+            R.createElement('div',{style:{fontSize:12,color:'#888',marginBottom:10}},(function(){ var m=wishMinutes(o); return m? ('in ca. '+m+' Min ab jetzt') : ''; })()),
+            R.createElement('button',{onClick:function(){doAcceptWish(o);},style:{width:'100%',padding:13,borderRadius:10,border:'none',background:C.green,color:'#fff',fontWeight:800,fontSize:15,cursor:'pointer',fontFamily:'inherit',marginBottom:8}},'✓ Wunschzeit bestätigen'),
+            // Fallback: doch eigene Minuten setzen
+            R.createElement('div',{style:{fontSize:11,color:'#999',marginBottom:6}},'oder anders einplanen:'),
+            R.createElement('div',{style:{display:'flex',gap:7,alignItems:'center'}},
+              R.createElement('input',{type:'number',inputMode:'numeric',placeholder:'eigene Min.',value:customMin,onChange:function(e){setCustomMin(e.target.value);},style:{flex:1,padding:'10px 12px',borderRadius:9,border:'2px solid #ffe082',fontSize:14,fontFamily:'inherit',boxSizing:'border-box'}}),
+              R.createElement('button',{onClick:function(){doAccept(o,parseInt(customMin));},style:{padding:'10px 16px',borderRadius:9,border:'none',background:'#e65100',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'OK'),
+              R.createElement('button',{onClick:function(){setAccepting(null);},style:{padding:'10px 14px',borderRadius:9,border:'2px solid #ddd',background:'#fff',color:'#777',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}},'Zurück')
+            )
+          )
+        : // ===== SCHNELLSTMÖGLICH -> X Minuten (wie bisher) =====
+          R.createElement('div',{style:{marginTop:6,background:'#e8f5e9',borderRadius:12,padding:12}},
           R.createElement('div',{style:{fontWeight:700,fontSize:13,color:C.green,marginBottom:9}},(isOnlineDeliv(o)?'In wie vielen Minuten geliefert?':'In wie vielen Minuten abholbereit?')),
           R.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:7,marginBottom:9}},
             [20,30,45,60].map(function(m){
@@ -9596,7 +9658,7 @@ function OnlineOrdersLive({ pendingOrders, onAccept, onReject }) {
             R.createElement('button',{onClick:function(){doAccept(o,parseInt(customMin));},style:{padding:'10px 16px',borderRadius:9,border:'none',background:C.green,color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'OK'),
             R.createElement('button',{onClick:function(){setAccepting(null);},style:{padding:'10px 14px',borderRadius:9,border:'2px solid #ddd',background:'#fff',color:'#777',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}},'Zurück')
           )
-        )
+        ))
       );
     })
   );
@@ -14305,20 +14367,8 @@ function PrinterSettingsView({
       "3. Hier Speichern → Bon drucken → RawBT öffnet automatisch"
     )
   ),
-  // Font Size selector (Bluetooth + RawBT) — 12 / 14 / 16 pt
-  (form.method === "rawbt" || form.method === "bluetooth") && /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:10, padding:12, marginBottom:10, border:"1px solid #eee" } },
-    /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#333", marginBottom:8 } }, "📝 Schriftgröße auf dem Bon"),
-    /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 } },
-      [["normal","12 pt","Standard"],["gross","14 pt","Größer"],["xl","16 pt","Am größten"]].map(([v,l,sub]) =>
-        /*#__PURE__*/React.createElement("div", { key:v, onClick:()=>setForm(f=>({...f,bonFontSize:v})),
-          style:{ borderRadius:8, border:`2px solid ${(form.bonFontSize||"gross")===v?C.blue:"#ddd"}`, background:(form.bonFontSize||"gross")===v?"#e3f2fd":"#fff", padding:"10px 4px", cursor:"pointer", textAlign:"center" }
-        },
-          /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:16, color:(form.bonFontSize||"gross")===v?C.blue:"#555" } }, l),
-          /*#__PURE__*/React.createElement("div", { style:{ fontSize:10, color:"#888", marginTop:2 } }, sub)
-        )
-      )
-    )
-  ),
+  // Font-Größe ist jetzt FEST je Bon-Typ (Kunde/Bewirtung 12pt, Webshop/Küche/Bar 14pt)
+  // -> kein manuelles Schriftgröße-Setting mehr nötig (entfernt v109).
   // QR-Code on/off
   (form.method === "rawbt" || form.method === "bluetooth") && /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:10, padding:12, marginBottom:10, border:"1px solid #eee" } },
     /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#333", marginBottom:8 } }, "📱 QR-Code auf Zahlungs-Beleg"),
@@ -22131,24 +22181,41 @@ var MERGE_LIST_KEYS = {
   'zeiterfassung': 1, 'customers': 1, 'expenses': 1, 'reservations': 1, 'users': 1, 'floors': 1, 'drivers': 1
 };
 
-// Zwei ID-Listen zusammenfuehren: alle Eintraege nach id (oder name) eindeutig, deleted gewinnt
-function _mergeById(localArr, remoteArr) {
+// Zwei ID-Listen zusammenfuehren: alle Eintraege eindeutig, deleted gewinnt.
+// byName=true -> Schluessel ist der NAME (fuer users/floors: ein Name = ein Eintrag,
+//   egal ob mit oder ohne id -> verhindert Doppel-Eintraege wenn Geraete unterschiedlich
+//   generierte ids haben). Sonst Schluessel = id (fuer Stempel/Kunden/Ausgaben, wo
+//   derselbe Name viele Eintraege haben darf).
+function _mergeById(localArr, remoteArr, byName) {
   var byId = {};
-  var keyOf = function(e){ return (e && e.id != null) ? ('id:'+e.id) : (e && e.name != null ? ('nm:'+e.name) : null); };
-  (Array.isArray(remoteArr) ? remoteArr : []).forEach(function(e){ var k=keyOf(e); if(k) byId[k] = e; });
-  (Array.isArray(localArr) ? localArr : []).forEach(function(e){
+  var keyOf = function(e){
+    if(!e) return null;
+    if(byName){
+      if(e.name != null && String(e.name).trim()!=='') return 'nm:'+String(e.name).trim().toLowerCase();
+      if(e.id != null) return 'id:'+e.id;
+      return null;
+    }
+    if(e.id != null) return 'id:'+e.id;
+    if(e.name != null) return 'nm:'+e.name;
+    return null;
+  };
+  var consider = function(e){
     var k = keyOf(e); if(!k) return;
     var ex = byId[k];
-    if(!ex) { byId[k] = e; }
-    else if(e.deleted && !ex.deleted) { byId[k] = e; } // Loeschung gewinnt
-    else if(!e.deleted && !ex.deleted) {
-      // beide aktiv: neueren behalten (nach time)
-      if(new Date(e.time||0) > new Date(ex.time||0)) byId[k] = e;
-    }
-  });
+    if(!ex){ byId[k] = e; return; }
+    if(e.deleted && !ex.deleted){ byId[k] = e; return; }   // Loeschung gewinnt
+    if(!e.deleted && ex.deleted){ return; }                // bestehende Loeschung behalten
+    // beide gleicher Status: neueren nach time behalten
+    var te = new Date(e.time || e.deletedAt || 0), tx = new Date(ex.time || ex.deletedAt || 0);
+    if(te > tx) byId[k] = e;
+  };
+  (Array.isArray(remoteArr) ? remoteArr : []).forEach(consider);
+  (Array.isArray(localArr) ? localArr : []).forEach(consider);
   return Object.keys(byId).map(function(k){ return byId[k]; })
     .sort(function(a,b){ return new Date(a.time||0) - new Date(b.time||0); });
 }
+// Diese Keys werden nach NAME zusammengefuehrt (eindeutiger Datensatz pro Name)
+var MERGE_BY_NAME_KEYS = { 'users': 1, 'floors': 1, 'drivers': 1 };
 
 // Einen einzelnen localStorage-Key synchronisieren (Last-Write-Wins)
 async function syncOneStateKey(lsKey) {
@@ -22161,7 +22228,7 @@ async function syncOneStateKey(lsKey) {
 
     // --- ID-Listen IMMER mergen (Stempel von allen Geraeten zusammenfuehren) ---
     if (MERGE_LIST_KEYS[remoteKey] && remote && Array.isArray(remote.value)) {
-      var merged = _mergeById(local, remote.value);
+      var merged = _mergeById(local, remote.value, !!MERGE_BY_NAME_KEYS[remoteKey]);
       var mergedStr = JSON.stringify(merged);
       if (mergedStr !== JSON.stringify(local)) {
         window._syncWriting = true;
