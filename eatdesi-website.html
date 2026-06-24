@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- eatDeSi Website · Update 2026-06-24a: Gemini-Modell auf gemini-2.5-flash aktualisiert (2.0-flash abgeschaltet) · Beliebt-Badge bleibt auch bei Cloud-Menue (top per nr gemerged) · Artikelnamen groesser · Preise dezenter · 27 Top-Artikel · alle Beschreibungen -->
+<!-- eatDeSi Website · Update 2026-06-24b: Gemini gemini-2.5-flash + AI-Key Speichern mit klarer Bestaetigung + Key beim Chat-Oeffnen frisch aus Supabase laden · Beliebt-Badge bleibt auch bei Cloud-Menue · 27 Top-Artikel -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -1785,10 +1785,38 @@ function drawAI(){
     <p class="hint">Dein Google-Gemini API-Key. Derselbe wie im POS. Hol ihn unter aistudio.google.com/apikey. Wird sicher in Supabase gespeichert.</p>
     <div class="afield"><label>Gemini API-Key</label><input id="aiKeyInput" placeholder="AIza..." value="${AI_KEY||''}"></div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button class="btn-save" onclick="AI_KEY=$('#aiKeyInput').value.trim();saveConfig()">💾 Speichern</button>
+      <button class="btn-save" onclick="saveAiKey()">💾 Speichern</button>
       <button class="btn-add" onclick="aiTestKey()">🔌 Verbindung testen</button>
       <span id="aiTestRes" style="font-size:13px;color:var(--paper-2)"></span></div>
     <p style="font-size:12px;color:var(--gold-deep);margin-top:14px">Ohne Key beantwortet die Assistentin Standardfragen (Öffnungszeiten, Lieferzonen, Menü) trotzdem – nur ohne freies Gespräch.</p></div>`;
+}
+async function saveAiKey(){
+  const k=$('#aiKeyInput').value.trim();
+  AI_KEY=k;
+  // bestehende Config laden, aiKey ergaenzen, zurueckschreiben -> nichts geht verloren
+  const cfg={zones:ZONES,offers:OFFERS,events:EVENTS,hours:HOURS_CFG,aiKey:AI_KEY,company:COMPANY,gallery:GALLERY};
+  try{
+    const r=await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
+      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
+      body:JSON.stringify({key:CONFIG_KEY,value:JSON.stringify(cfg),updated_at:new Date().toISOString()})});
+    if(r.ok||r.status===201||r.status===409){
+      // Gegenpruefung: wirklich in Supabase angekommen?
+      let ok=false;
+      try{
+        const g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+CONFIG_KEY+'&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
+        if(g.ok){const j=await g.json(); if(j&&j[0]&&j[0].value){const c=JSON.parse(j[0].value); ok=(c.aiKey===AI_KEY);}}
+      }catch(e){}
+      toast('✓ Gespeichert');
+      if(ok) alert('✓ Gemini-Key gespeichert und geprueft.\n\nDie Assistentin fuehrt jetzt freie Gespraeche. Lade die Gaeste-Seite einmal neu, damit der Key dort aktiv wird.');
+      else alert('✓ Gespeichert, aber Gegenpruefung unklar.\n\nBitte teste im Gaeste-Chat. Falls dort weiter Standardantworten kommen, Seite neu laden.');
+    } else {
+      toast('⚠️ Speichern fehlgeschlagen');
+      alert('⚠️ Speichern fehlgeschlagen (Status '+r.status+').\n\nInternet pruefen und nochmal versuchen.');
+    }
+  }catch(e){
+    toast('⚠️ Speichern fehlgeschlagen');
+    alert('⚠️ Speichern fehlgeschlagen: '+(e&&e.message?e.message:'Netzwerkfehler')+'\n\nInternet pruefen und nochmal versuchen.');
+  }
 }
 async function aiTestKey(){
   const k=$('#aiKeyInput').value.trim(); const res=$('#aiTestRes');
@@ -1832,6 +1860,14 @@ Wenn jemand bestellen will, erkläre freundlich: Gerichte über „Speisekarte &
 function openAI(){
   $('#aiPanel').classList.add('show');$('#aiFab').style.display='none';
   if(!aiOpened){aiOpened=true; aiAddMsg('bot','Namaste! 🪔 Ich bin die Desi-Assistentin von eatDeSi. Frag mich nach Öffnungszeiten, Gerichten, Lieferung oder Catering – per Text oder Mikrofon.');}
+  // AI-Key frisch aus Supabase holen, falls der Inhaber ihn gerade erst gespeichert
+  // hat (sonst bliebe AI_KEY leer und es kaemen nur Standardantworten).
+  if(!AI_KEY){
+    fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+CONFIG_KEY+'&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}})
+      .then(function(g){return g.ok?g.json():null;})
+      .then(function(j){ if(j&&j[0]&&j[0].value){ try{var c=JSON.parse(j[0].value); if(c.aiKey)AI_KEY=c.aiKey;}catch(e){} } })
+      .catch(function(){});
+  }
 }
 function closeAI(){$('#aiPanel').classList.remove('show');$('#aiFab').style.display='flex';aiStopSpeak();}
 function aiAddMsg(role,text){
