@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- eatDeSi Website · Update 2026-06-22c: Beliebt-Badge bleibt auch bei Cloud-Menue (top per nr gemerged) · Artikelnamen groesser · Preise dezenter · 27 Top-Artikel · alle Beschreibungen -->
+<!-- eatDeSi Website · Update 2026-06-24a: Gemini-Modell auf gemini-2.5-flash aktualisiert (2.0-flash abgeschaltet) · Beliebt-Badge bleibt auch bei Cloud-Menue (top per nr gemerged) · Artikelnamen groesser · Preise dezenter · 27 Top-Artikel · alle Beschreibungen -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -1795,7 +1795,7 @@ async function aiTestKey(){
   if(!k){res.textContent='Bitte Key eingeben';return;}
   res.textContent='Teste…';
   try{
-    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+k,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:'sag nur OK'}]}]})});
+    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+k,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:'sag nur OK'}]}]})});
     if(r.ok){res.innerHTML='<span style="color:#a4c46f">✓ Verbindung OK</span>';AI_KEY=k;}
     else{const e=await r.json();res.innerHTML='<span style="color:var(--red)">✗ '+(e.error?.message||'Fehler '+r.status)+'</span>';}
   }catch(e){res.innerHTML='<span style="color:var(--red)">✗ '+e.message+'</span>';}
@@ -1854,7 +1854,7 @@ async function aiAsk(userText){
   try{
     const body={system_instruction:{parts:[{text:aiContext()}]},contents:aiHistory.slice(-10),
       generationConfig:{temperature:0.6,maxOutputTokens:300}};
-    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+AI_KEY,
+    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+AI_KEY,
       {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const j=await r.json();
     let ans=j?.candidates?.[0]?.content?.parts?.[0]?.text || aiFallback(userText);
