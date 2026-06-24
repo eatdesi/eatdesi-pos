@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v115</title>
+<title>eatDeSi POS v117</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v115';",
+    "var CACHE='eatdesi-v117';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6698,12 +6698,13 @@ const BTPrint = {
       }
     });
     // EUR-Kopf: als Zeile "Artikel ... EUR" -> EUR steht rechts über der Preisspalte.
-    // Links steht "Artikel" (kein reiner Leerraum), damit der Drucker die Zeile
-    // nicht linksbündig trimmt und "EUR" tatsächlich rechts landet.
+    // Links "Artikel" (kein reiner Leerraum, sonst trimmt der Drucker links).
+    // WICHTIG: 1 Zeichen Puffer (W-1) lassen, sonst bricht die Zeile auf dem
+    // echten TM-m30 um und "EUR" landet allein in der nächsten Zeile.
     tmp.querySelectorAll('.eur-note').forEach(function(c){
       var t=A(c.textContent.trim());           // "EUR"
       var left='Artikel';
-      var p=W-left.length-t.length; if(p<1)p=1;
+      var p=(W-1)-left.length-t.length; if(p<1)p=1;
       c.textContent=left+' '.repeat(p)+t;
     });
     tmp.querySelectorAll('.line').forEach(function(l){ var n=Math.max(8,Math.floor(W/2)); var dash=Array(n+1).join('-'); var pad=Math.floor((W-n)/2); l.textContent=' '.repeat(pad)+dash; });
@@ -6744,8 +6745,11 @@ const BTPrint = {
     // (nicht volle 48) -> bei 48 bricht "EUR" um. Daher konservativ 44.
     if(m){ var px=parseInt(m[1],10); if(px>=384) baseW=44; else if(px>=304) baseW=40; else baseW=32; }
     var W = baseW;
+    // GS ! n: 0x01 = nur doppelte HÖHE (Zeichen höher, NICHT breiter) -> volle
+    // Zeichenzahl pro Zeile bleibt. Nur bei doppelter BREITE (dblW) halbieren,
+    // sonst würden Webshop/Küche-Bons (14pt) Namen abschneiden und EUR/Preis
+    // in die Mitte rutschen.
     if(dblW) W = Math.floor(W/2);
-    else if(dblH) W = Math.floor(W/2);   // doubleHeight -> ebenfalls halbe Zeichenzahl
     if(W < 16) W = 16;
     var text = this.htmlToText(html, W);
     var qrUrl = '';
@@ -9600,9 +9604,10 @@ function OnlineOrdersLive({ pendingOrders, onAccept, onReject }) {
   // Vorbestellung mit Wunschzeit direkt bestätigen
   function doAcceptWish(o){
     var min = wishMinutes(o);
-    if(!min || min<1) min = 1;
-    onAccept(o, min);
+    if(!min || min<1 || isNaN(min)) min = 1;
+    console.log('[Wunschzeit] bestätigt bonNr='+(o&&o.bonNr)+' min='+min);
     setAccepting(null); setCustomMin("");
+    onAccept(o, min);
   }
 
   return R.createElement('div',{style:{padding:14,overflowY:'auto',height:'calc(100vh - 90px)'}},
@@ -20404,12 +20409,16 @@ function App() {
     onAccept: (order, prepMin) => {
       // Schutz vor Doppel-Klick: wenn schon angenommen ([OK:..]) -> nichts tun, nicht erneut drucken
       if (typeof order.note === 'string' && order.note.indexOf('[OK:') !== -1) {
+        alert('Diese Bestellung wurde bereits angenommen (kein erneuter Druck).');
         setPendingOnlinePopup(null);
         return;
       }
-      if (window._acceptingBon === order.bonNr) { return; }
+      if (window._acceptingBon === order.bonNr) {
+        alert('Bestellung wird gerade verarbeitet, bitte einen Moment warten.');
+        return;
+      }
       window._acceptingBon = order.bonNr;
-      setTimeout(function(){ if(window._acceptingBon===order.bonNr) window._acceptingBon=null; }, 4000);
+      setTimeout(function(){ if(window._acceptingBon===order.bonNr) window._acceptingBon=null; }, 2500);
       // EINHEITLICHER FLOW: Annehmen -> direkt in KDS Pro "Neu" (NICHT mehr Takeaway!)
       // note-Marker [NEU] -> [OK:min]. Das ist KDS-Stage 'new'. Sync zu Supabase -> Website liest Status mit.
       var cleanNote = String(order.note||'').replace('[NEU]','').replace(/^[\s·]+/,'').trim();
