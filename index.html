@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v117</title>
+<title>eatDeSi POS v118</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v117';",
+    "var CACHE='eatdesi-v118';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6699,12 +6699,12 @@ const BTPrint = {
     });
     // EUR-Kopf: als Zeile "Artikel ... EUR" -> EUR steht rechts über der Preisspalte.
     // Links "Artikel" (kein reiner Leerraum, sonst trimmt der Drucker links).
-    // WICHTIG: 1 Zeichen Puffer (W-1) lassen, sonst bricht die Zeile auf dem
+    // WICHTIG: 4 Zeichen Puffer (W-4) lassen, sonst bricht die Zeile auf dem
     // echten TM-m30 um und "EUR" landet allein in der nächsten Zeile.
     tmp.querySelectorAll('.eur-note').forEach(function(c){
       var t=A(c.textContent.trim());           // "EUR"
       var left='Artikel';
-      var p=(W-1)-left.length-t.length; if(p<1)p=1;
+      var p=(W-4)-left.length-t.length; if(p<1)p=1;
       c.textContent=left+' '.repeat(p)+t;
     });
     tmp.querySelectorAll('.line').forEach(function(l){ var n=Math.max(8,Math.floor(W/2)); var dash=Array(n+1).join('-'); var pad=Math.floor((W-n)/2); l.textContent=' '.repeat(pad)+dash; });
