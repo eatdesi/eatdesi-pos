@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v119</title>
+<title>eatDeSi POS v120</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v119';",
+    "var CACHE='eatdesi-v120';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6683,6 +6683,7 @@ const BTPrint = {
     // normale Preis-Zeilen: " EUR"/"€" aus dem Preis entfernen -> nur die Zahl
     // (EUR steht einmal oben rechts im Kopf). Name wird gekürzt, falls zu lang,
     // damit der Preis IMMER vollständig rechtsbündig steht und nie umbricht.
+    var ESCb='\x1B';
     tmp.querySelectorAll('.row:not(.info-row)').forEach(function(r){
       var s=r.querySelectorAll('span');
       if(s.length>=2){
@@ -6694,7 +6695,12 @@ const BTPrint = {
         if(l.length > maxName){ l = l.slice(0, maxName); }
         var p = W - l.length - ri.length;   // Füll-Leerzeichen
         if(p < 1) p = 1;
-        r.textContent = l + ' '.repeat(p) + ri;
+        var rowTxt = l + ' '.repeat(p) + ri;
+        // GESAMT-Zeile (.row.bold): nur DIESE Zeile fett -> ESC E 1 ... ESC E 0
+        // direkt in den Text einbetten (Chain-API b.bold() greift auf TM-m30 nicht).
+        var isBoldRow = r.className && (''+r.className).indexOf('bold') !== -1;
+        if(isBoldRow){ rowTxt = ESCb+'E'+'\x01' + rowTxt + ESCb+'E'+'\x00'; }
+        r.textContent = rowTxt;
       }
     });
     // EUR-Kopf: GENAU wie eine normale Preis-Zeile ausrichten (volle Breite W),
@@ -7788,7 +7794,8 @@ function printOnlineBons(order, prepMin, printerCfg) {
       var unit = line + optSum;
       var lineTotal = unit * (it.qty||1);
       sub += lineTotal;
-      return '<div class="row"><span>'+(it.qty||1)+'× '+(it.nr?it.nr+'. ':'')+it.name+'</span><span>'+fmt(lineTotal)+'</span></div>'+optLines(it);
+      // nach jedem Artikel eine Leerzeile -> mehr Abstand, besser lesbar (wie Küche-Bon)
+      return '<div class="row"><span>'+(it.qty||1)+'× '+(it.nr?it.nr+'. ':'')+it.name+'</span><span>'+fmt(lineTotal)+'</span></div>'+optLines(it)+'<div>&nbsp;</div>';
     }).join('');
     cLines += '<div class="line"></div>';
     var t7 = calcTax7(items), t19 = calcTax19(items);
