@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v123</title>
+<title>eatDeSi POS v126</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v123';",
+    "var CACHE='eatdesi-v126';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6684,7 +6684,7 @@ const BTPrint = {
     // (EUR steht einmal oben rechts im Kopf). Name wird gekürzt, falls zu lang,
     // damit der Preis IMMER vollständig rechtsbündig steht und nie umbricht.
     var ESCb='\x1B';
-    tmp.querySelectorAll('.row:not(.info-row)').forEach(function(r){
+    tmp.querySelectorAll('.row:not(.info-row):not(.eur-note)').forEach(function(r){
       var s=r.querySelectorAll('span');
       if(s.length>=2){
         var l=A(s[0].textContent.trim());
@@ -6703,12 +6703,13 @@ const BTPrint = {
         r.textContent = rowTxt;
       }
     });
-    // EUR-Kopf: GENAU wie eine normale Preis-Zeile ausrichten (volle Breite W),
-    // damit "EUR" exakt über der Preisspalte steht und NIE umbricht -- die
-    // Preis-Zeilen darunter nutzen dieselbe Logik und drucken sauber.
+    // EUR-Kopf (.row.eur-note hat zwei Spans: "Artikel" + "EUR"): GENAU wie eine
+    // Preis-Zeile ausrichten (volle Breite W), damit "EUR" exakt über der
+    // Preisspalte steht und NIE umbricht.
     tmp.querySelectorAll('.eur-note').forEach(function(c){
-      var t=A(c.textContent.trim());           // "EUR"
-      var left='Artikel';
+      var s=c.querySelectorAll('span');
+      var left = s.length>=1 ? A(s[0].textContent.trim()) : 'Artikel';
+      var t    = s.length>=2 ? A(s[1].textContent.trim()) : 'EUR';
       var maxName = W - t.length - 1;
       if(maxName < 1) maxName = 1;
       if(left.length > maxName){ left = left.slice(0, maxName); }
@@ -7717,7 +7718,7 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
     ${deliveryBlock}
     <div class="line"></div>
-    <div class="eur-note" style="display:none">EUR</div>${lines}
+    <div class="row eur-note"><span>Artikel</span><span>EUR</span></div>${lines}
     ${tseBlock}
     ${_footerOn?`<div class="center" style="margin-top:8px;font-size:11px">${_footerTxt}</div>`:""}
     ${qrOn?`<div class="center" style="font-size:11px;margin-top:4px">📱 ${qrLink}</div>`:""}
@@ -8027,7 +8028,7 @@ function BonModal({
     <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
     ${deliveryBlock}
     <div class="line"></div>
-    <div class="eur-note" style="display:none">EUR</div>${lines}
+    <div class="row eur-note"><span>Artikel</span><span>EUR</span></div>${lines}
     <div class="center" style="font-size:11px;margin-top:8px">${printerSettings?.footer || "Danke & bis bald! 🙏"}</div>
     ${printerSettings?.googleLink ? `<div class="center" style="font-size:10px;color:#4285f4;margin-top:4px">⭐ Google: ${printerSettings.googleLink.slice(0,35)}...</div>` : ""}
     ${printerSettings?.firmaPhone ? `<div class="center" style="font-size:10px;color:#25d366">💬 WhatsApp: wa.me/${(printerSettings.firmaPhone||"").replace(/[^0-9]/g,"")}</div>` : ""}
@@ -8675,6 +8676,26 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
     const name = firma?.firmaName || "eatDeSi";
     const now = new Date();
     const dateStr = fmtD(now) + ' ' + fmtT(now);
+
+    // Bluetooth/WLAN/ePOS: denselben Weg wie alle anderen Belege nehmen
+    // (printBon -> sauberes Format, Artikel/EUR eine Zeile, GESAMT fett,
+    // druckt zuverlässig auf dem TM-m30). Vorher fehlte dieser Pfad komplett,
+    // daher kam bei getrennter Zahlung pro Gast KEIN Bon aus dem Bluetooth-Drucker.
+    if (printerSettings?.method === 'bluetooth' || printerSettings?.method === 'wifi') {
+      try {
+        let L = (gitems||[]).map(i => {
+          const head = `${i.qty}× ${i.nr?i.nr+'. ':''}${i.name}`;
+          const noteLine = i.note ? `<div style="font-size:12px;padding-left:14px">(${i.note})</div>` : "";
+          return `<div class="row"><span>${head}</span><span>${fmt(i.finalPrice*i.qty)}</span></div>${noteLine}`;
+        }).join("");
+        L += `<div class="line"></div>`;
+        L += `<div class="row bold" style="font-size:16px"><span>GESAMT</span><span>${fmt(gtotal)}</span></div>`;
+        if (gtg > 0) L += `<div class="row"><span>Trinkgeld</span><span>${fmt(gtg)}</span></div>`;
+        L += `<div class="row bold"><span>Zahlung:</span><span>${method}</span></div>`;
+        printBon("💳 ZAHLUNG — Gast " + nr, L, lbl, genNr(), now, null, printerSettings, null, 'kunde');
+      } catch(e){ console.warn('Gast-Bon (BT) Fehler:', e); }
+      return;
+    }
 
     if (printerSettings?.method === 'rawbt') {
       // Plain text for RawBT
@@ -18705,7 +18726,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, "v123")),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v126"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21359,6 +21380,33 @@ function KdsProView({ tableOrders, takeaway, setTableOrders, completedOrders, se
 
   var allTickets = onlineTickets.concat(taTickets).concat(tableTickets);
 
+  // Beim Ausliefern einer Online-Bestellung wird vor Ort kassiert -> TSE-Pflicht.
+  // Erzeugt die TSE-Signatur (wie completeOrder) genau einmal, sofern noch keine
+  // vorhanden ist, und schreibt sie + Zahlart fest in die Order. Danach hat der
+  // Beleg beim Wiederdruck aus der Bestellungen-Liste seine TSE-Signatur.
+  async function signOnlineIfNeeded(order){
+    try {
+      if (!order || order.tse) return; // schon signiert -> nichts tun
+      var pm = order.payMethod || order.payment || 'bar';
+      if (/ec|karte|card/i.test(pm)) pm = 'Karte'; else if (/bar|cash/i.test(pm)) pm = 'Bar';
+      var _tse = null;
+      try {
+        _tse = await window.TSE.signOrder({ bonNr: order.bonNr, total: order.total||0, payMethod: pm, items: order.items||[], tableId: order.tableId||null });
+      } catch(e){ console.warn('TSE (Online-Ausliefern) Fehler:', e); }
+      if (!_tse) return;
+      setCompletedOrders(function(list){
+        return list.map(function(x){
+          return String(x.bonNr)===String(order.bonNr) ? Object.assign({}, x, { tse:_tse, payMethod: pm }) : x;
+        });
+      });
+      // tse + Zahlart in die Cloud schreiben, damit andere Geräte sie auch haben
+      try {
+        var merged = Object.assign({}, order, { tse:_tse, payMethod: pm });
+        if (typeof pushOrderToSupabase === 'function') pushOrderToSupabase(merged);
+      } catch(e){ console.warn('TSE-Sync (Online) Fehler:', e); }
+    } catch(e){ console.warn('signOnlineIfNeeded Fehler:', e); }
+  }
+
   // STATUS WECHSELN (Neu -> In Arbeit -> Fertig -> Ausgeliefert)
   function moveStage(ticket, dir){
     var order = ['new','working','ready','delivered'];
@@ -21366,6 +21414,7 @@ function KdsProView({ tableOrders, takeaway, setTableOrders, completedOrders, se
     var newStatus = order[Math.max(0, Math.min(3, idx + dir))];
 
     if (ticket.kind === 'online') {
+      if (newStatus === 'delivered') { signOnlineIfNeeded(ticket._order); }
       var newNote = setKdsMarkerInNote(ticket._order.note, newStatus);
       setCompletedOrders(function(list){ return list.map(function(x){ return String(x.bonNr)===String(ticket.bonNr)?Object.assign({},x,{note:newNote}):x; }); });
       if (typeof updateOrderNoteInSupabase==='function') updateOrderNoteInSupabase(ticket.bonNr, newNote);
@@ -21379,6 +21428,7 @@ function KdsProView({ tableOrders, takeaway, setTableOrders, completedOrders, se
   // ERLEDIGT / Aus KDS entfernen
   function finishTicket(ticket){
     if (ticket.kind === 'online') {
+      signOnlineIfNeeded(ticket._order);
       var newNote = setKdsMarkerInNote(ticket._order.note, 'delivered');
       setCompletedOrders(function(list){ return list.map(function(x){ return String(x.bonNr)===String(ticket.bonNr)?Object.assign({},x,{note:newNote}):x; }); });
       if (typeof updateOrderNoteInSupabase==='function') updateOrderNoteInSupabase(ticket.bonNr, newNote);
@@ -21926,7 +21976,8 @@ async function pushOrderToSupabase(order) {
         device_id: window._deviceId,
         storniert: order.storniert || false,
         storno_von: order.stornoVon || null,
-        storno_zeit: order.stornoZeit || null
+        storno_zeit: order.stornoZeit || null,
+        tse: order.tse ? JSON.stringify(order.tse) : null
       })
     });
     return resp.ok || resp.status === 409;
@@ -22074,6 +22125,7 @@ function mergeRemoteOrders(remoteOrders) {
       customerEmail: ro.customer_email || (function(){ try{ var m=(ro.note||'').match(/✉️\s*([^\s·]+@[^\s·]+)/); return m?m[1]:null; }catch(e){return null;} })(),
       customerStreet: ro.customer_street || null, note: ro.note || '',
       source: ro.source || 'POS', time: ro.created_at, synced: true,
+      tse: (function(){ try { return ro.tse ? (typeof ro.tse === 'string' ? JSON.parse(ro.tse) : ro.tse) : null; } catch(e){ return null; } })(),
       storniert: ro.storniert || false, stornoVon: ro.storno_von || null, stornoZeit: ro.storno_zeit || null
     };
     // DEBUG: jede Web/Online-relevante Order loggen
@@ -22088,6 +22140,18 @@ function mergeRemoteOrders(remoteOrders) {
   // lokale Orders die NOCH NICHT in der Cloud sind (offline erstellt) behalten
   var pendingLocal = local.filter(function(lo){
     return lo.bonNr && !remoteByBon.hasOwnProperty(String(lo.bonNr)) && !lo.synced;
+  });
+
+  // TSE-Schutz: wenn die Cloud-Version (noch) keine TSE hat, aber lokal eine
+  // vorhanden ist (Beleg wurde auf diesem Gerät signiert), die lokale TSE behalten.
+  // Sonst würde der Beleg beim Wiederdruck aus der Order-Liste seine TSE-Signatur
+  // verlieren, obwohl er fest geschrieben ist.
+  var localByBon = {};
+  local.forEach(function(lo){ if(lo && lo.bonNr) localByBon[String(lo.bonNr)] = lo; });
+  Object.keys(remoteByBon).forEach(function(k){
+    if (!remoteByBon[k].tse && localByBon[k] && localByBon[k].tse) {
+      remoteByBon[k].tse = localByBon[k].tse;
+    }
   });
 
   // Neue gemeinsame Liste = alle Cloud-Orders + lokale noch-nicht-gepushte
