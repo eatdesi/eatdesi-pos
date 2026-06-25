@@ -228,7 +228,10 @@ footer{border-top:1px solid var(--line);padding:50px 0 60px;background:var(--ink
 footer h4{font-family:'Fraunces',serif;font-size:20px;color:var(--cream);margin:0 0 13px}
 footer p,footer .fl{color:var(--paper-2);font-size:13.5px;line-height:1.8;display:block}
 footer .fl:hover{color:var(--gold)}
-.foot-bot{margin-top:34px;padding-top:20px;border-top:1px solid var(--line);font-size:12px;color:var(--gold-deep);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.foot-social{display:flex;gap:12px;margin-top:30px;flex-wrap:wrap}
+.foot-social a{width:50px;height:50px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:23px;background:rgba(255,255,255,.04);border:1px solid var(--line);text-decoration:none;transition:.18s}
+.foot-social a:hover{border-color:var(--gold);transform:translateY(-3px);background:rgba(200,160,78,.1)}
+.foot-bot{margin-top:24px;padding-top:20px;border-top:1px solid var(--line);font-size:12px;color:var(--gold-deep);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
 
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120px);background:var(--gold);color:var(--ink);font-weight:700;font-size:14px;padding:13px 22px;border-radius:12px;z-index:200;box-shadow:var(--shadow);transition:transform .3s;display:flex;align-items:center;gap:9px;max-width:90vw}
 .toast.show{transform:translateX(-50%) translateY(0)}
@@ -398,6 +401,42 @@ footer .fl:hover{color:var(--gold)}
 .legal-doc a{color:var(--gold)}
 .legal-doc .box{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:13px;padding:18px 20px;margin:0 0 18px}
 @media(max-width:600px){.legal-tabs button{padding:8px 10px;font-size:12px}.legal-doc h1{font-size:26px}}
+/* ===== LINK-TREE (Quick-Links Startscreen) ===== */
+.linktree{background:var(--ink);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:38px 18px;position:relative;background-image:radial-gradient(circle at 50% 0%,rgba(200,160,78,.14),transparent 58%)}
+.lt-wrap{width:100%;max-width:440px;margin:0 auto}
+.lt-brand{text-align:center;margin-bottom:26px}
+.lt-logo{font-family:'Fraunces',serif;font-size:42px;font-weight:600;color:var(--paper);letter-spacing:.5px}
+.lt-logo b{color:var(--gold)}.lt-logo span{color:var(--gold)}
+.lt-tag{font-size:12.5px;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-top:8px;font-weight:600}
+.lt-btn{display:flex;align-items:center;gap:14px;width:100%;padding:17px 20px;margin-bottom:12px;border-radius:16px;background:var(--ink-soft);border:1px solid var(--line);color:var(--paper);font-size:16px;font-weight:600;text-decoration:none;cursor:pointer;transition:.18s;text-align:left}
+.lt-btn:hover,.lt-btn:active{border-color:var(--gold);background:var(--ink-2);transform:translateY(-2px);box-shadow:0 6px 22px rgba(0,0,0,.5)}
+.lt-btn .lt-ic{font-size:22px;width:28px;text-align:center;flex-shrink:0}
+.lt-btn .lt-arr{margin-left:auto;opacity:.45;font-size:20px}
+.lt-primary{background:linear-gradient(135deg,var(--gold),var(--gold-glow));color:var(--ink);border:none;font-weight:800;box-shadow:0 6px 20px rgba(200,160,78,.32)}
+.lt-primary:hover{filter:brightness(1.07)}
+.lt-social{display:flex;justify-content:center;gap:13px;margin-top:20px;flex-wrap:wrap}
+.lt-social a{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:23px;background:var(--ink-soft);border:1px solid var(--line);text-decoration:none;transition:.18s}
+.lt-social a:hover{border-color:var(--gold);transform:translateY(-3px) scale(1.04)}
+.lt-scroll{display:block;margin:26px auto 0;background:none;border:none;color:var(--gold);font-size:13px;letter-spacing:1px;cursor:pointer;opacity:.8;animation:ltbob 2s ease-in-out infinite}
+.lt-scroll:hover{opacity:1}
+@keyframes ltbob{0%,100%{transform:translateY(0)}50%{transform:translateY(4px)}}
+@media(prefers-reduced-motion:reduce){.lt-scroll{animation:none}}
+/* Tablet & PC: breiteres Layout, Buttons in 2 Spalten */
+@media(min-width:760px){
+  .linktree{padding:60px 32px}
+  .lt-wrap{max-width:760px}
+  .lt-logo{font-size:56px}
+  .lt-tag{font-size:14px;letter-spacing:3px}
+  .lt-brand{margin-bottom:38px}
+  .lt-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .lt-grid .lt-btn{margin-bottom:0}
+  .lt-primary{padding:22px 24px;font-size:18px}
+  .lt-social a{width:58px;height:58px;font-size:26px}
+}
+@media(min-width:1100px){
+  .lt-wrap{max-width:860px}
+  .lt-logo{font-size:64px}
+}
 </style>
 </head>
 <body>
@@ -431,6 +470,27 @@ footer .fl:hover{color:var(--gold)}
     <a href="#kontakt" onclick="toggleMenu()">Kontakt</a>
   </div>
 </div>
+
+<!-- ===================== LINK-TREE (Quick-Links) ===================== -->
+<section class="linktree" id="quicklinks">
+  <div class="lt-wrap">
+    <div class="lt-brand">
+      <div class="lt-logo">eat<b>De</b><span>Si</span></div>
+      <div class="lt-tag">Indian Fusion Kitchen &amp; Grill · Bad Wildungen</div>
+    </div>
+    <a class="lt-btn lt-primary" id="lt-menu"><span class="lt-ic">📋</span><span>Speisekarte ansehen &amp; bestellen</span><span class="lt-arr">›</span></a>
+    <div class="lt-grid">
+    <a class="lt-btn" id="lt-pdf" target="_blank"><span class="lt-ic">📄</span><span>Speisekarte als PDF</span><span class="lt-arr">›</span></a>
+    <a class="lt-btn" id="lt-resv"><span class="lt-ic">📅</span><span>Tisch reservieren</span><span class="lt-arr">›</span></a>
+    <a class="lt-btn" id="lt-review" target="_blank"><span class="lt-ic">⭐</span><span>Google Bewertung abgeben</span><span class="lt-arr">›</span></a>
+    <a class="lt-btn" id="lt-call"><span class="lt-ic">☎️</span><span>Anrufen</span><span class="lt-arr">›</span></a>
+    <a class="lt-btn" id="lt-maps" target="_blank"><span class="lt-ic">📍</span><span>Route / Google Maps</span><span class="lt-arr">›</span></a>
+    <a class="lt-btn" id="lt-wa" target="_blank"><span class="lt-ic">💬</span><span>WhatsApp</span><span class="lt-arr">›</span></a>
+    </div>
+    <div class="lt-social" id="lt-social"></div>
+    <button class="lt-scroll" onclick="document.getElementById('top').scrollIntoView({behavior:'smooth'})">▾ Mehr entdecken</button>
+  </div>
+</section>
 
 <!-- ===================== HERO ===================== -->
 <section class="hero" id="top">
@@ -591,11 +651,14 @@ footer .fl:hover{color:var(--gold)}
       <div>
         <h4>Kontakt</h4>
         <a class="fl" data-co-phone href="tel:+4956219449087">📞 +49 5621 9449087</a>
-        <a class="fl" href="https://beacons.ai/eatdesi.bw" target="_blank">🔗 beacons.ai/eatdesi.bw</a>
+        <a class="fl" data-co-whatsapp href="https://wa.me/4956219449087" target="_blank">💬 WhatsApp</a>
+        <a class="fl" data-co-maps href="#" target="_blank">📍 Route / Google Maps</a>
+        <a class="fl" data-co-review href="#" target="_blank" style="display:none">⭐ Google Bewertung</a>
         <a class="fl" href="#catering">🍽️ Catering anfragen</a>
         <a class="fl" href="#menu">🛒 Jetzt bestellen</a>
       </div>
     </div>
+    <div class="foot-social" id="footSocial"></div>
     <div class="foot-bot">
       <span>© <span id="yr"></span> eatDeSi · Familie Sidhu</span>
       <span><a class="fl" style="display:inline;cursor:pointer" onclick="openLegal('impressum')">Impressum</a> · <a class="fl" style="display:inline;cursor:pointer" onclick="openLegal('datenschutz')">Datenschutz</a> · <a class="fl" style="display:inline;cursor:pointer" onclick="openLegal('agb')">AGB</a></span>
@@ -1350,6 +1413,17 @@ let COMPANY = {
   street:'Brunnenallee 30', zip:'34537', city:'Bad Wildungen',
   phone:'+49 5621 9449087',
   about:'Bei eatDeSi treffen indische Tradition und moderne Küche aufeinander. Familie Sidhu aus Indien kocht mit Liebe und Leidenschaft – frisch zubereitet, mit hochwertigen Zutaten.',
+  // Kontakt-Links (im Admin editierbar)
+  whatsapp:'4956219449087',   // Nummer ohne + und ohne führende 0
+  maps:'https://www.google.com/maps/search/?api=1&query=Brunnenallee+30+34537+Bad+Wildungen',
+  google_review:'https://search.google.com/local/writereview?placeid=ChIJuyuEhqtlu0cRov30x233UoQ',
+  menu_pdf:'https://drive.google.com/file/d/1mbKFrSLN2v1x7n_zEBX8fJdCwbY7jJ65/view',
+  // Social Media (admin editierbar, add/delete) – echte Links
+  social:[
+    {id:'ig', name:'Instagram', icon:'📷', url:'https://www.instagram.com/eatdesi_indien_trifft_trends'},
+    {id:'fb', name:'Facebook',  icon:'👍', url:'https://www.facebook.com/share/1EPQozjbfs/'},
+    {id:'tt', name:'TikTok',    icon:'🎵', url:'https://www.tiktok.com/@eatdesi_'}
+  ],
   // Rechtliche Angaben (im Admin editierbar)
   legalName:'', rechtsform:'', vertreter:'', email:'', ustId:'', register:'', aufsicht:''
 };
@@ -1358,6 +1432,50 @@ function applyCompany(){
   document.querySelectorAll('[data-co-phone]').forEach(el=>{el.textContent='📞 '+COMPANY.phone;el.href='tel:'+COMPANY.phone.replace(/\s/g,'');});
   document.querySelectorAll('[data-co-addr]').forEach(el=>{el.innerHTML='📍 '+COMPANY.street+'<br>'+COMPANY.zip+' '+COMPANY.city;});
   document.querySelectorAll('[data-co-about]').forEach(el=>{el.textContent=COMPANY.about;});
+  // WhatsApp / Maps / Google-Bewertung Links
+  document.querySelectorAll('[data-co-whatsapp]').forEach(el=>{el.href='https://wa.me/'+(COMPANY.whatsapp||'').replace(/\D/g,'');});
+  document.querySelectorAll('[data-co-maps]').forEach(el=>{el.href=COMPANY.maps||'#';});
+  document.querySelectorAll('[data-co-review]').forEach(el=>{
+    if(COMPANY.google_review){el.href=COMPANY.google_review;el.style.display='block';}
+    else{el.style.display='none';}
+  });
+  // Social-Bar rendern (Footer)
+  var fs=document.getElementById('footSocial');
+  if(fs){
+    fs.innerHTML='';
+    (COMPANY.social||[]).forEach(function(s){
+      if(!s.url) return;
+      var a=document.createElement('a');
+      a.href=s.url; a.target='_blank'; a.title=s.name; a.innerHTML=s.icon||'🔗';
+      fs.appendChild(a);
+    });
+  }
+  // ---- LINK-TREE (Startscreen) ----
+  var waUrl='https://wa.me/'+(COMPANY.whatsapp||'').replace(/\D/g,'');
+  var set=function(id,fn){var el=document.getElementById(id);if(el)fn(el);};
+  set('lt-menu',function(el){el.onclick=function(){openShopFromHero();};});
+  set('lt-pdf',function(el){
+    if(COMPANY.menu_pdf){el.href=COMPANY.menu_pdf;el.style.display='';}
+    else{el.style.display='none';}
+  });
+  set('lt-resv',function(el){el.onclick=function(){openReq('reservierung');};});
+  set('lt-review',function(el){
+    if(COMPANY.google_review){el.href=COMPANY.google_review;el.style.display='';}
+    else{el.style.display='none';}
+  });
+  set('lt-call',function(el){el.href='tel:'+(COMPANY.phone||'').replace(/\s/g,'');});
+  set('lt-maps',function(el){el.href=COMPANY.maps||'#';});
+  set('lt-wa',function(el){el.href=waUrl;});
+  var lts=document.getElementById('lt-social');
+  if(lts){
+    lts.innerHTML='';
+    (COMPANY.social||[]).forEach(function(s){
+      if(!s.url) return;
+      var a=document.createElement('a');
+      a.href=s.url; a.target='_blank'; a.title=s.name; a.innerHTML=s.icon||'🔗';
+      lts.appendChild(a);
+    });
+  }
 }
 
 /* ---- LIVE-MENÜ aus Supabase (vom POS gepflegt) ---- */
@@ -1738,6 +1856,15 @@ function drawCompany(){
     <div class="afield"><label>Ort</label><input id="co_city" value="${COMPANY.city}"></div></div>
     <div class="afield"><label>Telefon</label><input id="co_phone" value="${COMPANY.phone}"></div>
     <div class="afield"><label>Über uns (Text)</label><textarea id="co_about" rows="4">${COMPANY.about}</textarea></div>
+    <h3 style="margin-top:20px">📱 Links & Social Media</h3>
+    <p class="hint">Diese Links erscheinen im Footer. Leere Felder werden ausgeblendet.</p>
+    <div class="afield"><label>WhatsApp-Nummer (ohne + und 0)</label><input id="co_whatsapp" value="${COMPANY.whatsapp||''}" placeholder="z.B. 4956219449087"></div>
+    <div class="afield"><label>Google Maps Link</label><input id="co_maps" value="${COMPANY.maps||''}" placeholder="https://maps.google.com/..."></div>
+    <div class="afield"><label>Speisekarte PDF-Link 📄</label><input id="co_menupdf" value="${COMPANY.menu_pdf||''}" placeholder="https://drive.google.com/..."></div>
+    <div class="afield"><label>Google Bewertungs-Link ⭐</label><input id="co_review" value="${COMPANY.google_review||''}" placeholder="https://g.page/r/..."></div>
+    <label style="display:block;margin:12px 0 6px;font-size:13px;color:var(--gold)">Social-Media-Buttons</label>
+    <div id="co_social_rows"></div>
+    <button class="x-btn" style="width:auto;padding:6px 14px;font-size:13px;margin-top:4px" onclick="addSocialRow()">＋ Link hinzufügen</button>
     <h3 style="margin-top:20px">Rechtliche Angaben (für Impressum/AGB/Datenschutz)</h3>
     <div class="afield"><label>Inhaber / Vertretungsberechtigt *</label><input id="co_vertreter" value="${COMPANY.vertreter||''}" placeholder="z.B. Vor- und Nachname"></div>
     <div class="row2"><div class="afield"><label>Rechtsform</label><input id="co_rechtsform" value="${COMPANY.rechtsform||''}" placeholder="z.B. GbR, e.K., GmbH"></div>
@@ -1746,6 +1873,28 @@ function drawCompany(){
     <div class="afield"><label>USt-IdNr. (falls vorhanden)</label><input id="co_ustId" value="${COMPANY.ustId||''}" placeholder="DE…"></div>
     <div class="afield"><label>Registereintrag (falls vorhanden)</label><input id="co_register" value="${COMPANY.register||''}" placeholder="z.B. Amtsgericht …, HRA …"></div>
     <button class="btn-save" onclick="saveCompany()">💾 Speichern</button></div>`;
+  drawSocialRows();
+}
+var _socialDraft = null;
+function drawSocialRows(){
+  if(_socialDraft===null) _socialDraft = JSON.parse(JSON.stringify(COMPANY.social||[]));
+  var c=$('#co_social_rows'); if(!c) return;
+  c.innerHTML = _socialDraft.map(function(s,i){
+    return `<div class="row2" style="align-items:end;margin-bottom:8px">
+      <div class="afield" style="max-width:64px"><label>Icon</label><input value="${(s.icon||'').replace(/"/g,'&quot;')}" oninput="_socialDraft[${i}].icon=this.value" style="text-align:center"></div>
+      <div class="afield"><label>Name</label><input value="${(s.name||'').replace(/"/g,'&quot;')}" oninput="_socialDraft[${i}].name=this.value"></div>
+      <div class="afield"><label>Link</label><input value="${(s.url||'').replace(/"/g,'&quot;')}" oninput="_socialDraft[${i}].url=this.value" placeholder="https://..."></div>
+      <button class="x-btn" style="width:auto;padding:0 12px;color:var(--red)" onclick="delSocialRow(${i})">🗑</button>
+    </div>`;
+  }).join('') || '<p class="hint">Noch keine Links. Mit „＋ Link hinzufügen" starten.</p>';
+}
+function addSocialRow(){
+  if(_socialDraft===null) _socialDraft=[];
+  _socialDraft.push({id:'x'+Date.now(),name:'',icon:'🔗',url:''});
+  drawSocialRows();
+}
+function delSocialRow(i){
+  _socialDraft.splice(i,1); drawSocialRows();
 }
 function saveCompany(){
   COMPANY.name=$('#co_name').value.trim()||COMPANY.name;
@@ -1755,6 +1904,18 @@ function saveCompany(){
   COMPANY.city=$('#co_city').value.trim();
   COMPANY.phone=$('#co_phone').value.trim();
   COMPANY.about=$('#co_about').value.trim();
+  COMPANY.whatsapp=($('#co_whatsapp')||{}).value?.replace(/\D/g,'')||'';
+  COMPANY.maps=($('#co_maps')||{}).value?.trim()||'';
+  COMPANY.menu_pdf=($('#co_menupdf')||{}).value?.trim()||'';
+  COMPANY.google_review=($('#co_review')||{}).value?.trim()||'';
+  if(_socialDraft!==null){
+    COMPANY.social=_socialDraft.filter(function(s){return (s.name||s.url);}).map(function(s){
+      var u=(s.url||'').trim();
+      if(u && !/^https?:\/\//.test(u)) u='https://'+u;
+      return {id:s.id||('x'+Date.now()), name:(s.name||'').trim(), icon:(s.icon||'🔗').trim(), url:u};
+    });
+    _socialDraft=null;
+  }
   COMPANY.vertreter=($('#co_vertreter')||{}).value?.trim()||'';
   COMPANY.rechtsform=($('#co_rechtsform')||{}).value?.trim()||'';
   COMPANY.legalName=($('#co_legalName')||{}).value?.trim()||'';
