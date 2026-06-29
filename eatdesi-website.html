@@ -9,6 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,900;1,9..144,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
 :root{
@@ -118,6 +120,32 @@ h2.head{font-family:'Fraunces',serif;font-weight:900;font-size:clamp(30px,5vw,46
 .mode-pills button{padding:9px 14px;border-radius:999px;font-size:13.5px;font-weight:600;color:var(--paper-2);transition:.18s}
 @media(max-width:520px){.mode-pills button{padding:8px 9px;font-size:12.5px}}
 .mode-pills button.on{background:var(--gold);color:var(--ink)}
+.mode-pills button.closed{opacity:.5;text-decoration:line-through;background:rgba(197,72,47,.12);border-color:var(--red)}
+.shop-mode{margin:0 0 18px}
+.shop-mode-label{font-size:13px;color:var(--gold);font-weight:600;letter-spacing:.5px;margin-bottom:8px}
+.shop-mode .mode-pills{max-width:100%;justify-content:stretch}
+.shop-mode .mode-pills button{flex:1}
+.shop-mode-hint{font-size:12.5px;color:var(--paper-2);margin-top:8px}
+.dc-overlay{position:fixed;inset:0;z-index:400;background:rgba(0,0,0,.78);display:none;align-items:center;justify-content:center;padding:20px}
+.dc-overlay.show{display:flex}
+.dc-box{background:var(--ink-soft);border:1px solid var(--gold);border-radius:18px;padding:24px;width:100%;max-width:400px;max-height:90vh;overflow-y:auto}
+.dc-box h3{color:var(--gold);font-family:'Fraunces',serif;font-size:21px;margin-bottom:6px}
+.dc-sub{font-size:13.5px;color:var(--paper-2);margin-bottom:16px;line-height:1.5}
+.dc-l{display:block;font-size:12px;color:var(--gold);margin:10px 0 5px;font-weight:600}
+.dc-i{width:100%;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:10px;padding:12px;color:var(--cream);font-size:15px}
+.dc-i:focus{outline:none;border-color:var(--gold)}
+.dc-row{display:flex;gap:10px;align-items:flex-end}
+.dc-err{color:var(--red);font-size:13px;margin:10px 0 0;min-height:18px}
+.dc-cancel{width:100%;margin-top:10px;color:var(--paper-2);font-size:13px;font-weight:600;padding:8px}
+.dc-confirm{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:12px;padding:14px;margin:14px 0}
+.dc-crow{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:14px;border-bottom:1px solid rgba(200,160,78,.12)}
+.dc-crow:last-child{border-bottom:none}
+.dc-crow span{color:var(--paper-2)}
+.dc-crow b{color:var(--cream)}
+.dc-warn{font-size:12.5px;color:var(--gold);background:rgba(200,160,78,.1);border:1px solid var(--line);border-radius:10px;padding:11px;margin:14px 0;line-height:1.5}
+#dc_map{height:180px;border-radius:12px;margin:14px 0;border:1px solid var(--line);overflow:hidden}
+.dc-spin{display:inline-block;width:14px;height:14px;border:2px solid var(--ink);border-top-color:transparent;border-radius:50%;animation:dcspin .7s linear infinite;vertical-align:middle}
+@keyframes dcspin{to{transform:rotate(360deg)}}
 .time-pills{display:flex;gap:6px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:12px;padding:4px}
 .time-pills button{flex:1;padding:11px 8px;border-radius:9px;font-size:13.5px;font-weight:600;color:var(--paper-2);transition:.18s;cursor:pointer;border:none;background:transparent;font-family:inherit}
 .time-pills button.on{background:var(--gold);color:var(--ink)}
@@ -284,6 +312,25 @@ footer .fl:hover{color:var(--gold)}
 .acard{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.012));border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:16px}
 .acard h3{font-family:'Fraunces',serif;font-size:20px;color:var(--cream);margin:0 0 4px}
 .acard .hint{font-size:12.5px;color:var(--paper-2);margin:0 0 16px}
+.dmode-opt{display:block;font-size:13px;color:var(--cream);background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px;padding:11px;cursor:pointer;line-height:1.4}
+.dmode-opt input{margin-right:8px;accent-color:var(--gold)}
+.srow{display:flex;align-items:center;justify-content:space-between;padding:13px;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;background:rgba(255,255,255,.02)}
+.srow.dim{opacity:.45}
+.sinfo .stitle{font-size:15px;font-weight:600;color:var(--cream)}
+.sstate{font-size:12px;margin-top:3px}
+.sstate.on{color:#7fc77f}.sstate.off{color:var(--red)}
+.allstop{display:flex;align-items:center;justify-content:space-between;padding:16px;border:2px solid var(--line);border-radius:14px;background:rgba(255,255,255,.02)}
+.allstop.active{border-color:var(--red);background:rgba(197,72,47,.1)}
+.switch{position:relative;display:inline-block;width:50px;height:28px;flex-shrink:0}
+.switch.big{width:60px;height:34px}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;inset:0;background:#555;border-radius:34px;transition:.3s}
+.slider:before{content:"";position:absolute;height:22px;width:22px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.3s}
+.switch.big .slider:before{height:28px;width:28px}
+.switch input:checked+.slider{background:#3fae6a}
+.switch input:checked+.slider:before{transform:translateX(22px)}
+.switch.big input:checked+.slider:before{transform:translateX(26px)}
+.switch input:disabled+.slider{opacity:.4}
 .zrow{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:9px;align-items:end;margin-bottom:10px}
 .zrow input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:10px;color:var(--cream);font-size:13.5px}
 .zrow .tlabel{font-size:11px;color:var(--gold);font-weight:600;margin-bottom:4px}
@@ -630,6 +677,15 @@ footer .fl:hover{color:var(--gold)}
     <!-- Toggle: Speisekarte anzeigen/schließen (Bestellweg wird oben gewählt) -->
     <button id="menuToggle" class="menu-toggle" onclick="toggleShop()">📋 Speisekarte ansehen & bestellen</button>
     <div class="shop" id="shopWrap" style="display:none">
+      <div class="shop-mode" id="shopMode">
+        <div class="shop-mode-label">Wie möchtest du bestellen?</div>
+        <div class="mode-pills" id="shopModePills">
+          <button type="button" data-mode="abholung" class="on" onclick="setShopMode('abholung')">🥡 Abholung</button>
+          <button type="button" data-mode="lieferung" onclick="setShopMode('lieferung')">🛵 Lieferung</button>
+          <button type="button" data-mode="dinein" onclick="setShopMode('dinein')">🍽️ Vor Ort</button>
+        </div>
+        <div class="shop-mode-hint" id="shopModeHint">🥡 Kostenlos abholen in der Brunnenallee 30.</div>
+      </div>
       <nav class="catnav" id="catNav"></nav>
       <div class="menu-col" id="menuCol"></div>
     </div>
@@ -696,7 +752,8 @@ footer .fl:hover{color:var(--gold)}
     </div>
   </div>
   <div class="admin-tabs" id="adminTabs" style="display:none">
-    <button data-at="reports" class="on" onclick="adminTab('reports')">📊 Reports</button>
+    <button data-at="status" class="on" onclick="adminTab('status')">🟢 Status</button>
+    <button data-at="reports" onclick="adminTab('reports')">📊 Reports</button>
     <button data-at="requests" onclick="adminTab('requests')">📬 Anfragen</button>
     <button data-at="zones" onclick="adminTab('zones')">🛵 Liefergebiete</button>
     <button data-at="hours" onclick="adminTab('hours')">🕐 Öffnungszeiten</button>
@@ -808,10 +865,24 @@ function notifyWhatsApp(p){
 }
 
 /* ---- LIEFERZONEN (aus eatdesi-bw.de; später im Admin editierbar) ---- */
+/* Restaurant-Standort (für Umkreis-Berechnung). Im Admin änderbar. */
+let REST_LOC = { lat:51.1188, lng:9.1278 };
+/* Liefer-Modus: 'address' = Adress-Check via OpenStreetMap (A=Umkreis / B=Polygon),
+   'manual' = alte Ortsteil-Auswahl (Fallback). zoneMode: 'radius' | 'polygon'. */
+let DELIVERY_CFG = { mode:'address', zoneMode:'radius' };
+/* Service-Schalter: Admin kann einzelne Bestellwege oder alles pausieren.
+   open=true heißt aktiv. allClosed pausiert ALLES (Notfall-Stopp). */
+let SERVICES = {
+  abholung:  { open:true, msg:'Abholung ist momentan pausiert. Bitte später erneut versuchen.' },
+  lieferung: { open:true, msg:'Lieferung ist momentan pausiert – sehr viele Bestellungen. Abholung & Vor Ort gehen weiter.' },
+  dinein:    { open:true, msg:'Vor-Ort-Bestellung ist momentan pausiert.' },
+  allClosed: false,
+  allMsg:    'Wir nehmen gerade keine Online-Bestellungen an. Wir sind gleich wieder für euch da! 🙏'
+};
 let ZONES = [
-  {name:'Zone 1', min:9.90, fee:2.50, plz:'34537', orte:'Bad Wildungen (Kernstadt)'},
-  {name:'Zone 2', min:14.90, fee:2.90, plz:'34537', orte:'Reinhardshausen, Reitzenhagen'},
-  {name:'Zone 3', min:19.90, fee:3.50, plz:'34537, 34549', orte:'Wega, Mandern, Albertshausen'}
+  {name:'Zone 1', min:9.90, fee:2.50, plz:'34537', orte:'Bad Wildungen (Kernstadt)', km:3,  poly:[]},
+  {name:'Zone 2', min:14.90, fee:2.90, plz:'34537', orte:'Reinhardshausen, Reitzenhagen', km:6,  poly:[]},
+  {name:'Zone 3', min:19.90, fee:3.50, plz:'34537, 34549', orte:'Wega, Mandern, Albertshausen', km:10, poly:[]}
 ];
 let activeZone = 0; // gewählte Zone für Lieferung
 let activeOrt = '';  // vom Kunden gewählter Ort/Stadtteil (Lieferung)
@@ -835,8 +906,101 @@ function setOrt(ort){
   return false;
 }
 
-/* ---- ÖFFNUNGSZEITEN (Mo,Mi-So 11:30-21:30, Di Ruhetag) ---- */
-const HOURS = { open:'11:30', close:'21:30', closedDay:2 }; // 2 = Dienstag (0=So)
+/* Wird beim Ort-Wechsel im Checkout aufgerufen: setzt Zone, füllt PLZ
+   automatisch mit der ersten erlaubten PLZ der Zone, aktualisiert Hinweis. */
+function onCityChange(city){
+  setOrt(city);
+  const z=ZONES[activeZone];
+  const zipEl=document.getElementById('f_zip');
+  const hintEl=document.getElementById('plzHint');
+  if(z){
+    const firstPlz=(z.plz||'').split(',').map(s=>s.trim()).filter(Boolean)[0]||'';
+    // PLZ nur vorbefüllen wenn leer ODER wenn aktuelle PLZ nicht zur Zone passt
+    if(zipEl){
+      const cur=(zipEl.value||'').trim();
+      if(!cur || !plzMatchesZone(cur, activeZone)) zipEl.value=firstPlz;
+    }
+    if(hintEl) hintEl.textContent='Liefergebiet: '+z.name+' · PLZ '+(z.plz||'');
+  }
+  // Gebühr/Summe + Mindestbestellwert-Anzeige neu berechnen
+  // (Checkout neu zeichnen, dabei Eingaben erhalten)
+  var keep={};
+  ['f_name','f_phone','f_email','f_street','f_zip','f_guests','f_note'].forEach(function(id){
+    var el=document.getElementById(id); if(el) keep[id]=el.value;
+  });
+  if(typeof goCheckout==='function'){ try{ goCheckout(); }catch(e){} }
+  Object.keys(keep).forEach(function(id){
+    var el=document.getElementById(id); if(el) el.value=keep[id];
+  });
+  // Ort-Auswahl wiederherstellen
+  var cityEl=document.getElementById('f_city'); if(cityEl) cityEl.value=activeOrt;
+}
+/* ===== GEO-HELFER für Adress-basierten Liefer-Check (OpenStreetMap) ===== */
+// Entfernung in km (Haversine)
+function geoDistKm(lat1,lng1,lat2,lng2){
+  const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLng=(lng2-lng1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+// Himmelsrichtung vom Restaurant zur Adresse (z.B. "Südosten")
+function geoDirection(latFrom,lngFrom,latTo,lngTo){
+  const dLng=(lngTo-lngFrom)*Math.PI/180;
+  const y=Math.sin(dLng)*Math.cos(latTo*Math.PI/180);
+  const x=Math.cos(latFrom*Math.PI/180)*Math.sin(latTo*Math.PI/180)-Math.sin(latFrom*Math.PI/180)*Math.cos(latTo*Math.PI/180)*Math.cos(dLng);
+  let brng=(Math.atan2(y,x)*180/Math.PI+360)%360;
+  const dirs=['Norden','Nordosten','Osten','Südosten','Süden','Südwesten','Westen','Nordwesten'];
+  return dirs[Math.round(brng/45)%8];
+}
+// Punkt-in-Polygon (Ray-Casting)
+function geoInPoly(lat,lng,poly){
+  if(!poly||poly.length<3) return false;
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const yi=poly[i][0],xi=poly[i][1], yj=poly[j][0],xj=poly[j][1];
+    const intersect=((yi>lat)!==(yj>lat)) && (lng < (xj-xi)*(lat-yi)/(yj-yi)+xi);
+    if(intersect) inside=!inside;
+  }
+  return inside;
+}
+// Adresse -> Koordinaten (Nominatim, kostenlos). Gibt {lat,lng,display} oder null.
+async function geocodeAddress(q){
+  try{
+    const url='https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=de&q='+encodeURIComponent(q);
+    const r=await fetch(url,{headers:{'Accept':'application/json'}});
+    const d=await r.json();
+    if(d&&d.length) return {lat:parseFloat(d[0].lat),lng:parseFloat(d[0].lon),display:d[0].display_name};
+  }catch(e){ console.warn('geocode',e); }
+  return null;
+}
+// Zone aus Koordinaten finden (je nach zoneMode). Gibt {idx,zone,dist} oder null.
+function findZoneByCoords(lat,lng){
+  if(DELIVERY_CFG.zoneMode==='polygon'){
+    for(let i=0;i<ZONES.length;i++){
+      if(geoInPoly(lat,lng,ZONES[i].poly)) return {idx:i,zone:ZONES[i],dist:geoDistKm(REST_LOC.lat,REST_LOC.lng,lat,lng)};
+    }
+    return null;
+  }
+  // radius (Standard)
+  const d=geoDistKm(REST_LOC.lat,REST_LOC.lng,lat,lng);
+  for(let i=0;i<ZONES.length;i++){
+    if(d<=(ZONES[i].km||0)) return {idx:i,zone:ZONES[i],dist:d};
+  }
+  return null;
+}
+/* Prüft ob eine PLZ zur Zone des gewählten Ortes passt.
+   Liest die erlaubten PLZ aus zone.plz (kommagetrennt). Gibt true wenn ok. */
+function plzMatchesZone(zip, zoneIndex){
+  const z=ZONES[zoneIndex]; if(!z) return false;
+  const allowed=(z.plz||'').split(',').map(s=>s.trim()).filter(Boolean);
+  if(!allowed.length) return true; // keine PLZ hinterlegt -> nicht blockieren
+  return allowed.includes((zip||'').trim());
+}
+/* Liste ALLER erlaubten PLZ über alle Zonen (für Fehlermeldung). */
+function allZonePlz(){
+  const set=new Set();
+  ZONES.forEach(z=>(z.plz||'').split(',').map(s=>s.trim()).filter(Boolean).forEach(p=>set.add(p)));
+  return [...set];
+}
 
 let MENU = {"Softdrinks":[{"id":200,"nr":"211","name":"Coca-Cola 0,33l","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":201,"nr":"212","name":"Cola Zero 0,33l","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":202,"nr":"213","name":"Fanta 0,33l","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":203,"nr":"214","name":"Sprite 0,33l","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":204,"nr":"215","name":"Spezi 0,33l","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":205,"nr":"216","name":"Ice Tea Pfirsich","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":206,"nr":"217","name":"Bitter Lemon","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":207,"nr":"220","name":"Gerolsteiner 0,25l","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":208,"nr":"221","name":"Gerolsteiner 0,75l","price":5.5,"veg":false,"vegan":false,"taxRate":"drinks"}],"Säfte & Lassi":[{"id":220,"nr":"231","name":"Apfelsaft/-schorle","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":221,"nr":"232","name":"Kirschsaft/-schorle","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":222,"nr":"233","name":"Kiba 0,3l","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":223,"nr":"234","name":"Bananensaft","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":224,"nr":"235","name":"Ananas/-schorle","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":225,"nr":"236","name":"Lychee/-schorle","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":230,"nr":"240","name":"Mango Lassi","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":231,"nr":"241","name":"Rose Lassi","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":232,"nr":"242","name":"Salz Lassi","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":233,"nr":"244","name":"Nimbu Pani Lassi","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"}],"Alkoholfrei":[{"id":180,"nr":"AF1","name":"Red Bull Classic","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":181,"nr":"AF2","name":"Havana Juicer","price":6.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":182,"nr":"AF3","name":"Virgin Colada","price":6.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":183,"nr":"AF4","name":"Virgin Hugo","price":6.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":184,"nr":"AF5","name":"Virgin Mojito","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":185,"nr":"AF6","name":"Nimbu Pani","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"}],"Bier":[{"id":240,"nr":"251a","name":"Bitburger Pils 0,3l","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":241,"nr":"251b","name":"Bitburger Pils 0,5l","price":4.9,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":242,"nr":"252","name":"Radler 0,3l","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":243,"nr":"253","name":"Diesel Bier & Cola","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":244,"nr":"254","name":"Bitburger alkoholfrei","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":245,"nr":"255","name":"Benediktiner Weizen 0,5l","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":246,"nr":"256","name":"Banana Weizen 0,5l","price":5.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":247,"nr":"257","name":"Licher Pilsner","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":248,"nr":"258","name":"Köstritzer Schwarzbier","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"}],"Weine":[{"id":260,"nr":"261","name":"Weißer Burgunder 0,2l","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":261,"nr":"262","name":"Pinot Grigio 0,2l","price":4,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":262,"nr":"263","name":"Lugana trocken 0,2l","price":6.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":263,"nr":"264","name":"Lugana Flasche 0,75l","price":19.9,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":264,"nr":"265","name":"Merlot halbtrocken 0,2l","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":265,"nr":"266","name":"Bardolino 0,2l","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":266,"nr":"267","name":"Chianti Flasche 0,75l","price":16.9,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":267,"nr":"268","name":"Portugieser Rosé 0,2l","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"}],"Cocktails":[{"id":170,"nr":"C1","name":"Mojito","price":6.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":171,"nr":"C2","name":"Pina Colada","price":6.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":172,"nr":"C3","name":"Long Island Iced Tea","price":6.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":173,"nr":"C4","name":"Swimming Pool","price":6.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":174,"nr":"C5","name":"Red Bull Thunder","price":6.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":175,"nr":"A1","name":"Aperol Spritz","price":6.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":176,"nr":"A2","name":"Hugo","price":6.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":177,"nr":"A3","name":"Lillet Rosé","price":6.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":178,"nr":"A4","name":"Prosecco","price":2.9,"veg":false,"vegan":false,"taxRate":"drinks"}],"Long & Shot Drinks":[{"id":270,"nr":"301","name":"Jacky Cola","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":271,"nr":"302","name":"Cuba Libre","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":272,"nr":"303","name":"Gin Sprite","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":273,"nr":"310","name":"Vodka Shot 2cl","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":274,"nr":"311","name":"Tequila Shot 2cl","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":275,"nr":"312","name":"Rum Shot 2cl","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":276,"nr":"313","name":"Ouzo Shot 2cl","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"}],"Digestive":[{"id":280,"nr":"281","name":"Obstler 2cl","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":281,"nr":"282","name":"Ramazzotti 4cl","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":282,"nr":"283","name":"Sambuca 2cl","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":283,"nr":"284","name":"Grappa 2cl","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":284,"nr":"285","name":"Limoncello 2cl","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":285,"nr":"286","name":"Amaretto 2cl","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":286,"nr":"287","name":"Baileys 4cl","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"}],"Caffe":[{"id":290,"nr":"321","name":"Tasse Caffè","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":291,"nr":"322","name":"Espresso","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":292,"nr":"323","name":"Espresso Doppel","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":293,"nr":"324","name":"Cappuccino","price":3,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":294,"nr":"325","name":"Latte Macchiato","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":295,"nr":"326","name":"Espresso Macchiato","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":296,"nr":"327","name":"Heiße Schokolade","price":3.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":297,"nr":"328","name":"Masala Chai","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":298,"nr":"329","name":"Chai Latte","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":299,"nr":"330","name":"Kurkuma Latte","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":300,"nr":"331","name":"Matcha Latte","price":4.5,"veg":false,"vegan":false,"taxRate":"drinks"},{"id":301,"nr":"332","name":"Tasse Tee","price":2.5,"veg":false,"vegan":false,"taxRate":"drinks"}],"Vorspeisen & Fries":[{"id":1,"nr":"1","name":"Avocado Fries","price":8.9,"veg":false,"vegan":true,"taxRate":"food","description":"Frische Avocado, Tempura-Panko, Sweet-Chili-Sauce","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]},{"id":2,"nr":"2","name":"Allu Tikki Chaat","price":8.9,"veg":true,"vegan":false,"taxRate":"food","description":"Kartoffel-Patty, Tomaten, Zwiebeln, Gurke, Kichererbsen, Sweet-Chili & Ranch-Dip","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"top":true},{"id":3,"nr":"3","name":"Mix Fries Platte","price":14.9,"veg":false,"vegan":false,"taxRate":"food","description":"Avocado Fries, Mozzarella Sticks, Blumenkohl, Onion Rings & Calamari mit Aioli & Sweet-Chili","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"top":true},{"id":4,"nr":"4","name":"Mozzarella Sticks","price":6.9,"veg":true,"vegan":false,"taxRate":"food","description":"Goldbraun gebacken mit Cheesy-Garlic-Sauce","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]},{"id":5,"nr":"5","name":"Crispy Blumenkohl","price":6.9,"veg":false,"vegan":true,"taxRate":"food","description":"Blumenkohlroeschen, Tempura-Panko, Ranch-Dip","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]},{"id":6,"nr":"6","name":"Crispy Onion Rings","price":6.9,"veg":false,"vegan":true,"taxRate":"food","description":"Goldene Zwiebel Ringe mit Guacamole-Dip","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]},{"id":7,"nr":"7","name":"Guacamole Shrimps","price":9.9,"veg":false,"vegan":false,"taxRate":"food","description":"Gegrillte Garnelen, Knoblauch, Guacamole","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"top":true},{"id":8,"nr":"8","name":"Roasty Pfeffer-Feta","price":13.4,"veg":true,"vegan":false,"taxRate":"food","description":"Ofengeroesteter Pfeffer-Feta, Feigen, Walnuesse, Honig","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]},{"id":9,"nr":"9","name":"Samosa","price":9.9,"veg":false,"vegan":false,"taxRate":"food","description":"Gefuellte Teigtaschen: Kartoffeln, Erbsen, Gewuerze, Tamarinden-Chutney","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]},{"id":10,"nr":"10","name":"Calamari","price":9.9,"veg":false,"vegan":false,"taxRate":"food","description":"Knusprig gebacken mit Limette & Aioli","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]},{"id":11,"nr":"11a","name":"Wonder Bites 6 Stk.","price":6.9,"veg":false,"vegan":false,"taxRate":"food","description":"Haehnchensticks, Tempura-Panko, hausgemacht","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]},{"id":12,"nr":"11b","name":"Wonder Bites 12 Stk.","price":12.9,"veg":false,"vegan":false,"taxRate":"food","description":"Haehnchensticks, Tempura-Panko, hausgemacht","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]},{"id":13,"nr":"12a","name":"Wonder Shrimps 6 Stk.","price":7.9,"veg":false,"vegan":false,"taxRate":"food","description":"Garnelen mit Knoblauch gegrillt, Aioli & Limette","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]},{"id":14,"nr":"12b","name":"Wonder Shrimps 12 Stk.","price":13.9,"veg":false,"vegan":false,"taxRate":"food","description":"Garnelen mit Knoblauch gegrillt, Aioli & Limette","options":[{"label":"Portion","required":false,"priced":false,"choices":["Als Vorspeise","Als Hauptspeise"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]},{"id":15,"nr":"19","name":"Pommes Frites","price":5.5,"veg":false,"vegan":true,"taxRate":"food","description":"Klassisch, knusprig, leicht gesalzen","options":[{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]},{"id":16,"nr":"20","name":"Sweet Potato Fries","price":6.5,"veg":false,"vegan":true,"taxRate":"food","description":"Suesskartoffelpommes mit feiner Gewuerznote","options":[{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}]}],"Salat":[{"nr":"21S","name":"Salat Mix Klein","price":5.9,"veg":true,"vegan":false,"taxRate":"food","options":[],"id":302,"description":"Lauchzwiebeln · Ranch-Dressing"},{"nr":"21G","name":"Salat Mix Groß","price":8.9,"veg":true,"vegan":false,"taxRate":"food","options":[],"id":303,"description":"Lauchzwiebeln · Ranch-Dressing"},{"nr":"22","name":"Tonno Salat","price":12.9,"veg":false,"vegan":false,"taxRate":"food","options":[],"id":304,"description":"Thunfisch · Oliven · Ei · Ranch-Dressing"},{"nr":"23","name":"Salat Italia","price":12.9,"veg":false,"vegan":false,"taxRate":"food","options":[],"id":305,"description":"Schinken · Artischocken · Mais · Oliven · Mozzarella · Cheesy-Garlic"},{"nr":"24","name":"Feta Deluxe Salat","price":14.9,"veg":true,"vegan":false,"taxRate":"food","options":[],"id":306,"description":"Pfeffer-Feta · Feigen · Walnüsse · Honig · Limette · Olivenöl","top":true},{"nr":"25","name":"Feta Salat","price":12.9,"veg":true,"vegan":false,"taxRate":"food","options":[],"id":307,"description":"Cremiger Feta · Oliven · Limette · Olivenöl","top":true},{"nr":"26","name":"Avocado-Ranch-Salat","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Fleisch","required":true,"priced":false,"choices":["Beef","Smoky Chicken"]}],"id":308,"description":"Beef oder Smoky Chicken · Avocado · Spiegelei · Limette · Ranch-Dressing"},{"nr":"27","name":"Surf & Turf Salat","price":16.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Fleisch","required":true,"priced":false,"choices":["Beef","Smoky Chicken"]}],"id":309,"description":"Beef oder Smoky Chicken + Garnelen · Limette · Cheesy-Garlic-Dressing","top":true},{"nr":"28","name":"Lachs-Salat","price":16.9,"veg":false,"vegan":false,"taxRate":"food","options":[],"id":310,"description":"Gegrilltes Lachsfilet · Avocado · Limette · Ranch-Dressing"}],"Indisch Curry & Naan":[{"nr":"31","name":"Butter Curry","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Zutat","required":true,"priced":true,"choices":[{"name":"Hähnchen","price":15.9},{"name":"Lachs","price":19.9},{"name":"Garnelen","price":19.9},{"name":"Gemüse Mix","price":13.9},{"name":"Paneer","price":15.9},{"name":"Lammkotelett","price":25.9}]},{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":311,"description":"Cremige Tomaten-Curry-Sahnesauce · Honig · Cashewnüsse · mit Basmatireis oder Nudeln","top":true},{"nr":"32","name":"Korma","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Zutat","required":true,"priced":true,"choices":[{"name":"Hähnchen","price":15.9},{"name":"Lachs","price":19.9},{"name":"Garnelen","price":19.9},{"name":"Gemüse Mix","price":13.9},{"name":"Paneer","price":15.9},{"name":"Lammkotelett","price":25.9}]},{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":312,"description":"Milde Kokos-Currysauce · Kokosmilch · Sahne · mit Basmatireis oder Nudeln"},{"nr":"33","name":"Biryani","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Zutat","required":true,"priced":true,"choices":[{"name":"Hähnchen","price":15.9},{"name":"Lachs","price":19.9},{"name":"Garnelen","price":19.9},{"name":"Gemüse Mix","price":13.9},{"name":"Paneer","price":15.9},{"name":"Lammkotelett","price":25.9}]},{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":313,"description":"Aromatisch gewürzter Basmatireis · Rosted Zwiebel · Rosinen · Sour Cream Dip"},{"nr":"34","name":"Curry","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Zutat","required":true,"priced":true,"choices":[{"name":"Hähnchen","price":15.9},{"name":"Lachs","price":19.9},{"name":"Garnelen","price":19.9},{"name":"Gemüse Mix","price":13.9},{"name":"Paneer","price":15.9},{"name":"Lammkotelett","price":25.9}]},{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":314,"description":"Klassische Tomaten-Currysauce · Rote Zwiebeln · mit Basmatireis oder Nudeln"},{"nr":"35","name":"Mango Curry","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Zutat","required":true,"priced":true,"choices":[{"name":"Hähnchen","price":15.9},{"name":"Lachs","price":19.9},{"name":"Garnelen","price":19.9},{"name":"Gemüse Mix","price":13.9},{"name":"Paneer","price":15.9},{"name":"Lammkotelett","price":25.9}]},{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":315,"description":"Fruchtige Mango-Curry-Sahnesauce · mit Basmatireis oder Nudeln"},{"nr":"36","name":"Vindaloo","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Zutat","required":true,"priced":true,"choices":[{"name":"Hähnchen","price":15.9},{"name":"Lachs","price":19.9},{"name":"Garnelen","price":19.9},{"name":"Gemüse Mix","price":13.9},{"name":"Paneer","price":15.9},{"name":"Lammkotelett","price":25.9}]},{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":316,"description":"Sehr scharf · Currysauce · Rote Zwiebeln · Kartoffeln · intensiver Chili"},{"nr":"38","name":"Tikka Masala","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Zutat","required":true,"priced":true,"choices":[{"name":"Hähnchen","price":15.9},{"name":"Lachs","price":19.9},{"name":"Garnelen","price":19.9},{"name":"Gemüse Mix","price":13.9},{"name":"Paneer","price":15.9},{"name":"Lammkotelett","price":25.9}]},{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":317,"description":"Joghurt-mariniert & gegrillt · Paprika · Zwiebeln · Masala-Sauce · mit Basmatireis oder Nudeln","top":true},{"nr":"39","name":"Palak","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Zutat","required":true,"priced":true,"choices":[{"name":"Hähnchen","price":15.9},{"name":"Lachs","price":19.9},{"name":"Garnelen","price":19.9},{"name":"Gemüse Mix","price":13.9},{"name":"Paneer","price":15.9},{"name":"Lammkotelett","price":25.9}]},{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":318,"description":"Cremige Spinat-Tomaten-Sahnesauce · mit Basmatireis oder Nudeln"},{"nr":"40","name":"Chilli Chicken","price":14.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":319,"description":"Knuspriges Hähnchenbrustfilet · rote Zwiebeln · Paprika · süß-sauer Sauce","top":true},{"nr":"51","name":"Chana Masala","price":12.9,"veg":false,"vegan":true,"taxRate":"food","options":[{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":320,"description":"Kichererbsen in würziger Tomaten-Currysauce"},{"nr":"52","name":"Dal Makhni","price":12.9,"veg":true,"vegan":false,"taxRate":"food","options":[{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":321,"description":"Linsen in cremiger Butter-Sahnesauce"},{"nr":"53","name":"Raj Mah","price":12.9,"veg":false,"vegan":true,"taxRate":"food","options":[{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":322,"description":"Kidneybohnen in würziger Tomaten-Zwiebel-Sauce"},{"nr":"60A","name":"Garlic Naan","price":3.9,"veg":true,"vegan":false,"taxRate":"food","options":[],"id":323,"description":"Knoblauch-Fladenbrot"},{"nr":"60B","name":"Butter Naan","price":3.9,"veg":true,"vegan":false,"taxRate":"food","options":[],"id":324,"description":"Butterweiches Fladenbrot"},{"nr":"60C","name":"Kasoori Naan","price":4.5,"veg":true,"vegan":false,"taxRate":"food","options":[],"id":325,"description":"Aromatische Kräuter & Knoblauch"},{"nr":"60D","name":"Papadam","price":3.9,"veg":true,"vegan":false,"taxRate":"food","options":[],"id":326,"description":"Dünne, knusprige Linsenwaffeln"}],"Tandoori & Grill":[{"nr":"41","name":"Indien Mix Grill","price":26.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":327,"description":"Hähnchen · Garnelen · Lachs · Salat & Basmatireis"},{"nr":"42","name":"Tandoori Mix Grill","price":26.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":328,"description":"Lammkoteletts · Garnelen · Hähnchen · Basmatireis & Salat","top":true},{"nr":"43","name":"eatDeSi Lammkotelett Grill","price":28.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":329,"description":"Saftige gegrillte Lammkoteletts · Bratkartoffeln & Salat"},{"nr":"46","name":"Premium Rumpsteak (250g)","price":27.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":330,"description":"Auf den Punkt · Bratkartoffeln · frischer Salat","top":true},{"nr":"47","name":"Premium Lachssteak (250g)","price":26.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Naan dazu","multi":true,"required":false,"choices":[{"name":"Garlic Naan","price":3.9},{"name":"Butter Naan","price":3.9},{"name":"Kasoori Naan","price":4.5},{"name":"Papadam","price":3.9}]}],"id":331,"description":"Zart & aromatisch · Guacamole · Bratkartoffeln · gemischter Salat","top":true}],"Tacos":[{"nr":"71","name":"Garlic Tacos","price":12.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Fleisch","required":true,"priced":false,"choices":["Beef","Smoky Chicken"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":332,"description":"Beef oder Smoky Chicken · Gerösteter Knoblauch · Parmesan · Limette · rote Zwiebeln · Aioli"},{"nr":"72","name":"Avocado Tacos","price":13.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Fleisch","required":true,"priced":false,"choices":["Beef","Smoky Chicken"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":333,"description":"Beef oder Smoky Chicken · Avocado · Parmesan · Guacamole · Limette · Ranch Sauce"},{"nr":"73","name":"Capsicum Cheese Tacos","price":12.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Fleisch","required":true,"priced":false,"choices":["Beef","Smoky Chicken"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":334,"description":"Beef oder Smoky Chicken · Paprika · Zwiebelmarmelade · Parmesan · Limette · Sour Cream"},{"nr":"74","name":"Surf & Turf Tacos","price":16.4,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Fleisch","required":true,"priced":false,"choices":["Beef","Smoky Chicken"]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":335,"description":"Beef oder Smoky Chicken + Garnelen · Parmesan · Limette · Cheesy-Garlic Sauce","top":true},{"nr":"75","name":"Salmon Tacos","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":336,"description":"Gegrillter Lachs · Avocado · Limette · Guacamole · Ranch Sauce"},{"nr":"76","name":"Blumenkohl Tinga Tacos","price":11.4,"veg":true,"vegan":false,"taxRate":"food","options":[{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":337,"description":"Knuspriger Blumenkohl · Paprika · Limette · Sour Cream"},{"nr":"77","name":"Tandoori Tacos","price":12.9,"veg":true,"vegan":false,"taxRate":"food","options":[{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":338,"description":"Gegrillter Paneer · Knoblauch · Paprika · Zwiebeln · Limette · Cheesy-Garlic-Sauce"}],"Burger":[{"nr":"81","name":"Der Klassiker","price":11.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Patty","required":true,"priced":false,"choices":["Beef","Chicken","Vegan","Veggie"]},{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Süß-Pommes statt Pommes","price":1.9}]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":339,"description":"Saftiges Patty · Salat · Tomaten · Gurke · rote Zwiebeln · Mayo · Ketchup · Senf"},{"nr":"82","name":"Smashed Bacontor Burger","price":14.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Patty","required":true,"priced":false,"choices":["Beef","Chicken","Vegan","Veggie"]},{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Süß-Pommes statt Pommes","price":1.9}]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":340,"description":"Smash Patty · Beef-Bacon-Zwiebelmarmelade · Cheddar · Jalapeños · Gurke · Hot-BBQ","top":true},{"nr":"84","name":"Smashed Cheesy Burger","price":9.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Patty","required":true,"priced":false,"choices":["Beef","Chicken","Vegan","Veggie"]},{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Süß-Pommes statt Pommes","price":1.9}]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":341,"description":"Smash Patty · Cheddar · Gurke · Mayo · Ketchup","top":true},{"nr":"85","name":"Trüffel Burger","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Patty","required":true,"priced":false,"choices":["Beef","Chicken","Vegan","Veggie"]},{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Süß-Pommes statt Pommes","price":1.9}]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":342,"description":"Patty · Champignons · Cheddar · Beef-Bacon-Zwiebelmarmelade · Trüffel-Creme"},{"nr":"86","name":"Biella Italia","price":18.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Patty","required":true,"priced":false,"choices":["Beef","Chicken","Vegan","Veggie"]},{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Süß-Pommes statt Pommes","price":1.9}]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":343,"description":"Doppel-Patty · Beef-Bacon-Zwiebelmarmelade · Champignons · Mozzarella · Cheesy-Garlic"},{"nr":"87","name":"Born Bacon","price":16.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Patty","required":true,"priced":false,"choices":["Beef","Chicken","Vegan","Veggie"]},{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Süß-Pommes statt Pommes","price":1.9}]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":344,"description":"Patty · Gegrilltes Chicken · Senf · Beef-Bacon-Zwiebelmarmelade · Spiegelei · Cheddar · Sweet-BBQ"},{"nr":"88","name":"Smashed Aioli Burger","price":14.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Patty","required":true,"priced":false,"choices":["Beef","Chicken","Vegan","Veggie"]},{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Süß-Pommes statt Pommes","price":1.9}]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":345,"description":"Smash Patty · Gerösteter Knoblauch · Cheddar · Zwiebeln · Jalapeños · Aioli","top":true},{"nr":"89","name":"Avocado Burger","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Patty","required":true,"priced":false,"choices":["Beef","Chicken","Vegan","Veggie"]},{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Süß-Pommes statt Pommes","price":1.9}]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":346,"description":"Patty · Avocado · Cheddar · Spiegelei · Ranch-Sauce","top":true},{"nr":"90","name":"Veggie Burger","price":9.9,"veg":true,"vegan":false,"taxRate":"food","options":[{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Süß-Pommes statt Pommes","price":1.9}]},{"label":"Extra Dip","multi":true,"required":false,"choices":[{"name":"Sour Cream","price":1.7},{"name":"Ranch","price":1.7},{"name":"Cheesy Garlic","price":1.7},{"name":"Sweet Chili","price":1.7},{"name":"Hot BBQ","price":1.7},{"name":"Sweet BBQ","price":1.7},{"name":"Aioli","price":1.7},{"name":"Tamarinden","price":1.7},{"name":"Minze","price":1.7},{"name":"Guacamole","price":2.9}]}],"id":347,"description":"Veggie-Patty · Cheddar · Salat · Tomaten · Gurke · Sweet-Chili"}],"Schnitzel":[{"id":110,"nr":"101","name":"Schnitzel Wiener Art","price":10.9,"veg":false,"vegan":false,"taxRate":"food","description":"Klassisch paniertes Putenschnitzel, knusprig gebacken","options":[{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Extra Salat","price":2.9}]}]},{"id":111,"nr":"103","name":"Schnitzel Hawaii","price":13.9,"veg":false,"vegan":false,"taxRate":"food","description":"Schinken, Ananas, Sahnesauce, Mozzarella ueberbacken","options":[{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Extra Salat","price":2.9}]}]},{"id":112,"nr":"104","name":"Schnitzel Al Forno","price":13.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Extra Salat","price":2.9}]}]},{"id":113,"nr":"105","name":"Rahm Schnitzel","price":13.9,"veg":false,"vegan":false,"taxRate":"food","description":"Champignons, Zwiebeln, cremige Rahmsauce","options":[{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Extra Salat","price":2.9}]}]},{"id":114,"nr":"106","name":"Schnitzel Chef","price":14.9,"veg":false,"vegan":false,"taxRate":"food","description":"Paprika, Zwiebeln, Knoblauch, Curry-Tomatensahnesauce, Mozzarella ueberbacken","options":[{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Extra Salat","price":2.9}]}]},{"id":115,"nr":"107","name":"Schnitzel Erbe","price":13.9,"veg":false,"vegan":false,"taxRate":"food","description":"Brokkoli, Spinat, Cheese-Sauce, Parmesan, Roestzwiebeln","options":[{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Extra Salat","price":2.9}]}]},{"id":116,"nr":"108","name":"Schnitzel Trüffel","price":13.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Beilage","required":true,"priced":false,"choices":["Pommes","Salat"]},{"label":"Extra","multi":true,"required":false,"choices":[{"name":"Extra Salat","price":2.9}]}]}],"Pizza":[{"id":130,"nr":"131","name":"Margherita","price":7.9,"veg":true,"vegan":false,"taxRate":"food","description":"Tomatensauce & Mozzarella","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}]},{"id":131,"nr":"133","name":"Veggie","price":11.9,"veg":true,"vegan":false,"taxRate":"food","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}]},{"id":132,"nr":"134","name":"Capricciosa","price":13.9,"veg":false,"vegan":false,"taxRate":"food","description":"Schinken, Salami, Champignons, Peperoni","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}],"top":true},{"id":133,"nr":"135","name":"4 Stagioni","price":13.9,"veg":false,"vegan":false,"taxRate":"food","description":"Schinken, Champignons, Artischocken, Ei","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}]},{"id":134,"nr":"136","name":"Scampi","price":14.9,"veg":false,"vegan":false,"taxRate":"food","description":"Garnelen & Knoblauch","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}],"top":true},{"id":135,"nr":"137","name":"Bull BBQ","price":15.9,"veg":false,"vegan":false,"taxRate":"food","description":"Hackfleisch, Salami, Champignons, Zwiebeln, Jalapenos, BBQ-Sauce","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}],"top":true},{"id":136,"nr":"138","name":"Fantasia","price":13.9,"veg":false,"vegan":false,"taxRate":"food","description":"Smoky Chicken, Zwiebeln, Paprika, Salat, Cheesy-Garlic-Sauce","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}]},{"id":137,"nr":"140","name":"Avocado Pizza","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}],"top":true},{"id":138,"nr":"141","name":"Salmon Pizza","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}],"top":true},{"id":139,"nr":"142","name":"Salami","price":10.5,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}]},{"id":140,"nr":"143","name":"Schinken","price":10.5,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}]},{"id":141,"nr":"144","name":"Rustica","price":11.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}]},{"id":142,"nr":"145","name":"Hawaii","price":11.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}]},{"id":143,"nr":"146","name":"Diavola","price":11.9,"veg":false,"vegan":false,"taxRate":"food","description":"Salami, Paprika, Chili, Olivenoel","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}]},{"id":145,"nr":"148","name":"Tonno","price":12.9,"veg":false,"vegan":false,"taxRate":"food","description":"Thunfisch & Zwiebeln","options":[{"label":"Toppings","multi":true,"required":false,"choices":[{"name":"Salami","price":1.5},{"name":"Schinken","price":1.5},{"name":"Champignons","price":1.5},{"name":"Artischocken","price":1.5},{"name":"Oliven","price":1.5},{"name":"Zwiebeln","price":1.5},{"name":"Ei","price":1.5},{"name":"Ananas","price":1.5},{"name":"Peperoni","price":1.5},{"name":"Paprika","price":1.5},{"name":"Mais","price":1.5},{"name":"Erbsen","price":1.5},{"name":"Spinat","price":1.5},{"name":"Mozzarella","price":2.5},{"name":"Meeresfrüchte","price":2.5},{"name":"Thunfisch","price":2.5},{"name":"Grilled Beef","price":4.9},{"name":"Smoky Chicken","price":4.9},{"name":"Garnelen","price":4.9},{"name":"Lachs","price":4.9}]}],"top":true}],"Paccheri":[{"nr":"111","name":"Paccheri Bacon","price":14.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Fleisch","required":true,"priced":false,"choices":["Beef","Smoky Chicken"]}],"id":348,"description":"Beef oder Smoky Chicken · Cheese-Sauce · Tomatensauce · Beef-Bacon-Zwiebelmarmelade · überbacken"},{"nr":"112","name":"Paccheri Roast Pfeffer Feta","price":14.9,"veg":false,"vegan":false,"taxRate":"food","options":[],"id":349,"description":"Cheese-Sauce · Honig · Walnuss · Feta-Käse · überbacken"},{"nr":"113","name":"Paccheri Roasty Garlic","price":14.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Fleisch","required":true,"priced":false,"choices":["Beef","Smoky Chicken"]}],"id":350,"description":"Beef oder Smoky Chicken · Gerösteter Knoblauch · rote Zwiebeln · Cheese-Sauce · überbacken"},{"nr":"114","name":"Paccheri Trüffel","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Fleisch","required":true,"priced":false,"choices":["Beef","Smoky Chicken"]}],"id":351,"description":"Beef oder Smoky Chicken · Trüffelcreme · Champignons · Cheese-Sauce · überbacken","top":true},{"nr":"115","name":"Paccheri Avocado","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Fleisch","required":true,"priced":false,"choices":["Beef","Smoky Chicken"]}],"id":352,"description":"Beef oder Smoky Chicken · Avocado · Spiegelei · Cheese-Sauce · überbacken"},{"nr":"116","name":"Paccheri Salmon","price":16.9,"veg":false,"vegan":false,"taxRate":"food","options":[],"id":353,"description":"Lachs · Avocado · cremige Cheese-Sauce · überbacken","top":true},{"nr":"117","name":"Paccheri Veggie","price":12.9,"veg":true,"vegan":false,"taxRate":"food","options":[],"id":354,"description":"Grillgemüse · Cheese-Sauce · Tomatensauce"},{"nr":"118","name":"Paccheri Erbe","price":13.9,"veg":false,"vegan":false,"taxRate":"food","options":[],"id":355,"description":"Brokkoli · Spinat · Cheese-Sauce · Parmesan · Röstzwiebeln"},{"nr":"119","name":"Paccheri eatDeSi Premium","price":14.9,"veg":false,"vegan":false,"taxRate":"food","options":[],"id":356,"description":"Hackfleisch · Schinken · Champignons · Erbsen · Tomaten-Sahnesauce · überbacken","top":true},{"nr":"120","name":"Paccheri Napoli","price":9.9,"veg":false,"vegan":false,"taxRate":"food","options":[],"id":357,"description":"Klassische Knoblauch-Tomatensauce"},{"nr":"121","name":"Paccheri Chef","price":14.9,"veg":false,"vegan":false,"taxRate":"food","options":[],"id":358,"description":"Hähnchen · Paprika · Zwiebeln · Knoblauch · Sahne & Curry-Tomatensauce · überbacken"}],"Potato Bombs":[{"nr":"61","name":"Smashed Veggie Bomb","price":11.9,"veg":true,"vegan":false,"taxRate":"food","options":[],"id":359,"description":"Gemüse · Spinat · Parmesan · Sahne · Mozzarella überbacken"},{"nr":"62","name":"Smashed Bacon Bomb","price":13.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Fleisch","required":true,"priced":false,"choices":["Beef","Smoky Chicken"]}],"id":360,"description":"Beef oder Smoky Chicken · Gemüse · Parmesan · Beef-Bacon-Zwiebel-Jam · Sahne · Mozzarella überbacken","top":true},{"nr":"63","name":"Smashed Lachs Bomb","price":15.9,"veg":false,"vegan":false,"taxRate":"food","options":[],"id":361,"description":"Gegrillter Lachs · Parmesan · Rahmspinat · Mozzarella überbacken"},{"nr":"64","name":"Cheese Fries","price":12.9,"veg":false,"vegan":false,"taxRate":"food","options":[{"label":"Fleisch","required":true,"priced":false,"choices":["Beef","Smoky Chicken"]}],"id":362,"description":"Beef oder Smoky Chicken · Cheesy-Garlic · Jalapeños · Mozzarella überbacken · Rosted Zwiebeln"}],"Dips":[{"id":30,"nr":"D1","name":"Sour Cream","price":1.7,"veg":false,"vegan":false,"taxRate":"food"},{"id":31,"nr":"D2","name":"Ranch","price":1.7,"veg":false,"vegan":false,"taxRate":"food"},{"id":32,"nr":"D3","name":"Cheesy Garlic","price":1.7,"veg":false,"vegan":false,"taxRate":"food"},{"id":33,"nr":"D4","name":"Sweet Chili","price":1.7,"veg":false,"vegan":false,"taxRate":"food"},{"id":34,"nr":"D5","name":"Hot BBQ","price":1.7,"veg":false,"vegan":false,"taxRate":"food"},{"id":35,"nr":"D6","name":"Sweet BBQ","price":1.7,"veg":false,"vegan":false,"taxRate":"food"},{"id":36,"nr":"D7","name":"Aioli","price":1.7,"veg":false,"vegan":false,"taxRate":"food"},{"id":37,"nr":"D8","name":"Tamarinden","price":1.7,"veg":false,"vegan":false,"taxRate":"food"},{"id":38,"nr":"D9","name":"Minze Sauce","price":1.7,"veg":false,"vegan":false,"taxRate":"food"},{"id":39,"nr":"D10","name":"Guacamole","price":2.9,"veg":false,"vegan":false,"taxRate":"food"}],"Dessert":[{"id":160,"nr":"130","name":"Tiramisu","price":6.9,"veg":false,"vegan":false,"taxRate":"food"},{"id":161,"nr":"131","name":"Soufflé","price":6.9,"veg":false,"vegan":false,"taxRate":"food"},{"id":162,"nr":"132","name":"Tartufo Nero","price":6.9,"veg":false,"vegan":false,"taxRate":"food"},{"id":163,"nr":"133","name":"Cheesecake","price":6.9,"veg":false,"vegan":false,"taxRate":"food"}]};
 
@@ -912,13 +1076,25 @@ function selectCat(cat){ activeCat=cat; renderMenu();
 }
 function toggleShop(){
   const w=$('#shopWrap'), b=$('#menuToggle');
-  if(w.style.display==='none'){ w.style.display='grid'; b.textContent='✕ Speisekarte schließen'; b.classList.add('open'); renderMenu(); }
+  if(w.style.display==='none'){ w.style.display='grid'; b.textContent='✕ Speisekarte schließen'; b.classList.add('open'); renderMenu(); updateShopModePills(); }
   else { w.style.display='none'; b.textContent='📋 Speisekarte ansehen & bestellen'; b.classList.remove('open'); }
 }
 function openShopFromHero(){
   const w=$('#shopWrap'), b=$('#menuToggle');
-  if(w.style.display==='none'){ w.style.display='grid'; b.textContent='✕ Speisekarte schließen'; b.classList.add('open'); renderMenu(); }
+  if(w.style.display==='none'){ w.style.display='grid'; b.textContent='✕ Speisekarte schließen'; b.classList.add('open'); renderMenu(); updateShopModePills(); }
   jump('menu');
+}
+// Zeigt pausierte Bestellwege optisch an (durchgestrichen + Hinweis)
+function updateShopModePills(){
+  var map={abholung:'🥡 Abholung',lieferung:'🛵 Lieferung',dinein:'🍽️ Vor Ort'};
+  document.querySelectorAll('#shopModePills button').forEach(function(b){
+    var m=b.dataset.mode;
+    var closed = SERVICES.allClosed || (SERVICES[m] && !SERVICES[m].open);
+    b.classList.toggle('closed', !!closed);
+    b.innerHTML = (map[m]||b.textContent) + (closed?' ⏸️':'');
+  });
+  var hint=document.getElementById('shopModeHint');
+  if(hint && SERVICES.allClosed){ hint.innerHTML='<span style="color:var(--red)">⏸️ '+SERVICES.allMsg+'</span>'; }
 }
 function renderCard(it){
   const hasOpt=it.options&&it.options.length;
@@ -1038,7 +1214,9 @@ function renderCartList(){
    ==================================================================== */
 function goCheckout(){
   const sub=cartTotal(), isDeliv=mode==='lieferung', isDine=mode==='dinein';
-  const z=ZONES[activeZone]||{fee:0}; const fee=isDeliv?z.fee:0, tot=sub+fee;
+  const z=ZONES[activeZone]||{fee:0,min:0,name:''}; const fee=isDeliv?z.fee:0, tot=sub+fee;
+  const ortChosen = isDeliv && activeOrt && buildOrtList().some(x=>x.ort===activeOrt);
+  const belowMin = isDeliv && ortChosen && sub < z.min;
   const modeTitle = isDeliv?'Lieferung':(isDine?'Vor Ort essen':'Abholung');
   const timeWord = isDeliv?'Lieferung':(isDine?'Ankunft':'Abholung');
   $('#drawerTitle').textContent='Kasse · '+modeTitle;
@@ -1054,12 +1232,13 @@ function goCheckout(){
     <div class="field"><label>Telefon *</label><input id="f_phone" inputmode="tel" placeholder="Für Rückfragen"><div class="err">Bitte Telefonnummer angeben</div></div>
     <div class="field"><label>E-Mail (optional)</label><input id="f_email" inputmode="email" placeholder="für Bestätigung per E-Mail"></div>
     ${isDeliv?`<div class="field"><label>Straße & Hausnummer *</label><input id="f_street" placeholder="z.B. Brunnenallee 12"><div class="err">Bitte Adresse angeben</div></div>
-      <div class="row2"><div class="field"><label>PLZ *</label><input id="f_zip" inputmode="numeric" placeholder="34537"><div class="err">PLZ</div></div>
-      <div class="field"><label>Ort / Stadtteil *</label>
-        <select id="f_city" onchange="setOrt(this.value)" style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:11px;color:var(--cream);font-size:14px">
+      <div class="row2"><div class="field"><label>Ort / Stadtteil *</label>
+        <select id="f_city" onchange="onCityChange(this.value)" style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:11px;color:var(--cream);font-size:14px">
           <option value="" ${!activeOrt?'selected':''} disabled>– wählen –</option>
           ${buildOrtList().map(x=>`<option value="${(x.ort||'').replace(/"/g,'&quot;')}" ${x.ort===activeOrt?'selected':''}>${x.ort}</option>`).join('')}
-        </select><div class="err">Bitte Ort wählen</div></div></div>`
+        </select><div class="err">Bitte Ort wählen</div></div>
+      <div class="field"><label>PLZ *</label><input id="f_zip" inputmode="numeric" placeholder="34537"><div class="err">PLZ</div></div></div>
+      <div class="hint" id="plzHint" style="margin:-4px 0 8px">${activeOrt?('Liefergebiet: '+(ZONES[activeZone]?ZONES[activeZone].name:'')+' · PLZ '+(ZONES[activeZone]?ZONES[activeZone].plz:'')):'Erst Ort wählen – die passende PLZ wird gesetzt.'}</div>`
       :isDine?`<div class="field"><label>Anzahl Personen *</label><input id="f_guests" inputmode="numeric" placeholder="z.B. 4"><div class="err">Bitte Personenzahl angeben</div></div>
       <div class="deliv-note">🍽️ Wir reservieren deinen Tisch und bereiten dein Essen vor. Die genaue Zeit bestätigen wir dir.</div>`
       :`<div class="deliv-note">🥡 Abholung: <b>eatDeSi, Brunnenallee 30, Bad Wildungen</b>.</div>`}
@@ -1076,9 +1255,20 @@ function goCheckout(){
     <div class="field"><label>Zahlungsart</label><select id="f_pay">
       <option value="bar">Bar bei ${isDine?'vor Ort':timeWord}</option><option value="ec">EC/Karte bei ${isDine?'vor Ort':timeWord}</option></select></div>
     <div class="field"><label>Anmerkung (optional)</label><textarea id="f_note" rows="2" placeholder="z.B. ohne Zwiebeln, Allergien…"></textarea></div>`;
-  $('#drawerFoot').innerHTML=`<div class="sumrow tot"><span>${isDine?'Summe (Vorbestellung)':'Zu zahlen'}</span><b>${eur(tot)}</b></div>
-    <button class="checkout" id="placeBtn" onclick="placeOrder()">Zahlungspflichtig bestellen · ${eur(tot)}</button>
+  $('#drawerFoot').innerHTML=`
+    <div class="sumrow"><span>Zwischensumme</span><span>${eur(sub)}</span></div>
+    ${(isDeliv&&ortChosen)?`<div class="sumrow"><span>Liefergebühr (${z.name})</span><span>${eur(fee)}</span></div>`:''}
+    <div class="sumrow tot"><span>${isDine?'Summe (Vorbestellung)':'Zu zahlen'}</span><b>${eur(tot)}</b></div>
+    ${belowMin?`<div class="deliv-note">🛵 Mindestbestellwert ${z.name}: <b>${eur(z.min)}</b> — dir fehlen noch ${eur(z.min-sub)}. Bitte lege noch etwas in den Warenkorb.</div>`:''}
+    <button class="checkout" id="placeBtn" ${belowMin?'disabled':''} onclick="placeOrder()">${belowMin?('Noch '+eur(z.min-sub)+' bis Mindestbestellwert'):('Zahlungspflichtig bestellen · '+eur(tot))}</button>
     <button style="width:100%;margin-top:9px;color:var(--paper-2);font-size:13px;font-weight:600" onclick="renderCartList()">← Zurück zum Warenkorb</button>`;
+  // Adresse aus Liefer-Check übernehmen (falls vorhanden)
+  if(isDeliv && window._delivPrefill){
+    var p=window._delivPrefill;
+    var sEl=document.getElementById('f_street'); if(sEl && p.street) sEl.value=p.street;
+    var zEl=document.getElementById('f_zip'); if(zEl && p.zip) zEl.value=p.zip;
+    var cEl=document.getElementById('f_city'); if(cEl && p.city) cEl.value=p.city;
+  }
 }
 function setWishTime(t){
   document.querySelectorAll('#timePills button').forEach(b=>b.classList.toggle('on',b.dataset.time===t));
@@ -1092,6 +1282,9 @@ function setWishTime(t){
 function bad(id,cond){const f=document.getElementById(id).closest('.field');f.classList.toggle('bad',cond);return cond;}
 
 async function placeOrder(){
+  // Service-Stopp prüfen (Sicherheits-Guard)
+  if(SERVICES.allClosed){ showServiceClosed(SERVICES.allMsg); return; }
+  if(SERVICES[mode] && !SERVICES[mode].open){ showServiceClosed(SERVICES[mode].msg); return; }
   const isDeliv=mode==='lieferung', isDine=mode==='dinein';
   const name=$('#f_name').value.trim(), phone=$('#f_phone').value.trim();
   let inv=false; inv=bad('f_name',!name)||inv; inv=bad('f_phone',phone.length<5)||inv;
@@ -1100,6 +1293,20 @@ async function placeOrder(){
     inv=bad('f_street',!street)||inv; inv=bad('f_zip',!zip)||inv; inv=bad('f_city',!city)||inv;
     // Ort -> Zone sicher setzen; außerhalb des Liefergebiets -> stoppen
     if(city){ if(!setOrt(city)){ inv=bad('f_city',true)||inv; toast('Zu diesem Ort liefern wir leider nicht.'); } }
+    // PLZ muss zur Zone des gewählten Ortes passen (verhindert falsche/Fake-Adressen)
+    if(city && zip && setOrt(city) && !plzMatchesZone(zip, activeZone)){
+      inv=bad('f_zip',true)||inv;
+      const ok=allZonePlz().join(', ');
+      toast('Die PLZ '+zip+' passt nicht zu „'+city+'". Wir liefern dort nur mit PLZ: '+ok);
+    }
+    // Mindestbestellwert prüfen (Sicherheits-Stopp)
+    if(city && setOrt(city)){
+      const zMin=ZONES[activeZone]||{min:0,name:''};
+      if(cartTotal() < zMin.min){
+        inv=true;
+        toast('Mindestbestellwert für '+zMin.name+' ist '+eur(zMin.min)+'. Bitte lege noch etwas dazu.');
+      }
+    }
   }
   if(isDine){guests=$('#f_guests').value.trim(); inv=bad('f_guests',!guests)||inv;}
   if(inv){toast('Bitte Pflichtfelder ausfüllen');return;}
@@ -1137,8 +1344,10 @@ async function placeOrder(){
   const items=cart.map(c=>({name:c.name,nr:c.nr,qty:c.qty,price:c.unit,taxRate:c.taxRate||'food',options:c.opts.map(o=>({label:o.label,value:o.name,price:o.price})),note:c.note||''}));
   const sub=cartTotal(), fee=isDeliv?z.fee:0, total=sub+fee;
   const addr=isDeliv?`${street}, ${zip} ${city}`:'';
-  // Bestellweg-Text
-  const wayText = isDeliv ? ('🛵 LIEFERUNG · '+z.name) : (isDine ? ('🍽️ VOR ORT · '+guests+' Pers.') : '🥡 ABHOLUNG');
+  // Bestellweg-Text (mit gewähltem Ortsteil zur Kontrolle im POS)
+  // Bestellweg-Text (mit Ortsteil + Richtung/km zur Kontrolle im POS)
+  var dirInfo = (isDeliv && window._delivPrefill && window._delivPrefill.dir) ? (' · '+window._delivPrefill.dir+' '+window._delivPrefill.dist+'km') : '';
+  const wayText = isDeliv ? ('🛵 LIEFERUNG · '+z.name+' · 📍'+(activeOrt||city)+dirInfo) : (isDine ? ('🍽️ VOR ORT · '+guests+' Pers.') : '🥡 ABHOLUNG');
   // E-Mail in die Notiz einbetten (POS liest sie aus), falls keine eigene Spalte existiert
   const emailTag = email ? ('✉️ '+email) : '';
   // [NEU] = wartet auf Annahme im POS. Wird nach Annahme zu [OK:Minuten] geändert.
@@ -1370,6 +1579,220 @@ function setMode(m){mode=m;document.querySelectorAll('#modePills button').forEac
   renderCartList();}
 document.querySelectorAll('#modePills button').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
 
+/* Bestellweg-Auswahl OBEN in der Speisekarte.
+   Abholung/Vor Ort: direkt übernehmen.
+   Lieferung: erst Adresse prüfen (Popup); nur bei lieferbarer Zone übernehmen. */
+function setShopMode(m){
+  // Service-Schalter prüfen
+  if(SERVICES.allClosed){ showServiceClosed(SERVICES.allMsg); return; }
+  if(SERVICES[m] && !SERVICES[m].open){ showServiceClosed(SERVICES[m].msg); return; }
+  if(m==='lieferung'){ openDelivCheck(); return; }
+  applyShopMode(m);
+}
+// Meldung wenn ein Service pausiert ist
+function showServiceClosed(msg){
+  var html='<div class="dc-box">'+
+    '<div style="font-size:38px;text-align:center">⏸️</div>'+
+    '<h3 style="text-align:center">Kurze Pause</h3>'+
+    '<p class="dc-sub" style="text-align:center">'+(msg||'Momentan pausiert.')+'</p>'+
+    '<button class="dc-cancel" onclick="closeDelivCheck()">Verstanden</button>'+
+    '</div>';
+  var ov=document.getElementById('delivCheck');
+  if(!ov){ ov=document.createElement('div'); ov.id='delivCheck'; ov.className='dc-overlay'; document.body.appendChild(ov); }
+  ov.innerHTML=html; ov.classList.add('show'); document.body.style.overflow='hidden';
+}
+function applyShopMode(m){
+  mode=m;
+  document.querySelectorAll('#shopModePills button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
+  var hint=document.getElementById('shopModeHint');
+  if(hint) hint.textContent = m==='lieferung'
+    ? ('🛵 Lieferung nach '+(activeOrt||'')+' · Mindestbestellwert '+eur((ZONES[activeZone]||{min:0}).min)+' · Gebühr '+eur((ZONES[activeZone]||{fee:0}).fee))
+    : (m==='dinein' ? '🍽️ Vor Ort essen – Tisch reservieren & vorbestellen.' : '🥡 Kostenlos abholen in der Brunnenallee 30.');
+  // auch Hero-Pills synchron halten (falls vorhanden)
+  document.querySelectorAll('#modePills button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
+}
+
+/* Adress-Check Popup für Lieferung */
+function openDelivCheck(){
+  // Fallback: alter Ortsteil-Modus (falls Admin 'manual' gewählt hat)
+  if(DELIVERY_CFG.mode==='manual'){ openDelivCheckManual(); return; }
+  var html =
+    '<div class="dc-box">'+
+    '<h3>🛵 Lieferung prüfen</h3>'+
+    '<p class="dc-sub">Gib deine vollständige Adresse ein – wir prüfen automatisch, ob wir zu dir liefern.</p>'+
+    '<label class="dc-l">Straße & Hausnummer</label>'+
+    '<input id="dc_street" class="dc-i" placeholder="z.B. Brunnenallee 30">'+
+    '<div class="dc-row">'+
+      '<div style="flex:1"><label class="dc-l">Ort</label>'+
+        '<input id="dc_city" class="dc-i" placeholder="Bad Wildungen"></div>'+
+      '<div style="width:110px"><label class="dc-l">PLZ</label>'+
+        '<input id="dc_zip" class="dc-i" inputmode="numeric" placeholder="34537"></div>'+
+    '</div>'+
+    '<div class="dc-err" id="dc_err"></div>'+
+    '<div id="dc_map" style="display:none"></div>'+
+    '<button class="checkout" id="dc_btn" onclick="confirmDelivCheck()">📍 Adresse prüfen</button>'+
+    '<button class="dc-cancel" onclick="closeDelivCheck()">Abbrechen</button>'+
+    '</div>';
+  var ov=document.getElementById('delivCheck');
+  if(!ov){ ov=document.createElement('div'); ov.id='delivCheck'; ov.className='dc-overlay'; document.body.appendChild(ov); }
+  ov.innerHTML=html; ov.classList.add('show'); document.body.style.overflow='hidden';
+}
+// Alter manueller Modus (Ortsteil-Dropdown) als Fallback
+function openDelivCheckManual(){
+  var ortOpts = buildOrtList().map(function(x){
+    return '<option value="'+(x.ort||'').replace(/"/g,'&quot;')+'">'+x.ort+' · Min '+eur(ZONES[x.zone].min)+' · '+eur(ZONES[x.zone].fee)+'</option>';
+  }).join('');
+  var html =
+    '<div class="dc-box">'+
+    '<h3>🛵 Lieferung prüfen</h3>'+
+    '<p class="dc-sub">Bitte gib deine <b>echte</b> Adresse ein. Wähle den Ortsteil, in dem deine Straße wirklich liegt.</p>'+
+    '<label class="dc-l">Straße & Hausnummer</label>'+
+    '<input id="dc_street" class="dc-i" placeholder="z.B. Brunnenallee 12">'+
+    '<div class="dc-row">'+
+      '<div style="flex:1"><label class="dc-l">Ort / Stadtteil</label>'+
+        '<select id="dc_city" class="dc-i"><option value="" disabled selected>– wählen –</option>'+ortOpts+'</select></div>'+
+      '<div style="width:110px"><label class="dc-l">PLZ</label>'+
+        '<input id="dc_zip" class="dc-i" inputmode="numeric" placeholder="34537"></div>'+
+    '</div>'+
+    '<div class="dc-err" id="dc_err"></div>'+
+    '<button class="checkout" onclick="confirmDelivCheckManual()">Adresse prüfen</button>'+
+    '<button class="dc-cancel" onclick="closeDelivCheck()">Abbrechen</button>'+
+    '</div>';
+  var ov=document.getElementById('delivCheck');
+  if(!ov){ ov=document.createElement('div'); ov.id='delivCheck'; ov.className='dc-overlay'; document.body.appendChild(ov); }
+  ov.innerHTML=html; ov.classList.add('show'); document.body.style.overflow='hidden';
+  var cs=document.getElementById('dc_city');
+  if(cs) cs.onchange=function(){
+    setOrt(this.value);
+    var z=ZONES[activeZone]; var zip=document.getElementById('dc_zip');
+    if(z && zip){ var fp=(z.plz||'').split(',').map(s=>s.trim()).filter(Boolean)[0]||''; if(!zip.value) zip.value=fp; }
+  };
+}
+function closeDelivCheck(){
+  var ov=document.getElementById('delivCheck');
+  if(ov){ ov.classList.remove('show'); }
+  document.body.style.overflow='';
+}
+async function confirmDelivCheck(){
+  var street=(document.getElementById('dc_street')||{}).value.trim();
+  var city=(document.getElementById('dc_city')||{}).value.trim();
+  var zip=(document.getElementById('dc_zip')||{}).value.trim();
+  var err=document.getElementById('dc_err');
+  var btn=document.getElementById('dc_btn');
+  if(!street||!city){ if(err) err.textContent='Bitte Straße und Ort ausfüllen.'; return; }
+  if(err) err.textContent='';
+  if(btn){ btn.disabled=true; btn.innerHTML='<span class="dc-spin"></span> Prüfe Adresse…'; }
+  // Adresse -> Koordinaten via OpenStreetMap
+  var q=street+', '+(zip?zip+' ':'')+city;
+  var geo=await geocodeAddress(q);
+  if(btn){ btn.disabled=false; btn.innerHTML='📍 Adresse prüfen'; }
+  if(!geo){
+    if(err) err.textContent='Adresse nicht gefunden. Bitte Straße + Hausnummer + Ort genau eingeben.';
+    return;
+  }
+  // Zone aus Koordinaten bestimmen
+  var hit=findZoneByCoords(geo.lat, geo.lng);
+  if(!hit){ showNotDeliverable(); return; }
+  // Lieferbar! Adresse + Zone merken
+  activeZone=hit.idx; activeOrt=city;
+  var dir=geoDirection(REST_LOC.lat,REST_LOC.lng,geo.lat,geo.lng);
+  window._delivPrefill={street:street, city:city, zip:zip, lat:geo.lat, lng:geo.lng, dir:dir, dist:(hit.dist!=null?hit.dist.toFixed(1):'')};
+  showDelivConfirm(street, city, zip, hit, geo);
+}
+// Bestätigungsansicht mit Mini-Karte
+function showDelivConfirm(street, city, zip, hit, geo){
+  var z=hit.zone;
+  var ov=document.getElementById('delivCheck');
+  var html='<div class="dc-box">'+
+    '<div style="font-size:34px;text-align:center">🛵✓</div>'+
+    '<h3 style="text-align:center">Wir liefern zu dir!</h3>'+
+    '<div id="dc_map"></div>'+
+    '<div class="dc-confirm">'+
+      '<div class="dc-crow"><span>Adresse</span><b style="text-align:right;max-width:60%">'+street.replace(/</g,'&lt;')+', '+city.replace(/</g,'&lt;')+'</b></div>'+
+      '<div class="dc-crow"><span>Liefergebiet</span><b>'+z.name+'</b></div>'+
+      (hit.dist!=null?'<div class="dc-crow"><span>Entfernung</span><b>'+geoDirection(REST_LOC.lat,REST_LOC.lng,geo.lat,geo.lng)+' · '+hit.dist.toFixed(1)+' km</b></div>':'')+
+      '<div class="dc-crow"><span>Liefergebühr</span><b>'+eur(z.fee)+'</b></div>'+
+      '<div class="dc-crow"><span>Mindestbestellwert</span><b>'+eur(z.min)+'</b></div>'+
+    '</div>'+
+    '<button class="checkout" onclick="finalizeDelivCheck()">✓ Weiter zur Bestellung</button>'+
+    '<button class="dc-cancel" onclick="openDelivCheck()">← Adresse ändern</button>'+
+    '</div>';
+  if(ov){ ov.innerHTML=html; }
+  // Mini-Karte zeigen
+  setTimeout(function(){ renderDcMap(geo.lat, geo.lng); }, 80);
+}
+// Mini-Karte im Popup
+var _dcMap=null;
+function renderDcMap(lat,lng){
+  try{
+    var el=document.getElementById('dc_map'); if(!el||typeof L==='undefined') return;
+    el.style.display='block';
+    if(_dcMap){ _dcMap.remove(); _dcMap=null; }
+    _dcMap=L.map(el,{zoomControl:false,attributionControl:false}).setView([lat,lng],14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(_dcMap);
+    L.marker([lat,lng]).addTo(_dcMap);
+    L.marker([REST_LOC.lat,REST_LOC.lng]).addTo(_dcMap).bindPopup('Restaurant');
+    setTimeout(function(){ _dcMap.invalidateSize(); }, 120);
+  }catch(e){ console.warn('dcMap',e); }
+}
+// Alter manueller Check (Ortsteil-Dropdown)
+function confirmDelivCheckManual(){
+  var street=(document.getElementById('dc_street')||{}).value||'';
+  var city=(document.getElementById('dc_city')||{}).value||'';
+  var zip=(document.getElementById('dc_zip')||{}).value||'';
+  var err=document.getElementById('dc_err');
+  street=street.trim(); city=city.trim(); zip=zip.trim();
+  if(!street||!city||!zip){ if(err) err.textContent='Bitte Straße, Ort und PLZ ausfüllen.'; return; }
+  // Ort -> Zone
+  if(!setOrt(city)){ showNotDeliverable(); return; }
+  if(!plzMatchesZone(zip, activeZone)){
+    if(err) err.textContent='Die PLZ '+zip+' passt nicht zu „'+city+'". Erlaubt: '+allZonePlz().join(', ');
+    return;
+  }
+  // Lieferbar! Adresse merken + Bestätigung mit Ortsteil/Zone zeigen
+  window._delivPrefill={street:street, city:city, zip:zip};
+  var z=ZONES[activeZone]||{fee:0,name:'',min:0};
+  var ov=document.getElementById('delivCheck');
+  var html='<div class="dc-box">'+
+    '<div style="font-size:38px;text-align:center">🛵✓</div>'+
+    '<h3 style="text-align:center">Adresse bestätigen</h3>'+
+    '<div class="dc-confirm">'+
+      '<div class="dc-crow"><span>Straße</span><b>'+street.replace(/</g,'&lt;')+'</b></div>'+
+      '<div class="dc-crow"><span>Ortsteil</span><b>'+city.replace(/</g,'&lt;')+'</b></div>'+
+      '<div class="dc-crow"><span>PLZ</span><b>'+zip+'</b></div>'+
+      '<div class="dc-crow"><span>Liefergebiet</span><b>'+z.name+'</b></div>'+
+      '<div class="dc-crow"><span>Liefergebühr</span><b>'+eur(z.fee)+'</b></div>'+
+      '<div class="dc-crow"><span>Mindestbestellwert</span><b>'+eur(z.min)+'</b></div>'+
+    '</div>'+
+    '<p class="dc-warn">⚠️ Stimmt der <b>Ortsteil</b> mit deiner Straße überein? Bei falscher Angabe kann die Bestellung vom Restaurant abgelehnt werden.</p>'+
+    '<button class="checkout" onclick="finalizeDelivCheck()">✓ Ja, stimmt – weiter</button>'+
+    '<button class="dc-cancel" onclick="openDelivCheck()">← Adresse ändern</button>'+
+    '</div>';
+  if(ov){ ov.innerHTML=html; }
+}
+/* Bestätigt die geprüfte Lieferadresse und schaltet auf Lieferung. */
+function finalizeDelivCheck(){
+  applyShopMode('lieferung');
+  closeDelivCheck();
+  var z=ZONES[activeZone]||{fee:0};
+  toast('✓ Lieferung nach '+(activeOrt||'')+' · Gebühr '+eur(z.fee));
+}
+/* Nicht lieferbar -> freundliche Meldung mit Alternativen */
+function showNotDeliverable(){
+  var ov=document.getElementById('delivCheck');
+  var html='<div class="dc-box">'+
+    '<div style="font-size:38px;text-align:center">🛵😔</div>'+
+    '<h3 style="text-align:center">Leider nicht lieferbar</h3>'+
+    '<p class="dc-sub" style="text-align:center">Leider ist deine Adresse außerhalb unseres Liefergebiets. '+
+    'Aber du kannst deine Lieblingsgerichte trotzdem genießen:</p>'+
+    '<button class="checkout" onclick="pickAlt(\'abholung\')">🥡 Zur Abholung wechseln</button>'+
+    '<button class="checkout" style="margin-top:10px" onclick="pickAlt(\'dinein\')">🍽️ Vor Ort essen</button>'+
+    '<button class="dc-cancel" onclick="closeDelivCheck()">Schließen</button>'+
+    '</div>';
+  if(ov){ ov.innerHTML=html; }
+}
+function pickAlt(m){ applyShopMode(m); closeDelivCheck(); }
+
 // Bestellmethode an der Kasse wechseln (Formular-Werte bleiben erhalten)
 function setModeCheckout(m){
   // aktuelle Eingaben sichern
@@ -1425,13 +1848,16 @@ async function loadConfig(){
     const g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+CONFIG_KEY+'&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
     if(g.ok){const j=await g.json(); if(j&&j[0]&&j[0].value){const c=JSON.parse(j[0].value);
       if(c.zones)ZONES=c.zones; if(c.offers)OFFERS=c.offers; if(c.events)EVENTS=c.events;
+      if(c.deliveryCfg)DELIVERY_CFG=Object.assign(DELIVERY_CFG,c.deliveryCfg);
+      if(c.restLoc)REST_LOC=Object.assign(REST_LOC,c.restLoc);
+      if(c.services)SERVICES=Object.assign(SERVICES,c.services);
       if(c.hours){HOURS_CFG=c.hours; HOURS.open=c.hours.open;HOURS.close=c.hours.close;HOURS.closedDay=c.hours.closedDay;}
       if(c.aiKey)AI_KEY=c.aiKey;
       if(c.company)COMPANY=Object.assign(COMPANY,c.company);
       if(c.gallery&&Array.isArray(c.gallery))GALLERY=c.gallery;
     }}
   }catch(e){console.warn('config load',e);}
-  renderOffers(); renderEvents(); checkOpen(); applyCompany(); renderGallery();
+  renderOffers(); renderEvents(); checkOpen(); applyCompany(); renderGallery(); if(typeof updateShopModePills==="function")updateShopModePills();
   try{ if(window.emailjs && emailjs.init){ emailjs.init({publicKey: NOTIFY.emailPublicKey}); } }catch(e){}
 }
 
@@ -1539,7 +1965,7 @@ async function loadMenuFromCloud(){
   }catch(e){console.warn('menu cloud load',e);}
 }
 async function saveConfig(){
-  const cfg={zones:ZONES,offers:OFFERS,events:EVENTS,hours:HOURS_CFG,aiKey:AI_KEY,company:COMPANY,gallery:GALLERY};
+  const cfg={zones:ZONES,offers:OFFERS,events:EVENTS,hours:HOURS_CFG,aiKey:AI_KEY,company:COMPANY,gallery:GALLERY,deliveryCfg:DELIVERY_CFG,restLoc:REST_LOC,services:SERVICES};
   try{
     const r=await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
       headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
@@ -1692,8 +2118,48 @@ function checkPin(){
 }
 
 function adminTab(t){adminTabCur=t;document.querySelectorAll('#adminTabs button').forEach(b=>b.classList.toggle('on',b.dataset.at===t));
-  if(t==='reports')drawReports();else if(t==='requests')drawRequests();else if(t==='zones')drawZones();
+  if(t==='status')drawStatus();else if(t==='reports')drawReports();else if(t==='requests')drawRequests();else if(t==='zones')drawZones();
   else if(t==='hours')drawHours();else if(t==='offers')drawOffers();else if(t==='events')drawEvents();else if(t==='ai')drawAI();else if(t==='company')drawCompany();else if(t==='menuinfo')drawMenuInfo();else if(t==='gallery')drawGallery();}
+
+/* ---- STATUS / SERVICE-SCHALTER ---- */
+function drawStatus(){
+  const sw=(key,label,emoji)=>{
+    const on=!SERVICES.allClosed && SERVICES[key] && SERVICES[key].open;
+    const disabled=SERVICES.allClosed;
+    return `<div class="srow${disabled?' dim':''}">
+      <div class="sinfo"><div class="stitle">${emoji} ${label}</div>
+        <div class="sstate ${on?'on':'off'}">${on?'● Aktiv':'● Pausiert'}</div></div>
+      <label class="switch"><input type="checkbox" ${SERVICES[key]&&SERVICES[key].open?'checked':''} ${disabled?'disabled':''} onchange="toggleService('${key}',this.checked)"><span class="slider"></span></label>
+    </div>`;
+  };
+  $('#adminBody').innerHTML=`<div class="acard">
+    <h3>🟢 Online-Status & Service-Schalter</h3>
+    <p class="hint">Bei vielen Bestellungen einzelne Wege oder alles kurz pausieren. Gilt sofort im Webshop.</p>
+
+    <div class="allstop ${SERVICES.allClosed?'active':''}">
+      <div class="sinfo"><div class="stitle" style="font-size:16px">🔴 Komplett-Stopp (alle Bestellungen)</div>
+        <div class="sstate ${SERVICES.allClosed?'off':'on'}">${SERVICES.allClosed?'● ALLES PAUSIERT':'● Restaurant nimmt Bestellungen an'}</div></div>
+      <label class="switch big"><input type="checkbox" ${SERVICES.allClosed?'checked':''} onchange="toggleAllClosed(this.checked)"><span class="slider"></span></label>
+    </div>
+
+    <div style="margin-top:16px">
+      ${sw('abholung','Abholung','🥡')}
+      ${sw('lieferung','Lieferung','🛵')}
+      ${sw('dinein','Vor Ort','🍽️')}
+    </div>
+
+    <div class="afield" style="margin-top:18px"><label>Nachricht bei Komplett-Stopp</label>
+      <textarea id="s_allmsg" rows="2" oninput="SERVICES.allMsg=this.value">${SERVICES.allMsg}</textarea></div>
+
+    <div style="margin-top:14px"><button class="btn-save" onclick="saveConfig()">💾 Speichern</button></div>
+  </div>`;
+}
+function toggleService(key,on){
+  if(SERVICES[key]){ SERVICES[key].open=on; drawStatus(); }
+}
+function toggleAllClosed(on){
+  SERVICES.allClosed=on; drawStatus();
+}
 
 /* ---- REPORTS ---- */
 let repPeriod='today';
@@ -1759,13 +2225,29 @@ async function toggleReqStatus(i){
 /* ---- ZONES ---- */
 function drawZones(){
   $('#adminBody').innerHTML=`<div class="acard"><h3>Liefergebiete & Gebühren</h3>
-    <p class="hint">Pro Zone: Name, Mindestbestellwert (€), Liefergebühr (€) und Ortsteile. <b>Wichtig:</b> Die <b>Ortsteile</b> erscheinen als Auswahl beim Kunden – er wählt seinen Ort, die passende Gebühr wird automatisch gesetzt. Mehrere Ortsteile mit Komma trennen. Hat eine Zone keinen Ortsteil, wird ihr Name verwendet. Gilt sofort im Webshop nach Speichern.</p>
+    <p class="hint">Wähle die <b>Prüf-Methode</b> für Lieferadressen:</p>
+    <div class="dmode" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+      <label class="dmode-opt"><input type="radio" name="dmode" value="address-radius" ${(DELIVERY_CFG.mode==='address'&&DELIVERY_CFG.zoneMode==='radius')?'checked':''} onchange="setDeliveryMode('address','radius')"> 📏 <b>Umkreis (A)</b> – Adresse wird per Karte geprüft, Zone nach Entfernung (km)</label>
+      <label class="dmode-opt"><input type="radio" name="dmode" value="address-polygon" ${(DELIVERY_CFG.mode==='address'&&DELIVERY_CFG.zoneMode==='polygon')?'checked':''} onchange="setDeliveryMode('address','polygon')"> 🗺️ <b>Karte/Polygon (B)</b> – Adresse wird geprüft, Zone nach gezeichnetem Gebiet</label>
+      <label class="dmode-opt"><input type="radio" name="dmode" value="manual" ${DELIVERY_CFG.mode==='manual'?'checked':''} onchange="setDeliveryMode('manual','radius')"> ✍️ <b>Manuell</b> – Kunde wählt Ortsteil selbst (ohne Karte)</label>
+    </div>
+    <div class="afield"><label>Restaurant-Standort (für Umkreis)</label>
+      <div class="row2"><input id="rest_lat" value="${REST_LOC.lat}" placeholder="Lat" oninput="REST_LOC.lat=parseFloat(this.value)||REST_LOC.lat">
+      <input id="rest_lng" value="${REST_LOC.lng}" placeholder="Lng" oninput="REST_LOC.lng=parseFloat(this.value)||REST_LOC.lng"></div>
+      <p class="hint" style="margin-top:4px">Tipp: Standort in Google Maps anklicken → Koordinaten kopieren.</p></div>
+    <p class="hint">Pro Zone: Name, Mindestbestellwert (€), Liefergebühr (€). Bei <b>Umkreis</b> zusätzlich Radius (km). Ortsteile/PLZ nur für „Manuell". Gilt sofort nach Speichern.</p>
     <div id="zoneRows"></div>
     <button class="btn-add" onclick="addZone()">+ Zone hinzufügen</button>
     <div style="margin-top:18px"><button class="btn-save" onclick="saveConfig()">💾 Speichern</button></div></div>`;
   drawZoneRows();
 }
+function setDeliveryMode(mode, zoneMode){
+  DELIVERY_CFG.mode=mode; DELIVERY_CFG.zoneMode=zoneMode;
+  drawZoneRows();
+}
 function drawZoneRows(){
+  var isRadius=DELIVERY_CFG.mode==='address'&&DELIVERY_CFG.zoneMode==='radius';
+  var isManual=DELIVERY_CFG.mode==='manual';
   $('#zoneRows').innerHTML=ZONES.map((z,i)=>`<div style="border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:12px">
     <div class="zrow" style="margin-bottom:10px">
       <div><div class="tlabel">Name</div><input value="${(z.name||'').replace(/"/g,'&quot;')}" oninput="ZONES[${i}].name=this.value"></div>
@@ -1773,13 +2255,15 @@ function drawZoneRows(){
       <div><div class="tlabel">Gebühr €</div><input type="number" step="0.10" value="${z.fee}" oninput="ZONES[${i}].fee=parseFloat(this.value)||0"></div>
       <button class="btn-del" onclick="delZone(${i})">✕</button>
     </div>
-    <div style="margin-bottom:8px"><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Postleitzahl(en) – mit Komma trennen</div>
+    ${isRadius?`<div style="margin-bottom:8px"><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Radius bis (km vom Restaurant)</div>
+      <input type="number" step="0.5" style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:8px;padding:9px;color:var(--cream);font-size:13px" value="${z.km||0}" placeholder="z.B. 3" oninput="ZONES[${i}].km=parseFloat(this.value)||0"></div>`:''}
+    ${isManual?`<div style="margin-bottom:8px"><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Postleitzahl(en) – mit Komma trennen</div>
       <input style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:8px;padding:9px;color:var(--cream);font-size:13px" value="${(z.plz||'').replace(/"/g,'&quot;')}" placeholder="z.B. 34537, 34549" oninput="ZONES[${i}].plz=this.value"></div>
     <div><div class="tlabel" style="font-size:11px;color:var(--gold);margin-bottom:4px">Ortsteile – mit Komma trennen</div>
-      <input style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:8px;padding:9px;color:var(--cream);font-size:13px" value="${(z.orte||'').replace(/"/g,'&quot;')}" placeholder="z.B. Reinhardshausen, Wega, Mandern" oninput="ZONES[${i}].orte=this.value"></div>
+      <input style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:8px;padding:9px;color:var(--cream);font-size:13px" value="${(z.orte||'').replace(/"/g,'&quot;')}" placeholder="z.B. Reinhardshausen, Wega, Mandern" oninput="ZONES[${i}].orte=this.value"></div>`:''}
     </div>`).join('');
 }
-function addZone(){ZONES.push({name:'Zone '+(ZONES.length+1),min:0,fee:0,plz:'',orte:''});drawZoneRows();}
+function addZone(){ZONES.push({name:'Zone '+(ZONES.length+1),min:0,fee:0,plz:'',orte:'',km:0,poly:[]});drawZoneRows();}
 function delZone(i){if(ZONES.length<=1){toast('Mindestens eine Zone nötig');return;}ZONES.splice(i,1);if(activeZone>=ZONES.length)activeZone=0;drawZoneRows();}
 
 /* ---- HOURS ---- */
@@ -1997,7 +2481,7 @@ async function saveAiKey(){
   const k=$('#aiKeyInput').value.trim();
   AI_KEY=k;
   // bestehende Config laden, aiKey ergaenzen, zurueckschreiben -> nichts geht verloren
-  const cfg={zones:ZONES,offers:OFFERS,events:EVENTS,hours:HOURS_CFG,aiKey:AI_KEY,company:COMPANY,gallery:GALLERY};
+  const cfg={zones:ZONES,offers:OFFERS,events:EVENTS,hours:HOURS_CFG,aiKey:AI_KEY,company:COMPANY,gallery:GALLERY,deliveryCfg:DELIVERY_CFG,restLoc:REST_LOC,services:SERVICES};
   try{
     const r=await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
       headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
