@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v127</title>
+<title>eatDeSi POS v128</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v127';",
+    "var CACHE='eatdesi-v128';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -362,10 +362,25 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
 
 </script>
 <script>
+// ╔═══════════════════════════════════════════════════════════════╗
+// ║   RESTAURANT CONFIG  —  NUR DIESEN BLOCK PRO FILIALE ÄNDERN     ║
+// ║   Für neue Tochter-App: LOCATION_ID ändern, Rest bleibt gleich  ║
+// ║   (Firmenname/Adresse/Menü werden IN DER APP eingestellt)       ║
+// ╠═══════════════════════════════════════════════════════════════╣
+// ║   eatDeSi BW (Bad Wildungen) → LOCATION_ID: 'eatdesi-bw'        ║
+// ║   eatDeSi FS (Felsberg)      → LOCATION_ID: 'eatdesi-fs'        ║
+// ╚═══════════════════════════════════════════════════════════════╝
+window.RESTAURANT = {
+  LOCATION_ID : 'eatdesi-bw',
+  SUPA_URL    : 'https://myaidcfmssfhzdatsqiv.supabase.co',
+  SUPA_KEY    : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15YWlkY2Ztc3NmaHpkYXRzcWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NTM0OTYsImV4cCI6MjA5NjQyOTQ5Nn0.zJl2j5EEgz6NQmhp0reyyool0RdEbt8PC0kdqrRDpaA'
+};
+// ═══════════════════ Ende RESTAURANT CONFIG ═══════════════════
+
 (function() {
   'use strict';
-  localStorage.setItem('eatdesi_sb_url','https://myaidcfmssfhzdatsqiv.supabase.co');
-  localStorage.setItem('eatdesi_sb_key','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15YWlkY2Ztc3NmaHpkYXRzcWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NTM0OTYsImV4cCI6MjA5NjQyOTQ5Nn0.zJl2j5EEgz6NQmhp0reyyool0RdEbt8PC0kdqrRDpaA');
+  localStorage.setItem('eatdesi_sb_url', window.RESTAURANT.SUPA_URL);
+  localStorage.setItem('eatdesi_sb_key', window.RESTAURANT.SUPA_KEY);
   var React = window.React;
   var ReactDOM = window.ReactDOM;
   if (!React || !ReactDOM) {
@@ -6448,8 +6463,8 @@ const MENU = {
     }
   ]
 };
-const SUPA_URL = 'https://myaidcfmssfhzdatsqiv.supabase.co';
-const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15YWlkY2Ztc3NmaHpkYXRzcWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NTM0OTYsImV4cCI6MjA5NjQyOTQ5Nn0.zJl2j5EEgz6NQmhp0reyyool0RdEbt8PC0kdqrRDpaA';
+const SUPA_URL = window.RESTAURANT.SUPA_URL;
+const SUPA_KEY = window.RESTAURANT.SUPA_KEY;
 const TABLES = Array.from({length:30},function(_,i){return {id:i+1};});
 
 var fmt = function(n){return (+(n||0)).toFixed(2)+' €';};
@@ -18732,7 +18747,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v127"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v128"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21933,7 +21948,7 @@ function SaasDashboardView() {
 // =======================================================
 
 // Using existing SUPA_URL and SUPA_KEY constants
-var LOCATION_ID = 'eatdesi-bw';
+var LOCATION_ID = window.RESTAURANT.LOCATION_ID;
 
 // Device ID - jedes Geraet hat eine eigene ID
 window._deviceId = localStorage.getItem('eatdesi_device_id') || (function(){
