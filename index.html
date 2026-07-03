@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v128</title>
+<title>eatDeSi POS v130</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v128';",
+    "var CACHE='eatdesi-v130';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -14991,7 +14991,8 @@ function MarketingView({ printerSettings, setPrinterSettings }) {
 
     // Vorschau Aushang
     reviewPageUrl && React.createElement("div", { style:{ background:"linear-gradient(135deg,#1b5e20,#2e7d32)", borderRadius:16, padding:20, textAlign:"center", color:"#fff" } },
-      React.createElement("div", { style:{ fontSize:20, fontWeight:900, marginBottom:4 } }, printerSettings?.firmaName||"eatDeSi"),
+      React.createElement("div", { style:{ fontSize:20, fontWeight:900, marginBottom:2 } }, printerSettings?.name || printerSettings?.firmaZusatz || "eatDeSi"),
+      React.createElement("div", { style:{ fontSize:13, fontWeight:700, opacity:.85, marginBottom:10, fontStyle:"italic" } }, "Indien trifft Trends"),
       React.createElement("div", { style:{ fontSize:14, opacity:.8, marginBottom:16 } }, "Wie war Ihr Besuch? ⭐"),
       React.createElement("canvas", { ref:null, style:{ display:"none" } }),
       React.createElement("div", { style:{ display:"flex", flexDirection:"column", gap:8, alignItems:"center" } },
@@ -15072,9 +15073,10 @@ function KundenkontakteView({ completedOrders, customers, printerSettings }) {
   const selectAll = () => setSelected(new Set(contacts.map(c=>c.phone)));
   const selectNone = () => setSelected(new Set());
 
-  const defaultMsg = `Hallo! 👋\nVielen Dank für Ihren Besuch bei ${printerSettings?.firmaName||"eatDeSi"}! 🍽️\n\nWir würden uns sehr über Ihre Bewertung freuen:\n⭐⭐⭐⭐⭐ Google: ${printerSettings?.googleLink||"[Google Link]"}\n\n📸 Instagram: ${printerSettings?.instagramLink||""}\n💬 WhatsApp: wa.me/${(printerSettings?.firmaPhone||"").replace(/[^0-9]/g,"")}\n\nMit freundlichen Grüßen\n${printerSettings?.firmaName||"eatDeSi"} \"Indien trifft Trends\"\n${printerSettings?.firmaStrasse||"Brunnenallee 30"},\n${printerSettings?.firmaPlzOrt||"34537 Bad Wildungen"}`;
+  const _restName = printerSettings?.name || printerSettings?.firmaZusatz || "eatDeSi";
+  const defaultMsg = `Hallo! 👋\nVielen Dank für Ihren Besuch bei ${_restName}! 🍽️\n\nWir würden uns sehr über Ihre Bewertung freuen:\n⭐⭐⭐⭐⭐ Google: ${printerSettings?.googleLink||"[Google Link]"}\n\n📸 Instagram: ${printerSettings?.instagramLink||""}\n💬 WhatsApp: wa.me/${(printerSettings?.firmaPhone||"").replace(/[^0-9]/g,"")}\n\nMit freundlichen Grüßen\n${_restName} \"Indien trifft Trends\"\n${printerSettings?.firmaStrasse||"Brunnenallee 30"},\n${printerSettings?.firmaPlzOrt||"34537 Bad Wildungen"}`;
 
-  const defaultEmailMsg = `Hallo,\n\nvielen Dank für Ihren Besuch bei ${printerSettings?.firmaName||"eatDeSi"}!\n\nWir würden uns sehr über Ihre Bewertung freuen:\n⭐⭐⭐⭐⭐ ${printerSettings?.googleLink||"[Google Link]"}\n\n📸 Instagram: ${printerSettings?.instagramLink||""}\n💬 WhatsApp: wa.me/${(printerSettings?.firmaPhone||"").replace(/[^0-9]/g,"")}\n\nMit freundlichen Grüßen\n${printerSettings?.firmaName||"eatDeSi"} "Indien trifft Trends"\n${printerSettings?.firmaStrasse||"Brunnenallee 30"},\n${printerSettings?.firmaPlzOrt||"34537 Bad Wildungen"}`;
+  const defaultEmailMsg = `Hallo,\n\nvielen Dank für Ihren Besuch bei ${_restName}!\n\nWir würden uns sehr über Ihre Bewertung freuen:\n⭐⭐⭐⭐⭐ ${printerSettings?.googleLink||"[Google Link]"}\n\n📸 Instagram: ${printerSettings?.instagramLink||""}\n💬 WhatsApp: wa.me/${(printerSettings?.firmaPhone||"").replace(/[^0-9]/g,"")}\n\nMit freundlichen Grüßen\n${_restName} "Indien trifft Trends"\n${printerSettings?.firmaStrasse||"Brunnenallee 30"},\n${printerSettings?.firmaPlzOrt||"34537 Bad Wildungen"}`;
 
   const sendWhatsApp = (phone, msg) => {
     const clean = phone.replace(/[^0-9+]/g,"");
@@ -17820,7 +17822,7 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
   const handleEin = () => {
     if (!activeUser) return;
     setZeiterfassung(p => [...p, {
-      id: Date.now(), userName: activeUser, type: "ein",
+      id: "z_" + Date.now() + "_" + Math.random().toString(36).slice(2,7), userName: activeUser, type: "ein",
       time: new Date().toISOString(), pause: 0, deleted: false
     }]);
   };
@@ -17832,7 +17834,7 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
 
   const confirmAus = () => {
     setZeiterfassung(p => [...p, {
-      id: Date.now(), userName: activeUser, type: "aus",
+      id: "z_" + Date.now() + "_" + Math.random().toString(36).slice(2,7), userName: activeUser, type: "aus",
       time: new Date().toISOString(), pause: parseInt(pauseMin)||0, deleted: false
     }]);
     setShowPause(false);
@@ -18198,7 +18200,7 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
         React.createElement("button", {
           onClick:()=>{
             if(!addForm.userName||!addForm.time) return;
-            setZeiterfassung(p=>[...p,{id:Date.now(),userName:addForm.userName,type:addForm.type,time:new Date(addForm.time).toISOString(),pause:addForm.pause||0,deleted:false,addedBy:loggedInUser?.name}]);
+            setZeiterfassung(p=>[...p,{id:"z_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),userName:addForm.userName,type:addForm.type,time:new Date(addForm.time).toISOString(),pause:addForm.pause||0,deleted:false,addedBy:loggedInUser?.name}]);
             setAddForm({userName:"",type:"ein",time:"",pause:0}); setShowAddEntry(false);
           },
           style:{width:"100%",padding:10,borderRadius:8,border:"none",background:C.green,color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:700}
@@ -18747,7 +18749,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v128"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v130"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22070,8 +22072,16 @@ async function pullOrdersFromSupabase() {
 }
 
 // State zu Supabase pushen (UPSERT: INSERT oder UPDATE bei vorhandenem key)
+// Kritische Listen, die NIE mit einer leeren Liste ueberschrieben werden duerfen
+// (Finanzamt-Schutz: Mitarbeiter + Zeiterfassung nie versehentlich loeschen)
+var _NEVER_EMPTY_KEYS = { 'users': 1, 'zeiterfassung': 1 };
 async function pushStateToSupabase(key, value) {
   try {
+    // SCHUTZ: leere kritische Liste nicht in die Cloud schreiben (sonst Datenverlust)
+    if (_NEVER_EMPTY_KEYS[key] && Array.isArray(value) && value.filter(function(e){return e && !e.deleted;}).length === 0) {
+      console.warn('pushState blockiert: leere ' + key + '-Liste wuerde Cloud-Daten loeschen');
+      return;
+    }
     var stamp = new Date().toISOString();
     // on_conflict=key + merge-duplicates => bestehende Zeile wird UEBERSCHRIEBEN statt ignoriert
     var resp = await fetch(SUPA_URL + '/rest/v1/pos_state?on_conflict=key', {
@@ -22349,8 +22359,27 @@ async function syncOneStateKey(lsKey) {
     var localStamp = _localStamp(remoteKey);
 
     // --- ID-Listen IMMER mergen (Stempel von allen Geraeten zusammenfuehren) ---
-    if (MERGE_LIST_KEYS[remoteKey] && remote && Array.isArray(remote.value)) {
-      var merged = _mergeById(local, remote.value, !!MERGE_BY_NAME_KEYS[remoteKey]);
+    // WICHTIG (Finanzamt): users + zeiterfassung duerfen NIE Daten verlieren.
+    // Auch wenn remote leer/null ist, muss die lokale Liste erhalten + hochgeladen werden.
+    if (MERGE_LIST_KEYS[remoteKey]) {
+      var localArr  = Array.isArray(local) ? local : [];
+      var remoteArr = (remote && Array.isArray(remote.value)) ? remote.value : [];
+      var merged = _mergeById(localArr, remoteArr, !!MERGE_BY_NAME_KEYS[remoteKey]);
+
+      // SCHUTZ: merged darf nie WENIGER aktive (nicht-geloeschte) Eintraege haben
+      // als die lokale Liste. Sonst wuerde ein Datenverlust in die Cloud geschrieben.
+      var _active = function(a){ return (Array.isArray(a)?a:[]).filter(function(e){ return e && !e.deleted; }).length; };
+      if (_active(merged) < _active(localArr)) {
+        // Etwas wuerde verloren gehen -> lokale aktive Eintraege zusaetzlich behalten
+        var seen = {};
+        merged.forEach(function(e){ var k=(e&&(e.id!=null?('id:'+e.id):(e.name!=null?('nm:'+String(e.name).trim().toLowerCase()):null))); if(k) seen[k]=1; });
+        localArr.forEach(function(e){
+          if(!e || e.deleted) return;
+          var k=(e.id!=null?('id:'+e.id):(e.name!=null?('nm:'+String(e.name).trim().toLowerCase()):null));
+          if(k && !seen[k]){ merged.push(e); seen[k]=1; }
+        });
+      }
+
       var mergedStr = JSON.stringify(merged);
       if (mergedStr !== JSON.stringify(local)) {
         window._syncWriting = true;
@@ -22359,12 +22388,12 @@ async function syncOneStateKey(lsKey) {
         window.dispatchEvent(new CustomEvent('eatdesi_state_synced', { detail: { key: lsKey, value: merged } }));
         window.dispatchEvent(new CustomEvent(lsKey + '_synced', { detail: merged }));
       }
-      // wenn lokale Liste mehr/neuere Eintraege hat -> zurueck in die Cloud schreiben
-      if (mergedStr !== JSON.stringify(remote.value)) {
+      // wenn lokale/gemergte Liste sich von der Cloud unterscheidet -> zurueck in die Cloud
+      if (mergedStr !== JSON.stringify(remoteArr)) {
         var _now = Date.now();
         _setLocalStamp(remoteKey, _now);
         pushStateToSupabase(remoteKey, merged);
-      } else {
+      } else if (remote) {
         _setLocalStamp(remoteKey, remote.updated_at);
       }
       return;
