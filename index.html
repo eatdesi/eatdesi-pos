@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v131</title>
+<title>eatDeSi POS v132</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v131';",
+    "var CACHE='eatdesi-v132';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -10085,6 +10085,9 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
   const [speaking, setSpeaking] = React.useState(false);
   const [listening, setListening] = React.useState(false);
   const [showLangPicker, setShowLangPicker] = React.useState(false);
+  const [handsFree, setHandsFree] = React.useState(false);
+  const handsFreeRef = React.useRef(false);
+  React.useEffect(()=>{ handsFreeRef.current = handsFree; }, [handsFree]);
   const msgsEndRef = React.useRef(null);
   const recogRef = React.useRef(null);
 
@@ -10096,17 +10099,34 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
     `${cat}:\n` + (items||[]).map(i => `  ${i.nr||""}. ${i.name} — ${(i.price||i.finalPrice||0).toFixed(2)}€${i.vegan?" (vegan)":i.veg?" (vegetarisch)":""}${i.desc?" — "+i.desc:""}`).join("\n")
   ).join("\n\n");
 
-  const systemPrompt = `Du bist Priya, eine freundliche, professionelle KI-Kellnerin im Restaurant eatDeSi Bad Wildungen (Fusion Kitchen & Grill, Indien trifft Trends).
-Antworte NUR auf ${curLang.name}.
-Du hilfst Gästen bei der Auswahl und nimmst Bestellungen auf.
-Wenn ein Gast etwas bestellt, antworte mit einem JSON-Block am Ende:
+  const _oeff = printerSettings?.oeffnungszeiten || printerSettings?.openingHours || "";
+  const _adr = [printerSettings?.firmaStrasse, printerSettings?.firmaPlzOrt].filter(Boolean).join(", ");
+  const _tel = printerSettings?.firmaPhone || "";
+  const systemPrompt = `Du bist Priya, die herzliche, aufmerksame Kellnerin im Restaurant eatDeSi (${_adr||"Bad Wildungen"}) — Fusion Kitchen & Grill, "Indien trifft Trends".
+
+DEINE PERSÖNLICHKEIT:
+- Warmherzig, natürlich und gastfreundlich — wie eine echte Lieblings-Kellnerin.
+- Führe ein lockeres Gespräch, stelle gerne mal eine Rückfrage, gehe auf Wünsche ein.
+- Antworte KURZ und natürlich (2-4 Sätze), nicht wie ein Lexikon. Kein Fließtext-Roman.
+- Antworte NUR auf ${curLang.name}.
+
+WAS DU WEISST (nutze diese Infos, verweise NICHT ans Restaurant):
+${_oeff ? "- Öffnungszeiten: "+_oeff : "- Öffnungszeiten: Wenn ein Gast fragt und du sie nicht kennst, sage freundlich, dass er sie am besten kurz telefonisch bestätigt — aber biete an, schon mal die Bestellung vorzubereiten."}
+${_adr ? "- Adresse: "+_adr : ""}
+${_tel ? "- Telefon: "+_tel : ""}
+- Du kennst die ganze Speisekarte (siehe unten) und empfiehlst gerne.
+
+DEINE AUFGABE:
+- Gäste beraten, Appetit machen, Bestellungen aufnehmen.
+- Wenn ein Gast bestellt, bestätige freundlich UND hänge am ENDE einen JSON-Block an (der Gast sieht ihn nicht):
 {"order":[{"name":"Artikelname","qty":1,"price":8.90}]}
-Sei freundlich, kurz und hilfreich. Empfehle passende Gerichte. Erkläre Zutaten auf Nachfrage.
+- Nimm auch mehrere Artikel in einer Bestellung auf. Frage nach, ob es sonst noch etwas sein darf (Getränk, Vorspeise, Dessert).
+- Wenn etwas unklar ist (z.B. "Butter" → Butter Curry/Butter Chicken?), frage kurz nach.
 
 Aktuelle Speisekarte:
 ${menuContext}
 
-Aktuell bestellte Artikel: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(", ") : "noch nichts"}`;
+Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(", ") : "noch nichts"}`;
 
   const startSession = () => {
     const greeting = curLang.greeting;
@@ -10125,7 +10145,13 @@ Aktuell bestellte Artikel: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`
     utt.rate = 0.95;
     utt.pitch = 1.1;
     setSpeaking(true);
-    utt.onend = () => setSpeaking(false);
+    utt.onend = () => {
+      setSpeaking(false);
+      // Gespräch-Modus: nach dem Sprechen automatisch wieder zuhören
+      if (handsFreeRef.current) {
+        setTimeout(() => { if (handsFreeRef.current) startListening(); }, 400);
+      }
+    };
     utt.onerror = () => setSpeaking(false);
     window.speechSynthesis.speak(utt);
   };
@@ -10152,13 +10178,38 @@ Aktuell bestellte Artikel: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`
 
           setListening(true);
           var handled = false;
-          // Live-Teilergebnisse (optional) + Endergebnis via Listener
-          try {
-            await SpeechPlugin.removeAllListeners();
-          } catch(re){}
+          var lastText = "";
+          var silenceTimer = null;
+          var doAutoSend = function(){
+            if (handled) return;
+            var t = (lastText||"").trim();
+            if (!t) return;
+            handled = true;
+            try { SpeechPlugin.stop(); } catch(e){}
+            try { SpeechPlugin.removeAllListeners(); } catch(e){}
+            setInput(t);
+            setListening(false);
+            setTimeout(function(){ sendMsg(t); }, 200);
+          };
+          // Live-Teilergebnisse: Text anzeigen + Stille-Timer neu starten
+          try { await SpeechPlugin.removeAllListeners(); } catch(re){}
           SpeechPlugin.addListener('partialResults', function(data){
             var arr = data && (data.matches || data.value);
-            if (arr && arr.length) setInput(arr[0]);
+            if (arr && arr.length) {
+              lastText = arr[0];
+              setInput(lastText);
+              // nach 1,4s Stille automatisch senden
+              if (silenceTimer) clearTimeout(silenceTimer);
+              silenceTimer = setTimeout(doAutoSend, 1400);
+            }
+          });
+          // Manche Versionen feuern 'listeningState' wenn der Nutzer aufhört
+          SpeechPlugin.addListener('listeningState', function(st){
+            if (st && st.status === 'stopped') {
+              if (silenceTimer) clearTimeout(silenceTimer);
+              doAutoSend();
+              if (!lastText) setListening(false);
+            }
           });
           var res = await SpeechPlugin.start({
             language: langCode,
@@ -10166,20 +10217,12 @@ Aktuell bestellte Artikel: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`
             partialResults: true,
             popup: false
           });
-          // Manche Plugin-Versionen liefern das Ergebnis direkt aus start()
+          // Manche Plugin-Versionen liefern das Endergebnis direkt aus start()
           var matches = res && (res.matches || res.value);
           if (matches && matches.length) {
-            handled = true;
-            var t = matches[0];
-            setInput(t);
-            setListening(false);
-            setTimeout(function(){ sendMsg(t); }, 300);
-          }
-          // Fallback: falls kein direktes Ergebnis, per Listener abschliessen
-          if (!handled) {
-            SpeechPlugin.addListener('listeningState', function(st){
-              if (st && st.status === 'stopped') setListening(false);
-            });
+            lastText = matches[0];
+            if (silenceTimer) clearTimeout(silenceTimer);
+            doAutoSend();
           }
         } catch(err) {
           setListening(false);
@@ -10362,14 +10405,25 @@ Aktuell bestellte Artikel: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`
         micError,
         /*#__PURE__*/React.createElement("span", { onClick:()=>setMicError(""), style:{ marginLeft:8, cursor:"pointer", fontWeight:700 } }, "✕")
       ),
-      /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8 } },
+      /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8, alignItems:"center" } },
+        // Gespräch-Modus (Hands-free) Toggle
+        /*#__PURE__*/React.createElement("button", { onClick: ()=>{
+            var next = !handsFree;
+            setHandsFree(next);
+            handsFreeRef.current = next;
+            if (next && !listening && !speaking) startListening();
+            if (!next) { try{ var c=window.Capacitor; if(c&&c.isNativePlatform&&c.isNativePlatform()&&c.Plugins&&c.Plugins.SpeechRecognition){ c.Plugins.SpeechRecognition.stop(); } }catch(e){} try{recogRef.current?.stop();}catch(e){} try{window.speechSynthesis.cancel();}catch(e){} setListening(false); }
+          },
+          title:"Gespräch-Modus: Priya hört automatisch weiter zu",
+          style:{ width:44, height:44, borderRadius:"50%", border:"none", background:handsFree?"#6a1b9a":"#e1bee7", color:handsFree?"#fff":"#6a1b9a", cursor:"pointer", fontSize:18, flexShrink:0 }
+        }, "🗣"),
         /*#__PURE__*/React.createElement("button", { onClick: listening ? ()=>{ try{ var c=window.Capacitor; if(c&&c.isNativePlatform&&c.isNativePlatform()&&c.Plugins&&c.Plugins.SpeechRecognition){ c.Plugins.SpeechRecognition.stop(); } }catch(e){} try{recogRef.current?.stop();}catch(e){} setListening(false);} : startListening,
-          title:"Mikrofon — funktioniert in Chrome (HTTPS)",
+          title:"Mikrofon",
           style:{ width:44, height:44, borderRadius:"50%", border:"none", background:listening?"#ef5350":C.green, color:"#fff", cursor:"pointer", fontSize:20, flexShrink:0, animation:listening?"pulse 1s infinite":"none" }
         }, listening?"⏹":"🎤"),
         /*#__PURE__*/React.createElement("input", { value:input, onChange:e=>setInput(e.target.value),
           onKeyDown:e=>e.key==="Enter"&&sendMsg(input),
-          placeholder: listening ? "🎤 Hört zu..." : "Tippen oder 🎤 drücken...",
+          placeholder: listening ? "🎤 Hört zu..." : handsFree ? "🗣 Gespräch-Modus aktiv..." : "Tippen oder 🎤 drücken...",
           style:{ flex:1, padding:"10px 12px", borderRadius:22, border:"2px solid #eee", fontSize:14, fontFamily:"inherit", outline:"none" }
         }),
         /*#__PURE__*/React.createElement("button", { onClick:()=>sendMsg(input), disabled:!input.trim()||loading,
@@ -18804,7 +18858,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v131"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v132"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
