@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v130</title>
+<title>eatDeSi POS v131</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v130';",
+    "var CACHE='eatdesi-v131';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -10134,9 +10134,64 @@ Aktuell bestellte Artikel: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`
 
   const startListening = () => {
     setMicError("");
+    // --- APK (Capacitor): natives Speech-Recognition-Plugin nutzen ---
+    var cap = window.Capacitor;
+    var isNative = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
+    var SpeechPlugin = cap && cap.Plugins && (cap.Plugins.SpeechRecognition);
+    if (isNative && SpeechPlugin) {
+      var langCode = lang === "pa" ? "pa-IN" : lang === "ur" ? "ur-PK" : lang === "ar" ? "ar-SA" : lang === "de" ? "de-DE" : lang === "en" ? "en-US" : lang+"-"+lang.toUpperCase();
+      (async function(){
+        try {
+          // Berechtigung sicherstellen
+          try {
+            var perm = await SpeechPlugin.checkPermissions();
+            if (!perm || perm.speechRecognition !== 'granted') {
+              await SpeechPlugin.requestPermissions();
+            }
+          } catch(pe) { try { await SpeechPlugin.requestPermission(); } catch(pe2){} }
+
+          setListening(true);
+          var handled = false;
+          // Live-Teilergebnisse (optional) + Endergebnis via Listener
+          try {
+            await SpeechPlugin.removeAllListeners();
+          } catch(re){}
+          SpeechPlugin.addListener('partialResults', function(data){
+            var arr = data && (data.matches || data.value);
+            if (arr && arr.length) setInput(arr[0]);
+          });
+          var res = await SpeechPlugin.start({
+            language: langCode,
+            maxResults: 1,
+            partialResults: true,
+            popup: false
+          });
+          // Manche Plugin-Versionen liefern das Ergebnis direkt aus start()
+          var matches = res && (res.matches || res.value);
+          if (matches && matches.length) {
+            handled = true;
+            var t = matches[0];
+            setInput(t);
+            setListening(false);
+            setTimeout(function(){ sendMsg(t); }, 300);
+          }
+          // Fallback: falls kein direktes Ergebnis, per Listener abschliessen
+          if (!handled) {
+            SpeechPlugin.addListener('listeningState', function(st){
+              if (st && st.status === 'stopped') setListening(false);
+            });
+          }
+        } catch(err) {
+          setListening(false);
+          setMicError("🎤 Sprache nicht verfügbar. Bitte tippen.");
+        }
+      })();
+      return;
+    }
+    // --- Browser: Web Speech API (funktioniert in Chrome) ---
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setMicError("🎤 Spracheingabe nicht verfügbar. Bitte tippen.");
+      setMicError("🎤 Spracheingabe in dieser App nicht verfügbar. Bitte tippen.");
       return;
     }
     navigator.mediaDevices?.getUserMedia({audio:true}).then(() => {
@@ -10308,7 +10363,7 @@ Aktuell bestellte Artikel: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`
         /*#__PURE__*/React.createElement("span", { onClick:()=>setMicError(""), style:{ marginLeft:8, cursor:"pointer", fontWeight:700 } }, "✕")
       ),
       /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8 } },
-        /*#__PURE__*/React.createElement("button", { onClick: listening ? ()=>{recogRef.current?.stop();setListening(false);} : startListening,
+        /*#__PURE__*/React.createElement("button", { onClick: listening ? ()=>{ try{ var c=window.Capacitor; if(c&&c.isNativePlatform&&c.isNativePlatform()&&c.Plugins&&c.Plugins.SpeechRecognition){ c.Plugins.SpeechRecognition.stop(); } }catch(e){} try{recogRef.current?.stop();}catch(e){} setListening(false);} : startListening,
           title:"Mikrofon — funktioniert in Chrome (HTTPS)",
           style:{ width:44, height:44, borderRadius:"50%", border:"none", background:listening?"#ef5350":C.green, color:"#fff", cursor:"pointer", fontSize:20, flexShrink:0, animation:listening?"pulse 1s infinite":"none" }
         }, listening?"⏹":"🎤"),
@@ -18749,7 +18804,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v130"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v131"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
