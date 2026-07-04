@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- eatDeSi Website · Update 2026-06-24b: Gemini gemini-2.5-flash + AI-Key Speichern mit klarer Bestaetigung + Key beim Chat-Oeffnen frisch aus Supabase laden · Beliebt-Badge bleibt auch bei Cloud-Menue · 27 Top-Artikel -->
+<!-- eatDeSi Website · Update 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -331,6 +331,16 @@ footer .fl:hover{color:var(--gold)}
 .switch input:checked+.slider:before{transform:translateX(22px)}
 .switch.big input:checked+.slider:before{transform:translateX(26px)}
 .switch input:disabled+.slider{opacity:.4}
+.poly-edit{border:1px solid var(--line);border-radius:14px;padding:14px;margin:14px 0;background:rgba(255,255,255,.02)}
+.poly-head{font-size:15px;font-weight:700;color:var(--gold);margin-bottom:4px}
+.poly-hint{font-size:12px;color:var(--paper-2);margin-bottom:12px;line-height:1.5}
+.poly-zonebar{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px}
+.pz-tab{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.04);border:1.5px solid var(--line);border-radius:999px;padding:7px 12px;color:var(--cream);font-size:12.5px;font-weight:600;cursor:pointer}
+.pz-tab.on{background:rgba(255,255,255,.1)}
+.pz-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+#zoneMap{height:300px;border-radius:12px;border:1px solid var(--line);overflow:hidden}
+.poly-actions{display:flex;gap:8px;margin-top:10px}
+.poly-btn{flex:1;background:var(--ink-soft);border:1px solid var(--line);border-radius:9px;padding:10px;color:var(--cream);font-size:13px;font-weight:600;cursor:pointer}
 .zrow{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:9px;align-items:end;margin-bottom:10px}
 .zrow input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:10px;color:var(--cream);font-size:13.5px}
 .zrow .tlabel{font-size:11px;color:var(--gold);font-weight:600;margin-bottom:4px}
@@ -972,6 +982,23 @@ async function geocodeAddress(q){
   }catch(e){ console.warn('geocode',e); }
   return null;
 }
+// Strukturierte Suche (Straße+Nr, PLZ, Ort getrennt). Probiert mehrere Varianten.
+async function geocodeStructured(street, number, plz, city){
+  street=(street||'').trim(); number=(number||'').trim(); plz=(plz||'').trim(); city=(city||'').trim();
+  // Variante 1: strukturierte Nominatim-Parameter
+  try{
+    var p='format=json&limit=1&countrycodes=de';
+    if(street||number) p+='&street='+encodeURIComponent((number?number+' ':'')+street);
+    if(city) p+='&city='+encodeURIComponent(city);
+    if(plz) p+='&postalcode='+encodeURIComponent(plz);
+    const r=await fetch('https://nominatim.openstreetmap.org/search?'+p,{headers:{'Accept':'application/json'}});
+    const d=await r.json();
+    if(d&&d.length) return {lat:parseFloat(d[0].lat),lng:parseFloat(d[0].lon),display:d[0].display_name};
+  }catch(e){ console.warn('geocodeStructured v1',e); }
+  // Variante 2: freie Textsuche als Fallback
+  var q=[ (street?street+(number?' '+number:''):''), plz, city ].filter(Boolean).join(', ');
+  return await geocodeAddress(q);
+}
 // Zone aus Koordinaten finden (je nach zoneMode). Gibt {idx,zone,dist} oder null.
 function findZoneByCoords(lat,lng){
   if(DELIVERY_CFG.zoneMode==='polygon'){
@@ -1006,6 +1033,12 @@ let MENU = {"Softdrinks":[{"id":200,"nr":"211","name":"Coca-Cola 0,33l","price":
 
 /* ---- STATE ---- */
 let cart = [], mode='abholung';
+/* QR TISCH-BESTELLUNG: URL ?tisch=N -> Modus "Vor Ort" + feste Tischnummer */
+let TABLE_NO=null;
+try{
+  var _tq=new URLSearchParams(location.search).get('tisch');
+  if(_tq && /^\d{1,3}$/.test(_tq.trim())){ TABLE_NO=_tq.trim(); mode='dinein'; }
+}catch(e){}
 let modalItem=null, modalSel={}, modalQty=1, modalNote='';
 
 const CAT_GROUPS = {
@@ -1217,7 +1250,7 @@ function goCheckout(){
   const z=ZONES[activeZone]||{fee:0,min:0,name:''}; const fee=isDeliv?z.fee:0, tot=sub+fee;
   const ortChosen = isDeliv && activeOrt && buildOrtList().some(x=>x.ort===activeOrt);
   const belowMin = isDeliv && ortChosen && sub < z.min;
-  const modeTitle = isDeliv?'Lieferung':(isDine?'Vor Ort essen':'Abholung');
+  const modeTitle = isDeliv?'Lieferung':(isDine?(TABLE_NO?('Tisch '+TABLE_NO):'Vor Ort essen'):'Abholung');
   const timeWord = isDeliv?'Lieferung':(isDine?'Ankunft':'Abholung');
   $('#drawerTitle').textContent='Kasse · '+modeTitle;
   $('#cartList').innerHTML=`
@@ -1240,7 +1273,7 @@ function goCheckout(){
       <div class="field"><label>PLZ *</label><input id="f_zip" inputmode="numeric" placeholder="34537"><div class="err">PLZ</div></div></div>
       <div class="hint" id="plzHint" style="margin:-4px 0 8px">${activeOrt?('Liefergebiet: '+(ZONES[activeZone]?ZONES[activeZone].name:'')+' · PLZ '+(ZONES[activeZone]?ZONES[activeZone].plz:'')):'Erst Ort wählen – die passende PLZ wird gesetzt.'}</div>`
       :isDine?`<div class="field"><label>Anzahl Personen *</label><input id="f_guests" inputmode="numeric" placeholder="z.B. 4"><div class="err">Bitte Personenzahl angeben</div></div>
-      <div class="deliv-note">🍽️ Wir reservieren deinen Tisch und bereiten dein Essen vor. Die genaue Zeit bestätigen wir dir.</div>`
+      <div class="deliv-note">${TABLE_NO?('🍽️ Du sitzt an <b>Tisch '+TABLE_NO+'</b> – wir bringen dein Essen direkt an deinen Tisch.'):'🍽️ Wir reservieren deinen Tisch und bereiten dein Essen vor. Die genaue Zeit bestätigen wir dir.'}</div>`
       :`<div class="deliv-note">🥡 Abholung: <b>eatDeSi, Brunnenallee 30, Bad Wildungen</b>.</div>`}
 
     <div class="field"><label>Wann? *</label>
@@ -1347,22 +1380,22 @@ async function placeOrder(){
   // Bestellweg-Text (mit gewähltem Ortsteil zur Kontrolle im POS)
   // Bestellweg-Text (mit Ortsteil + Richtung/km zur Kontrolle im POS)
   var dirInfo = (isDeliv && window._delivPrefill && window._delivPrefill.dir) ? (' · '+window._delivPrefill.dir+' '+window._delivPrefill.dist+'km') : '';
-  const wayText = isDeliv ? ('🛵 LIEFERUNG · '+z.name+' · 📍'+(activeOrt||city)+dirInfo) : (isDine ? ('🍽️ VOR ORT · '+guests+' Pers.') : '🥡 ABHOLUNG');
+  const wayText = isDeliv ? ('🛵 LIEFERUNG · '+z.name+' · 📍'+(activeOrt||city)+dirInfo) : (isDine ? ((TABLE_NO?('🍽️ TISCH '+TABLE_NO):'🍽️ VOR ORT')+' · '+guests+' Pers.') : '🥡 ABHOLUNG');
   // E-Mail in die Notiz einbetten (POS liest sie aus), falls keine eigene Spalte existiert
   const emailTag = email ? ('✉️ '+email) : '';
   // [NEU] = wartet auf Annahme im POS. Wird nach Annahme zu [OK:Minuten] geändert.
   const orderNote=['[NEU]',wayText,'⏰ '+wishLabel,addr,emailTag,note].filter(Boolean).join(' · ');
 
-  const body={location_id:LOCATION_ID,bon_nr:bonNr,table_id:isDeliv?('Lieferung '+z.name):(isDine?('Vor Ort '+guests+'P'):'Abholung'),
+  const body={location_id:LOCATION_ID,bon_nr:bonNr,table_id:isDeliv?('Lieferung '+z.name):(isDine?(TABLE_NO?('Tisch '+TABLE_NO):('Vor Ort '+guests+'P')):'Abholung'),
     items:JSON.stringify(items),total,payment:pay,customer_name:name,customer_phone:phone,
     customer_email:email||null,
     customer_street:addr||null,note:orderNote,source:'WEBSHOP',created_at:new Date().toISOString(),storniert:false};
   try{
     const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr',{method:'POST',
       headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
-    if(r.ok||r.status===201||r.status===409){showDone(bonNr,total,isDeliv);cart=[];updateCart();}
+    if(r.ok||r.status===201||r.status===409){cart=[];updateCart();showDone(bonNr,total,isDeliv);}
     else{ const ok=await retryMinimal(bonNr,isDeliv?('Lieferung '+z.name):'Abholung',items,total,pay,name,phone,orderNote);
-      if(ok){showDone(bonNr,total,isDeliv);cart=[];updateCart();} else throw new Error('HTTP '+r.status);}
+      if(ok){cart=[];updateCart();showDone(bonNr,total,isDeliv);} else throw new Error('HTTP '+r.status);}
   }catch(e){btn.disabled=false;btn.textContent='Erneut absenden';toast('⚠️ Senden fehlgeschlagen');console.warn(e);}
 }
 async function retryMinimal(bonNr,tableId,items,total,pay,name,phone,note){
@@ -1376,7 +1409,8 @@ function showDone(bonNr,total,isDeliv){
   const word=isDeliv?'Lieferzeit':(isDine?'Tischzeit':'Abholzeit');
   $('#drawerTitle').textContent='Bestellt!';
   $('#cartList').innerHTML=`<div class="done"><div class="ic">✓</div><h3>Danke für deine Bestellung!</h3>
-    <p>Wir prüfen sie gerade und bestätigen gleich deine ${word}.</p><div class="bn">${bonNr}</div>
+    <p>Wir prüfen sie gerade und bestätigen gleich deine ${word}.</p>
+    ${(isDine&&TABLE_NO)?('<p style="margin-top:6px">🍽️ Für <b>Tisch '+TABLE_NO+'</b> – dein Essen wird direkt an deinen Tisch gebracht.</p>'):''}<div class="bn">${bonNr}</div>
     <div id="liveStatus" style="margin-top:14px"></div>
     <p style="margin-top:10px">Gesamt: <b style="color:var(--gold-glow)">${eur(total)}</b></p></div>`;
   $('#drawerFoot').innerHTML=`<button class="checkout" onclick="closeCart()">Fertig</button>`;
@@ -1683,8 +1717,7 @@ async function confirmDelivCheck(){
   if(err) err.textContent='';
   if(btn){ btn.disabled=true; btn.innerHTML='<span class="dc-spin"></span> Prüfe Adresse…'; }
   // Adresse -> Koordinaten via OpenStreetMap
-  var q=street+', '+(zip?zip+' ':'')+city;
-  var geo=await geocodeAddress(q);
+  var geo=await geocodeStructured(street, '', zip, city);
   if(btn){ btn.disabled=false; btn.innerHTML='📍 Adresse prüfen'; }
   if(!geo){
     if(err) err.textContent='Adresse nicht gefunden. Bitte Straße + Hausnummer + Ort genau eingeben.';
@@ -2232,19 +2265,144 @@ function drawZones(){
       <label class="dmode-opt"><input type="radio" name="dmode" value="address-polygon" ${(DELIVERY_CFG.mode==='address'&&DELIVERY_CFG.zoneMode==='polygon')?'checked':''} onchange="setDeliveryMode('address','polygon')"> 🗺️ <b>Karte/Polygon (B)</b> – Adresse wird geprüft, Zone nach gezeichnetem Gebiet</label>
       <label class="dmode-opt"><input type="radio" name="dmode" value="manual" ${DELIVERY_CFG.mode==='manual'?'checked':''} onchange="setDeliveryMode('manual','radius')"> ✍️ <b>Manuell</b> – Kunde wählt Ortsteil selbst (ohne Karte)</label>
     </div>
-    <div class="afield"><label>Restaurant-Standort (für Umkreis)</label>
-      <div class="row2"><input id="rest_lat" value="${REST_LOC.lat}" placeholder="Lat" oninput="REST_LOC.lat=parseFloat(this.value)||REST_LOC.lat">
-      <input id="rest_lng" value="${REST_LOC.lng}" placeholder="Lng" oninput="REST_LOC.lng=parseFloat(this.value)||REST_LOC.lng"></div>
-      <p class="hint" style="margin-top:4px">Tipp: Standort in Google Maps anklicken → Koordinaten kopieren.</p></div>
+    <div class="afield"><label>Restaurant-Standort (für Umkreis & Karte)</label>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="rest_street" placeholder="Straße" style="flex:2" value="Brunnenallee">
+        <input id="rest_nr" placeholder="Nr." style="flex:0 0 70px" value="30">
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="rest_plz" placeholder="PLZ" style="flex:0 0 90px" inputmode="numeric" value="34537">
+        <input id="rest_ort" placeholder="Ort" style="flex:1" value="Bad Wildungen">
+        <button class="poly-btn" style="flex:0 0 auto;width:auto;padding:10px 14px" onclick="geocodeRestaurant()">🔍 Suchen</button>
+      </div>
+      <div id="restErr" style="color:var(--red);font-size:12px;min-height:0;margin-bottom:6px"></div>
+      <div id="restMap" style="height:240px;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-bottom:8px"></div>
+      <div class="row2"><input id="rest_lat" value="${REST_LOC.lat}" placeholder="Lat" oninput="REST_LOC.lat=parseFloat(this.value)||REST_LOC.lat;updateRestMarker()">
+      <input id="rest_lng" value="${REST_LOC.lng}" placeholder="Lng" oninput="REST_LOC.lng=parseFloat(this.value)||REST_LOC.lng;updateRestMarker()"></div>
+      <p class="hint" style="margin-top:6px">Adresse eingeben → 🔍 Suchen, oder direkt auf die Karte tippen / Pin ziehen. Die Koordinaten werden automatisch gesetzt.</p></div>
     <p class="hint">Pro Zone: Name, Mindestbestellwert (€), Liefergebühr (€). Bei <b>Umkreis</b> zusätzlich Radius (km). Ortsteile/PLZ nur für „Manuell". Gilt sofort nach Speichern.</p>
+    ${(DELIVERY_CFG.mode==='address'&&DELIVERY_CFG.zoneMode==='polygon')?`
+    <div class="poly-edit">
+      <div class="poly-head">🗺️ Liefergebiete auf der Karte zeichnen</div>
+      <div class="poly-hint">Wähle eine Zone, dann tippe auf die Karte um Eckpunkte zu setzen. Mind. 3 Punkte pro Zone.</div>
+      <div class="poly-zonebar" id="polyZoneBar"></div>
+      <div id="zoneMap"></div>
+      <div class="poly-actions">
+        <button class="poly-btn" onclick="undoPolyPoint()">↩️ Letzter Punkt</button>
+        <button class="poly-btn" onclick="clearPolyZone()">🗑️ Zone leeren</button>
+      </div>
+    </div>`:''}
     <div id="zoneRows"></div>
     <button class="btn-add" onclick="addZone()">+ Zone hinzufügen</button>
     <div style="margin-top:18px"><button class="btn-save" onclick="saveConfig()">💾 Speichern</button></div></div>`;
   drawZoneRows();
+  if(DELIVERY_CFG.mode==='address'&&DELIVERY_CFG.zoneMode==='polygon'){ setTimeout(initZoneMap, 100); }
+  if(DELIVERY_CFG.mode!=='manual'){ setTimeout(initRestMap, 120); }
+}
+/* ===== Restaurant-Standort: Karte + Adress-Suche ===== */
+var _restMap=null, _restMarker=null;
+function initRestMap(){
+  try{
+    var el=document.getElementById('restMap'); if(!el||typeof L==='undefined') return;
+    if(_restMap){ _restMap.remove(); _restMap=null; }
+    _restMap=L.map(el).setView([REST_LOC.lat,REST_LOC.lng],14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(_restMap);
+    _restMarker=L.marker([REST_LOC.lat,REST_LOC.lng],{draggable:true}).addTo(_restMap);
+    // Marker ziehen = Standort setzen
+    _restMarker.on('dragend',function(e){
+      var p=e.target.getLatLng();
+      REST_LOC.lat=+p.lat.toFixed(5); REST_LOC.lng=+p.lng.toFixed(5);
+      syncRestInputs();
+    });
+    // Auf Karte tippen = Standort setzen
+    _restMap.on('click',function(e){
+      REST_LOC.lat=+e.latlng.lat.toFixed(5); REST_LOC.lng=+e.latlng.lng.toFixed(5);
+      _restMarker.setLatLng(e.latlng); syncRestInputs();
+    });
+    setTimeout(function(){ _restMap.invalidateSize(); }, 150);
+  }catch(e){ console.warn('restMap',e); }
+}
+function syncRestInputs(){
+  var la=document.getElementById('rest_lat'), lo=document.getElementById('rest_lng');
+  if(la) la.value=REST_LOC.lat; if(lo) lo.value=REST_LOC.lng;
+}
+function updateRestMarker(){
+  if(_restMap&&_restMarker){ _restMarker.setLatLng([REST_LOC.lat,REST_LOC.lng]); _restMap.setView([REST_LOC.lat,REST_LOC.lng]); }
+}
+async function geocodeRestaurant(){
+  var street=(document.getElementById('rest_street')||{}).value||'';
+  var nr=(document.getElementById('rest_nr')||{}).value||'';
+  var plz=(document.getElementById('rest_plz')||{}).value||'';
+  var ort=(document.getElementById('rest_ort')||{}).value||'';
+  var err=document.getElementById('restErr');
+  if(!street.trim()&&!ort.trim()){ if(err) err.textContent='Bitte mindestens Straße und Ort eingeben.'; return; }
+  if(err){ err.style.color='var(--paper-2)'; err.textContent='Suche…'; }
+  var geo=await geocodeStructured(street, nr, plz, ort);
+  if(!geo){ if(err){ err.style.color='var(--red)'; err.textContent='Adresse nicht gefunden. Bitte Straße, PLZ und Ort prüfen.'; } return; }
+  if(err){ err.style.color='#7fc77f'; err.textContent='✓ Gefunden: '+geo.display.split(',').slice(0,3).join(','); }
+  REST_LOC.lat=+geo.lat.toFixed(5); REST_LOC.lng=+geo.lng.toFixed(5);
+  syncRestInputs(); updateRestMarker();
+  toast('✓ Standort gesetzt');
 }
 function setDeliveryMode(mode, zoneMode){
   DELIVERY_CFG.mode=mode; DELIVERY_CFG.zoneMode=zoneMode;
-  drawZoneRows();
+  drawZones();
+}
+
+/* ===== POLYGON-EDITOR (Option B) ===== */
+var _zoneMap=null, _zoneMapLayers=[], _activePolyZone=0;
+var ZONE_COLORS=['#3fae6a','#c8a04e','#c5482f','#7b61ff','#e0568a','#48b0c5','#d98324'];
+function initZoneMap(){
+  try{
+    var el=document.getElementById('zoneMap'); if(!el||typeof L==='undefined') return;
+    if(_zoneMap){ _zoneMap.remove(); _zoneMap=null; }
+    _zoneMap=L.map(el).setView([REST_LOC.lat,REST_LOC.lng],12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(_zoneMap);
+    L.marker([REST_LOC.lat,REST_LOC.lng]).addTo(_zoneMap).bindPopup('Restaurant');
+    // Tippen = Punkt zur aktiven Zone hinzufügen
+    _zoneMap.on('click',function(e){
+      if(!ZONES[_activePolyZone].poly) ZONES[_activePolyZone].poly=[];
+      ZONES[_activePolyZone].poly.push([e.latlng.lat, e.latlng.lng]);
+      redrawZonePolys();
+    });
+    setTimeout(function(){ _zoneMap.invalidateSize(); }, 150);
+    drawPolyZoneBar();
+    redrawZonePolys();
+  }catch(e){ console.warn('zoneMap',e); }
+}
+function drawPolyZoneBar(){
+  var bar=document.getElementById('polyZoneBar'); if(!bar) return;
+  bar.innerHTML=ZONES.map(function(z,i){
+    var n=(z.poly||[]).length;
+    return '<button class="pz-tab'+(i===_activePolyZone?' on':'')+'" style="border-color:'+ZONE_COLORS[i%7]+'" onclick="selectPolyZone('+i+')">'+
+      '<span class="pz-dot" style="background:'+ZONE_COLORS[i%7]+'"></span>'+(z.name||('Zone '+(i+1)))+' ('+n+')</button>';
+  }).join('');
+}
+function selectPolyZone(i){ _activePolyZone=i; drawPolyZoneBar(); }
+function redrawZonePolys(){
+  if(!_zoneMap) return;
+  _zoneMapLayers.forEach(function(l){ _zoneMap.removeLayer(l); }); _zoneMapLayers=[];
+  ZONES.forEach(function(z,i){
+    if(z.poly && z.poly.length>=2){
+      var pg=L.polygon(z.poly,{color:ZONE_COLORS[i%7],weight:2,fillOpacity:.15}).addTo(_zoneMap);
+      _zoneMapLayers.push(pg);
+    }
+    // Eckpunkte als kleine Kreise
+    (z.poly||[]).forEach(function(pt){
+      var cm=L.circleMarker(pt,{radius:5,color:ZONE_COLORS[i%7],fillColor:'#fff',fillOpacity:1,weight:2}).addTo(_zoneMap);
+      _zoneMapLayers.push(cm);
+    });
+  });
+  drawPolyZoneBar();
+}
+function undoPolyPoint(){
+  var p=ZONES[_activePolyZone].poly;
+  if(p && p.length){ p.pop(); redrawZonePolys(); }
+}
+function clearPolyZone(){
+  if(confirm('Zone „'+(ZONES[_activePolyZone].name||'')+'" wirklich leeren?')){
+    ZONES[_activePolyZone].poly=[]; redrawZonePolys();
+  }
 }
 function drawZoneRows(){
   var isRadius=DELIVERY_CFG.mode==='address'&&DELIVERY_CFG.zoneMode==='radius';
@@ -2511,7 +2669,7 @@ async function aiTestKey(){
   if(!k){res.textContent='Bitte Key eingeben';return;}
   res.textContent='Teste…';
   try{
-    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+k,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:'sag nur OK'}]}]})});
+    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key='+k,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:'sag nur OK'}]}]})});
     if(r.ok){res.innerHTML='<span style="color:#a4c46f">✓ Verbindung OK</span>';AI_KEY=k;}
     else{const e=await r.json();res.innerHTML='<span style="color:var(--red)">✗ '+(e.error?.message||'Fehler '+r.status)+'</span>';}
   }catch(e){res.innerHTML='<span style="color:var(--red)">✗ '+e.message+'</span>';}
@@ -2523,26 +2681,59 @@ async function aiTestKey(){
 let aiHistory=[], aiRec=null, aiRecording=false, aiOpened=false;
 
 function aiContext(){
-  // kompakter Menü-Überblick (Kategorien + Preisspanne) statt 190 Zeilen
+  // volle Speisekarte mit Preisen + preisbestimmenden Optionen (damit die AI richtig bestellt)
   let menuLines=[];
   for(const cat of Object.keys(MENU)){
     const items=(MENU[cat]||[]).filter(webVisible); if(!items.length)continue;
-    const prices=items.map(i=>i.price); const lo=Math.min(...prices),hi=Math.max(...prices);
-    const ex=items.slice(0,4).map(i=>i.name).join(', ');
-    menuLines.push(`- ${cat} (${eur(lo)}–${eur(hi)}): ${ex}${items.length>4?' u.a.':''}`);
+    menuLines.push('== '+cat+' ==');
+    for(const i of items){
+      var line='  '+i.name+' — '+(i.price>0?eur(i.price):'Preis je nach Wahl');
+      if(i.vegan)line+=' (vegan)'; else if(i.veg)line+=' (vegetarisch)';
+      // preisbestimmende Option (z.B. Zutat bei Curry)
+      if(Array.isArray(i.options)){
+        for(const g of i.options){
+          if(!g||!g.choices)continue;
+          if(g.priced){ line+=' ['+g.label+': '+g.choices.map(function(c){return (c.name||c)+' '+(c.price!=null?eur(c.price):'');}).join(', ')+']'; }
+        }
+      }
+      menuLines.push(line);
+    }
   }
   const ruhetag=DAYS[HOURS.closedDay]||'keiner';
   const zonen=ZONES.map(z=>`${z.name}: ab ${eur(z.min)}, Gebühr ${eur(z.fee)}`).join(' | ');
-  return `Du bist die freundliche Sprach-Assistentin von eatDeSi, einem indischen Fusion-Restaurant (Kitchen & Grill) in Bad Wildungen, Brunnenallee 30, betrieben von Familie Sidhu. Telefon +49 5621 9449087.
-Antworte IMMER kurz, herzlich und auf Deutsch (wechsle zu Englisch/Punjabi nur wenn der Gast so schreibt). Du hilfst bei Infos und Bestellungen, erfindest aber keine Preise oder Gerichte außerhalb der Liste.
+  // Top-Empfehlungen für Upselling
+  const grill=(MENU['Tandoori & Grill']||[]).filter(webVisible).slice(0,5).map(i=>i.name).join(', ');
+  const vorspeisen=(MENU['Vorspeisen & Fries']||[]).filter(webVisible).slice(0,5).map(i=>i.name).join(', ');
+  const cocktails=(MENU['Cocktails']||[]).filter(webVisible).slice(0,5).map(i=>i.name).join(', ');
+  const custInfo = window._aiCustomer ? ('\nAKTUELLER STAMMKUNDE: '+(window._aiCustomer.name||'')+(window._aiCustomer.points!=null?' · '+window._aiCustomer.points+' Punkte':'')+(window._aiCustomer.lastItems?' · Zuletzt: '+window._aiCustomer.lastItems.slice(0,5).join(', '):'')+'. Sprich ihn mit Namen an, empfiehl auf Basis der letzten Bestellung.') : '';
 
-ÖFFNUNGSZEITEN: ${HOURS.open}–${HOURS.close} Uhr, Ruhetag: ${ruhetag}. Jetzt gerade ${window._isOpen?'GEÖFFNET':'GESCHLOSSEN'}.
-LIEFERZONEN: ${zonen}. Abholung ist kostenlos.
-CATERING/BUFFET/FEIER: möglich – bitte über das Formular auf der Seite anfragen (sag dem Gast, er kann unten „Catering anfragen" nutzen).
-SPEISEKARTE (Überblick):
-${menuLines.join('\n')}
+  return `Du bist Priya, die herzliche, SCHLAUE Sprach-Assistentin & Verkäuferin von eatDeSi — indisches Fusion-Restaurant (Kitchen & Grill), Brunnenallee 30, Bad Wildungen, Familie Sidhu, Tel +49 5621 9449087. "Indien trifft Trends".
+Antworte KURZ (1-3 Sätze), herzlich, auf Deutsch (Englisch/Punjabi nur wenn der Gast so schreibt). Erfinde KEINE Preise/Gerichte außerhalb der Liste.
 
-Wenn jemand bestellen will, erkläre freundlich: Gerichte über „Speisekarte & Bestellen" in den Warenkorb legen, Abholung oder Lieferung wählen, dann zur Kasse. Halte Antworten unter 4 Sätzen, ideal zum Vorlesen.`;
+VERKAUFEN (schlau, Umsatz steigern):
+- Empfiehl aktiv unsere hochwertigen Grill-Gerichte zuerst: ${grill||'Tandoori Mix Grill'}.
+- Schlage passende Vorspeise vor: ${vorspeisen||'Allu Tikki, Samosa'}.
+- Schlage passenden Cocktail/Getränk vor: ${cocktails||'Mojito, Aperol Spritz'}. Charmant, nicht aufdringlich.
+
+STAMMKUNDE & KUNDENNUMMER (wichtig):
+- Frage früh freundlich: "Haben Sie eine Kundennummer bei uns?" (Handynummer = Kundennummer).
+- Nennt der Gast eine Nummer: hänge versteckt an {"lookup":"NUMMER"}.
+- Neukunde/keine Nummer: empfiehl kostenlose Registrierung ("Treuepunkte sammeln + ich merke mir Ihre Lieblingsgerichte").
+- Will er sich registrieren: frage Name + Handynummer, dann hänge versteckt an {"register":{"name":"NAME","phone":"NUMMER"}}.
+${window._aiCustomer?'- Stammkunde ist schon erkannt (siehe unten) — nicht nochmal nach Nummer fragen.':''}
+
+BESTELLEN (du kannst direkt in den Warenkorb legen!):
+- Wenn der Gast etwas bestellen will, lege es in den Warenkorb: hänge versteckt an {"cart":[{"name":"GENAUER Artikelname","qty":1}]}.
+- Nutze EXAKT die Namen aus der Liste. Bei Gerichten mit preisbestimmender Wahl (z.B. Curry-Zutat) frage kurz nach und schreibe die Wahl in den Namen, z.B. {"name":"Butter Curry","choice":"Hähnchen","qty":1}.
+- Nach dem Hinzufügen: bestätige kurz ("Ist im Warenkorb!") und frage, ob noch etwas dazu darf.
+- Wenn der Gast fertig ist: fasse den Warenkorb zusammen und weise auf "🛒 Warenkorb → Zur Kasse" hin (dort Abholung/Lieferung + Bezahlung).
+
+ÖFFNUNGSZEITEN: ${HOURS.open}–${HOURS.close} Uhr, Ruhetag: ${ruhetag}. Jetzt ${window._isOpen?'GEÖFFNET':'GESCHLOSSEN'}.
+LIEFERZONEN: ${zonen}. Abholung kostenlos.
+CATERING/FEIER: über Formular „Catering anfragen" auf der Seite.
+
+SPEISEKARTE:
+${menuLines.join('\n')}${custInfo}`;
 }
 
 function openAI(){
@@ -2575,15 +2766,109 @@ async function aiAsk(userText){
   if(!AI_KEY){
     const ans=aiFallback(userText); typing.remove(); aiReply(ans); return;
   }
+  var MODEL='gemini-2.5-flash-lite';
   try{
     const body={system_instruction:{parts:[{text:aiContext()}]},contents:aiHistory.slice(-10),
-      generationConfig:{temperature:0.6,maxOutputTokens:300}};
-    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='+AI_KEY,
+      generationConfig:{temperature:0.6,maxOutputTokens:400}};
+    var r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+MODEL+':generateContent?key='+AI_KEY,
       {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const j=await r.json();
+    var j=await r.json();
+    // Rate-Limit: kurz warten + einmal wiederholen
+    if(j&&j.error&&(j.error.code===429||/quota|rate|exceeded/i.test(j.error.message||''))){
+      var wait=8; var mm=(j.error.message||'').match(/retry in ([\d.]+)s/i); if(mm)wait=Math.min(Math.ceil(parseFloat(mm[1]))+1,20);
+      typing.textContent='Einen Moment bitte… ('+wait+'s)';
+      await new Promise(function(res){setTimeout(res,wait*1000);});
+      r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+MODEL+':generateContent?key='+AI_KEY,
+        {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      j=await r.json();
+    }
     let ans=j?.candidates?.[0]?.content?.parts?.[0]?.text || aiFallback(userText);
+    ans=aiProcessBlocks(ans);
     typing.remove(); aiReply(ans);
   }catch(e){ typing.remove(); aiReply(aiFallback(userText)); }
+}
+
+// Verarbeitet versteckte AI-Blöcke (cart/lookup/register) und gibt sauberen Text zurück
+function aiProcessBlocks(raw){
+  var text=raw;
+  // CART: Artikel per Name finden und in den Warenkorb legen
+  var cm=raw.match(/\{"cart":\s*\[[\s\S]*?\]\}/);
+  if(cm){
+    try{
+      var parsed=JSON.parse(cm[0]);
+      if(parsed.cart&&parsed.cart.length){
+        parsed.cart.forEach(function(ci){
+          var it=aiFindItem(ci.name);
+          if(!it)return;
+          var opts=[]; var unit=it.price||0;
+          // preisbestimmende Wahl (choice) anwenden
+          if(ci.choice&&Array.isArray(it.options)){
+            for(var g of it.options){
+              if(g.priced&&g.choices){
+                var ch=g.choices.find(function(c){return (c.name||c).toLowerCase()===String(ci.choice).toLowerCase();});
+                if(ch){opts.push({label:g.label,name:ch.name||ch,price:ch.price||0}); if(ch.price!=null)unit=ch.price;}
+              }
+            }
+          }
+          addToCart(it,opts,unit,ci.qty||1,'AI');
+        });
+      }
+    }catch(e){}
+  }
+  // LOOKUP Kundennummer
+  var lm=raw.match(/\{"lookup":\s*"([^"]+)"\}/);
+  if(lm){ aiLookupCustomer(lm[1]); }
+  // REGISTER neuer Kunde
+  var rm=raw.match(/\{"register":\s*\{[\s\S]*?\}\s*\}/);
+  if(rm){ try{ var rp=JSON.parse(rm[0]); if(rp.register&&rp.register.phone) aiRegisterCustomer(rp.register.name,rp.register.phone); }catch(e){} }
+  // Blöcke aus dem Text entfernen
+  text=text.replace(/\{"cart":\s*\[[\s\S]*?\]\}/g,'').replace(/\{"lookup":\s*"[^"]*"\}/g,'').replace(/\{"register":\s*\{[\s\S]*?\}\s*\}/g,'').trim();
+  return text;
+}
+// Artikel per Name finden (fuzzy)
+function aiFindItem(name){
+  if(!name)return null;
+  var q=String(name).toLowerCase().trim();
+  for(var c of Object.keys(MENU)){
+    for(var it of MENU[c]){
+      if(it.name.toLowerCase()===q) return it;
+    }
+  }
+  // Teil-Treffer
+  for(var c2 of Object.keys(MENU)){
+    for(var it2 of MENU[c2]){
+      if(it2.name.toLowerCase().indexOf(q)>-1||q.indexOf(it2.name.toLowerCase())>-1) return it2;
+    }
+  }
+  return null;
+}
+// Stammkunde aus Supabase (customers-State im pos_state) suchen
+async function aiLookupCustomer(num){
+  try{
+    var q=String(num).replace(/\s/g,'').toLowerCase();
+    var g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_customers&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
+    if(!g.ok)return; var j=await g.json();
+    if(j&&j[0]&&j[0].value){
+      var list=JSON.parse(j[0].value);
+      var found=(list||[]).find(function(c){return String(c.phone||'').replace(/\s/g,'').toLowerCase()===q||String(c.kundenNr||'').toLowerCase()===q;});
+      if(found){ window._aiCustomer=found; toast('⭐ Willkommen zurück, '+(found.name||'Stammkunde')+'!'); }
+    }
+  }catch(e){}
+}
+// Neuen Kunden anlegen (in pos_state customers, damit POS ihn sieht)
+async function aiRegisterCustomer(name,phone){
+  if(!phone)return;
+  try{
+    var g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_customers&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
+    var list=[]; if(g.ok){var j=await g.json(); if(j&&j[0]&&j[0].value){try{list=JSON.parse(j[0].value)||[];}catch(e){}}}
+    if(list.find(function(c){return String(c.phone||'')===String(phone);})){ window._aiCustomer=list.find(function(c){return String(c.phone||'')===String(phone);}); return; }
+    var neu={name:name||'Gast',phone:phone,kundenNr:phone,points:0,visits:0,since:new Date().toISOString(),pointsHistory:[]};
+    list.push(neu); window._aiCustomer=neu;
+    await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
+      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
+      body:JSON.stringify({key:LOCATION_ID+'_customers',value:JSON.stringify(list),updated_at:new Date().toISOString()})});
+    toast('✅ Registriert! Willkommen, '+(name||'Gast')+' ⭐');
+  }catch(e){}
 }
 function aiReply(text){
   aiAddMsg('bot',text);
@@ -2636,6 +2921,22 @@ function aiStopSpeak(){if(window.speechSynthesis)speechSynthesis.cancel();}
 // Stimmen vorladen
 if(window.speechSynthesis){speechSynthesis.onvoiceschanged=()=>{};}
 
+/* QR TISCH-BESTELLUNG: UI aktivieren wenn ?tisch=N in der URL */
+function applyTableQR(){
+  if(!TABLE_NO) return;
+  try{ applyShopMode('dinein'); }catch(e){}
+  var hint=document.getElementById('shopModeHint');
+  if(hint) hint.textContent='🍽️ Du bestellst für Tisch '+TABLE_NO+' – dein Essen kommt direkt an deinen Tisch.';
+  var mh=document.getElementById('modeHint');
+  if(mh) mh.textContent='🍽️ Bestellung für Tisch '+TABLE_NO;
+  if(!document.getElementById('tischBadge')){
+    var b=document.createElement('div'); b.id='tischBadge';
+    b.style.cssText='position:fixed;left:12px;bottom:12px;z-index:9999;background:linear-gradient(135deg,#c9a227,#e8c95a);color:#111;font-weight:800;font-size:13px;padding:7px 14px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.45);pointer-events:none';
+    b.textContent='🍽️ Tisch '+TABLE_NO;
+    document.body.appendChild(b);
+  }
+}
+
 /* INIT */
 $('#yr').textContent=new Date().getFullYear();
 checkOpen(); setInterval(checkOpen,60000);
@@ -2643,6 +2944,7 @@ indexMenu(); renderMenu(); updateCart(); drawReq(); renderGallery();
 loadConfig();
 loadMenuFromCloud();
 resumeTracking();
+applyTableQR();
 </script>
 </body>
 </html>
