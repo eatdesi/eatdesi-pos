@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v141</title>
+<title>eatDeSi POS v142</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v141';",
+    "var CACHE='eatdesi-v142';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -7332,7 +7332,7 @@ window.callAI = async function(prompt, maxTokens) {
 
 // callAIVision: wie callAI, aber MIT Bild (Foto-Scan, z.B. Lieferando-Tablet).
 // b64jpeg = reiner Base64-String (ohne "data:image/jpeg;base64," Prefix).
-window.callAIVision = async function(prompt, b64jpeg, maxTokens) {
+window.callAIVision = async function(prompt, b64jpeg, maxTokens, mimeType) {
   var cfg = {};
   try { cfg = JSON.parse(localStorage.getItem('eatdesi_printer') || '{}') || {}; } catch(e) {}
   var key = cfg.geminiKey || '';
@@ -7345,7 +7345,7 @@ window.callAIVision = async function(prompt, b64jpeg, maxTokens) {
     body: JSON.stringify({
       contents: [{ parts: [
         { text: prompt },
-        { inline_data: { mime_type: 'image/jpeg', data: b64jpeg } }
+        { inline_data: { mime_type: mimeType || 'image/jpeg', data: b64jpeg } }
       ] }],
       generationConfig: { maxOutputTokens: maxTokens || 800, temperature: 0.1 }
     })
@@ -19086,7 +19086,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v141"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v142"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21517,10 +21517,7 @@ function ChannelsView({menuData, completedOrders}){
     setQuick('');
     setMsg(r.unknown.length?('\u26A0\uFE0F Unbekannte Nr: '+r.unknown.join(', ')+(r.lines.length?(' \u2013 '+r.lines.length+' Artikel hinzugef\u00fcgt'):'')):('\u2705 '+r.lines.length+' Artikel hinzugef\u00fcgt'));
   }
-  function scanPhoto(e){
-    var file=e.target.files&&e.target.files[0];
-    e.target.value='';
-    if(!file) return;
+  function processScanB64(b64, mime){
     setScanning(true); setMsg('\uD83D\uDCF7 Foto wird von der AI gelesen\u2026');
     // Kompakte Nr-Liste f\u00fcrs Prompt (Nr|Name)
     var menuList=[];
@@ -21532,13 +21529,11 @@ function ChannelsView({menuData, completedOrders}){
       +'{"items":[{"nr":"31","name":"Butter Curry","qty":2}],"partnerNr":"","kunde":"","typ":"abholung","adresse":"","gesamt":0} '
       +'typ ist "lieferung" nur wenn eine Lieferadresse sichtbar ist, sonst "abholung". gesamt = Gesamtbetrag falls sichtbar, sonst 0. '
       +'Wenn ein Artikel nicht auf der Speisekarte steht, trotzdem mit qty und name auff\u00fchren aber nr leer lassen.';
-    fileToJpegBase64(file,1024).then(function(b64){
-      return window.callAIVision(prompt,b64,900);
-    }).then(function(text){
+    window.callAIVision(prompt,b64,900,mime||'image/jpeg').then(function(text){
       var clean=String(text).replace(/```json|```/g,'').trim();
       var j=JSON.parse(clean);
       var r=matchAILines(j.items,menuData);
-      if(r.lines.length) setLines(lines.concat(r.lines));
+      if(r.lines.length) setLines(function(prev){return prev.concat(r.lines);});
       if(j.partnerNr) setPnr(String(j.partnerNr));
       if(j.kunde) setKname(String(j.kunde));
       if(j.typ==='lieferung'){ setTyp('lieferung'); if(j.adresse) setAddr(String(j.adresse)); }
@@ -21551,6 +21546,35 @@ function ChannelsView({menuData, completedOrders}){
       setMsg('\u26A0\uFE0F Foto-Scan fehlgeschlagen: '+((err&&err.message)||err)+' \u2013 bitte Schnelleingabe oder Auswahl nutzen.');
       setScanning(false);
     });
+  }
+  // Foto holen: 1) nativ via Capacitor Camera-Plugin (APK), 2) Fallback file-input (Browser)
+  function pickScanPhoto(){
+    var c=window.Capacitor;
+    var Cam=c&&c.Plugins&&c.Plugins.Camera;
+    if(c&&c.isNativePlatform&&c.isNativePlatform()&&Cam&&Cam.getPhoto){
+      setMsg('\uD83D\uDCF7 Kamera/Galerie \u00f6ffnet\u2026');
+      Cam.getPhoto({quality:80,width:1024,resultType:'base64',source:'PROMPT',
+        promptLabelHeader:'Bestellung fotografieren',promptLabelPhoto:'\uD83D\uDDBC\uFE0F Aus Galerie',promptLabelPicture:'\uD83D\uDCF7 Kamera'})
+      .then(function(ph){
+        if(ph&&ph.base64String){ processScanB64(ph.base64String,'image/'+(ph.format||'jpeg')); }
+        else setMsg('');
+      })
+      .catch(function(err){
+        var m=String((err&&err.message)||err).toLowerCase();
+        if(m.indexOf('cancel')>=0){ setMsg(''); return; }
+        // Plugin fehlt/Fehler -> Datei-Picker Fallback (ohne capture, \u00f6ffnet Galerie)
+        var el=document.getElementById('chScanFile'); if(el) el.click();
+      });
+      return;
+    }
+    var el=document.getElementById('chScanFile'); if(el) el.click();
+  }
+  function scanPhoto(e){
+    var file=e.target.files&&e.target.files[0];
+    e.target.value='';
+    if(!file) return;
+    fileToJpegBase64(file,1024).then(function(b64){ processScanB64(b64,'image/jpeg'); })
+      .catch(function(err){ setMsg('\u26A0\uFE0F Foto konnte nicht gelesen werden: '+((err&&err.message)||err)); });
   }
   var cats=Object.keys(menuData||{});
   var curItems=(menuData&&menuData[cat])||[];
@@ -21622,8 +21646,8 @@ function ChannelsView({menuData, completedOrders}){
       R.createElement('div',{style:{display:'flex',gap:6}},
         R.createElement('input',{value:quick,onChange:function(e){setQuick(e.target.value);},onKeyDown:function(e){if(e.key==='Enter')addQuick();},style:Object.assign({},iS,{flex:1,width:'auto'}),placeholder:'2x31, 81, 3x211'}),
         R.createElement('button',{onClick:addQuick,style:{flex:'0 0 auto',padding:'8px 14px',borderRadius:8,border:'none',background:'#e65100',color:'#fff',fontWeight:800,cursor:'pointer',fontFamily:'inherit',marginBottom:8}},'\u26A1')),
-      R.createElement('input',{type:'file',accept:'image/*',capture:'environment',id:'chScanFile',style:{display:'none'},onChange:scanPhoto}),
-      R.createElement('button',{onClick:function(){var el=document.getElementById('chScanFile');if(el)el.click();},disabled:scanning,
+      R.createElement('input',{type:'file',accept:'image/*',id:'chScanFile',style:{display:'none'},onChange:scanPhoto}),
+      R.createElement('button',{onClick:pickScanPhoto,disabled:scanning,
         style:{width:'100%',padding:10,borderRadius:10,border:'2px dashed #7b1fa2',background:scanning?'#eee':'#f7f0fb',color:'#7b1fa2',fontWeight:800,fontSize:13,cursor:'pointer',fontFamily:'inherit',marginBottom:10}},
         scanning?'\uD83D\uDCF7 AI liest das Foto\u2026':'\uD83D\uDCF7 Foto vom Partner-Tablet scannen (AI f\u00fcllt automatisch aus)'),
       lbl('Artikel hinzuf\u00fcgen'),
