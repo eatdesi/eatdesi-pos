@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v133</title>
+<title>eatDeSi POS v141</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v133';",
+    "var CACHE='eatdesi-v141';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -7305,7 +7305,7 @@ window.callAI = async function(prompt, maxTokens) {
   if (!key) throw new Error('Kein Gemini API-Key. Bitte in Drucker-Einstellungen eingeben.');
 
   if (provider === 'gemini') {
-    var model = cfg.geminiModel || 'gemini-2.5-flash';
+    var model = cfg.geminiModel || 'gemini-2.5-flash-lite';
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
     var resp = await fetch(url, {
       method: 'POST',
@@ -7328,6 +7328,38 @@ window.callAI = async function(prompt, maxTokens) {
   }
 
   throw new Error('Unbekannter AI-Provider: ' + provider);
+};
+
+// callAIVision: wie callAI, aber MIT Bild (Foto-Scan, z.B. Lieferando-Tablet).
+// b64jpeg = reiner Base64-String (ohne "data:image/jpeg;base64," Prefix).
+window.callAIVision = async function(prompt, b64jpeg, maxTokens) {
+  var cfg = {};
+  try { cfg = JSON.parse(localStorage.getItem('eatdesi_printer') || '{}') || {}; } catch(e) {}
+  var key = cfg.geminiKey || '';
+  if (!key) throw new Error('Kein Gemini API-Key. Bitte in Drucker-Einstellungen eingeben.');
+  var model = cfg.geminiModel || 'gemini-2.5-flash-lite';
+  var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
+  var resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [
+        { text: prompt },
+        { inline_data: { mime_type: 'image/jpeg', data: b64jpeg } }
+      ] }],
+      generationConfig: { maxOutputTokens: maxTokens || 800, temperature: 0.1 }
+    })
+  });
+  if (!resp.ok) {
+    var errTxt = '';
+    try { var ej = await resp.json(); errTxt = (ej.error && ej.error.message) || ''; } catch(e){}
+    throw new Error('Gemini Fehler (' + resp.status + '): ' + errTxt);
+  }
+  var data = await resp.json();
+  var text = '';
+  try { text = data.candidates[0].content.parts[0].text; } catch(e) { text = ''; }
+  if (!text) throw new Error('Gemini: leere Antwort');
+  return text;
 };
 
 
@@ -10056,7 +10088,7 @@ function MonatsreportView({ completedOrders }) {
 
 
 // --- AI KELLNERIN -------------------------------------------------------------
-function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders, setView, setActiveTable, menuData }) {
+function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders, setView, setActiveTable, menuData, customers, setCustomers, loyaltySettings }) {
   const LANGS = [
     { code:"de", name:"Deutsch", flag:"🇩🇪", greeting:"Hallo! Ich bin Priya, Ihre KI-Kellnerin. Wie kann ich Ihnen helfen?" },
     { code:"en", name:"English", flag:"🇬🇧", greeting:"Hello! I'm Priya, your AI waitress. How can I help you?" },
@@ -10075,7 +10107,7 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
   const allTables = Array.from({length:30},(_,i)=>i+1);
   const floorTables = (floors||[]).flatMap(f=>(f.tables||[]).filter(t=>!(f.hidden||[]).includes(t)));
 
-  const [lang, setLang] = React.useState("de");
+  const [lang, setLang] = React.useState(function(){ try{ var k=localStorage.getItem('eatdesi_kiosk_lang'); if(k){ localStorage.removeItem('eatdesi_kiosk_lang'); return k; } }catch(e){} return "de"; });
   const [selTable, setSelTable] = React.useState(1);
   const [msgs, setMsgs] = React.useState([]);
   const [input, setInput] = React.useState("");
@@ -10088,46 +10120,111 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
   const [handsFree, setHandsFree] = React.useState(false);
   const handsFreeRef = React.useRef(false);
   React.useEffect(()=>{ handsFreeRef.current = handsFree; }, [handsFree]);
+  const [aiCustomer, setAiCustomer] = React.useState(null); // erkannter/registrierter Stammkunde
   const msgsEndRef = React.useRef(null);
   const recogRef = React.useRef(null);
+
+  // Kunde per Telefon/Kundennummer finden
+  const findCustomer = (q) => {
+    if (!q) return null;
+    var qq = String(q).replace(/\s/g,"").toLowerCase();
+    return (customers||[]).find(function(c){
+      return (String(c.phone||"").replace(/\s/g,"").toLowerCase()===qq) || (String(c.kundenNr||"").toLowerCase()===qq);
+    }) || null;
+  };
+  // Letzte Bestellungen eines Kunden (aus pointsHistory/lastItems, falls vorhanden)
+  const customerHistoryText = (c) => {
+    if (!c) return "";
+    var parts = [];
+    if (c.name) parts.push("Name: "+c.name);
+    if (c.points!=null) parts.push("Treuepunkte: "+c.points);
+    if (c.visits!=null) parts.push("Besuche: "+c.visits);
+    if (Array.isArray(c.lastItems) && c.lastItems.length) parts.push("Zuletzt bestellt: "+c.lastItems.slice(0,6).join(", "));
+    else if (Array.isArray(c.pointsHistory) && c.pointsHistory.length) parts.push("Letzte Aktivität: "+c.pointsHistory.slice(-3).map(function(h){return h.note||"";}).filter(Boolean).join("; "));
+    return parts.join(" · ");
+  };
+  // Neuen Kunden direkt aus dem Gespräch anlegen/aktualisieren
+  const registerCustomer = (name, phone) => {
+    if (!phone) return null;
+    var existing = findCustomer(phone);
+    if (existing) { setAiCustomer(existing); return existing; }
+    var kundenNr = phone;
+    var neu = { name: name||"Gast", phone: phone, kundenNr: kundenNr, points: 0, visits: 0, since: new Date().toISOString(), pointsHistory: [] };
+    if (typeof setCustomers === "function") {
+      setCustomers(function(prev){ return [...(prev||[]), neu]; });
+    }
+    setAiCustomer(neu);
+    return neu;
+  };
 
   const curLang = LANGS.find(l=>l.code===lang) || LANGS[0];
 
   // Build menu context string for AI - use live menuData or fallback to MENU
   const activeMenu = menuData || MENU;
+  const _optStr = (i) => {
+    var out = "";
+    if (Array.isArray(i.options)) {
+      i.options.forEach(function(g){
+        if (!g) return;
+        var ch = g.choices || (g.name!=null?[g]:[]);
+        if (g.priced || g.required) {
+          // Preis-bestimmende Wahl (z.B. Protein bei Curry) — WICHTIG für Preis
+          out += `\n    [${g.label||"Wahl"} — Preis hängt davon ab: ` + (ch||[]).map(function(c){return c.name+" "+((c.price||0).toFixed(2))+"€";}).join(", ") + "]";
+        } else if (ch && ch.length) {
+          out += `\n    [+ optional ${g.label||"Extra"}: ` + ch.slice(0,8).map(function(c){return c.name+(c.price?" +"+c.price.toFixed(2)+"€":"");}).join(", ") + "]";
+        }
+      });
+    }
+    return out;
+  };
   const menuContext = Object.entries(activeMenu).map(([cat, items]) =>
-    `${cat}:\n` + (items||[]).map(i => `  ${i.nr||""}. ${i.name} — ${(i.price||i.finalPrice||0).toFixed(2)}€${i.vegan?" (vegan)":i.veg?" (vegetarisch)":""}${i.desc?" — "+i.desc:""}`).join("\n")
+    `${cat}:\n` + (items||[]).map(i => `  ${i.nr||""}. ${i.name} — ${(i.price||i.finalPrice||0)>0?((i.price||i.finalPrice||0).toFixed(2)+"€"):"Preis je nach Wahl"}${i.vegan?" (vegan)":i.veg?" (vegetarisch)":""}${i.desc?" — "+i.desc:""}` + _optStr(i)).join("\n")
   ).join("\n\n");
 
   const _oeff = printerSettings?.oeffnungszeiten || printerSettings?.openingHours || "";
   const _adr = [printerSettings?.firmaStrasse, printerSettings?.firmaPlzOrt].filter(Boolean).join(", ");
   const _tel = printerSettings?.firmaPhone || "";
-  const systemPrompt = `Du bist Priya, die herzliche, aufmerksame Kellnerin im Restaurant eatDeSi (${_adr||"Bad Wildungen"}) — Fusion Kitchen & Grill, "Indien trifft Trends".
+  const _topGrill = (activeMenu["Tandoori & Grill"]||[]).slice(0,6).map(function(i){return i.name;}).join(", ");
+  const _topCocktails = (activeMenu["Cocktails"]||[]).slice(0,6).map(function(i){return i.name;}).join(", ");
+  const _vorspeisen = (activeMenu["Vorspeisen"]||activeMenu["Potato Bombs"]||[]).slice(0,6).map(function(i){return i.name;}).join(", ");
+  const _custInfo = aiCustomer ? `\n\nAKTUELLER STAMMKUNDE (bereits erkannt): ${customerHistoryText(aiCustomer)}. Sprich ihn mit Namen an, empfiehl auf Basis der letzten Bestellung etwas Passendes/Neues.` : "";
+
+  const systemPrompt = `Du bist Priya, die herzliche, SCHLAUE und schnelle Kellnerin im Restaurant eatDeSi (${_adr||"Bad Wildungen"}) — Fusion Kitchen & Grill, "Indien trifft Trends". Du bist auch eine gute Verkäuferin.
 
 DEINE PERSÖNLICHKEIT:
-- Warmherzig, natürlich und gastfreundlich — wie eine echte Lieblings-Kellnerin.
-- Führe ein lockeres Gespräch, stelle gerne mal eine Rückfrage, gehe auf Wünsche ein.
-- Antworte KURZ und natürlich (2-4 Sätze), nicht wie ein Lexikon. Kein Fließtext-Roman.
+- Warmherzig, natürlich, schnell. Antworte SEHR KURZ (1-3 Sätze), da alles vorgelesen wird. Kein Roman.
 - Antworte NUR auf ${curLang.name}.
 
-WAS DU WEISST (nutze diese Infos, verweise NICHT ans Restaurant):
-${_oeff ? "- Öffnungszeiten: "+_oeff : "- Öffnungszeiten: Wenn ein Gast fragt und du sie nicht kennst, sage freundlich, dass er sie am besten kurz telefonisch bestätigt — aber biete an, schon mal die Bestellung vorzubereiten."}
-${_adr ? "- Adresse: "+_adr : ""}
-${_tel ? "- Telefon: "+_tel : ""}
-- Du kennst die ganze Speisekarte (siehe unten) und empfiehlst gerne.
+VERKAUFEN (WICHTIG — du bist schlau und steigerst den Umsatz):
+- Empfiehl aktiv unsere BESTEN/HOCHWERTIGEN Gerichte zuerst, vor allem vom Grill: ${_topGrill||"Tandoori Mix Grill"}.
+- Schlage IMMER eine passende Vorspeise dazu vor (z.B. ${_vorspeisen||"Allu Tikki, Potato Bombs"}).
+- Schlage einen passenden Cocktail/Getränk vor (z.B. ${_topCocktails||"Mojito, Aperol Spritz, Mango Lassi"}).
+- Mach es charmant, nicht aufdringlich: "Dazu passt hervorragend ...". Ein Vorschlag nach der Bestellung reicht.
 
-DEINE AUFGABE:
-- Gäste beraten, Appetit machen, Bestellungen aufnehmen.
-- WICHTIG — SPRACHERKENNUNG: Der Gast spricht per Mikrofon, die Erkennung macht oft Fehler bei Gerichtnamen (besonders englische/indische Wörter). Beispiele: "schicken"/"Schigger" = meist "Chicken"; "Butter schicken" = "Butter Chicken/Butter Curry"; "Patrick" = evtl. "Palak"; "Tika"/"Tikka" ok. Rate clever anhand der Speisekarte, was gemeint ist, und bestätige kurz ("Meinen Sie ...?"). Erfinde KEINE Gerichte, die nicht auf der Karte stehen.
-- Wenn ein Gast bestellt, bestätige freundlich UND hänge am ENDE einen JSON-Block an (der Gast sieht ihn nicht):
+STAMMKUNDE & KUNDENNUMMER (SEHR WICHTIG):
+- Frage FREUNDLICH früh im Gespräch: "Haben Sie eine Kundennummer bei uns?" (Handynummer = Kundennummer).
+- Wenn der Gast eine Nummer nennt, hänge am Ende diesen versteckten Block an: {"lookup":"NUMMER"}
+- Wenn der Gast NEU ist (keine Nummer / sagt "nein"): empfiehl freundlich die kostenlose Registrierung — "So sammeln Sie Treuepunkte und ich merke mir Ihre Lieblingsgerichte."
+- Wenn der Gast sich registrieren möchte: frage nach Name + Handynummer, dann hänge diesen versteckten Block an: {"register":{"name":"NAME","phone":"NUMMER"}}
+- ${aiCustomer ? "Der Stammkunde ist schon erkannt (siehe unten) — frage NICHT nochmal nach der Nummer." : "Noch kein Kunde erkannt."}
+
+SPRACHERKENNUNG: Mikrofon macht Fehler bei Gericht-Namen (englisch/indisch). "schicken"=meist "Chicken"; "Butter schicken"="Butter Chicken/Butter Curry"; "Patrick"=evtl. "Palak". Rate clever anhand der Karte, bestätige kurz ("Meinen Sie ...?"). Erfinde KEINE Gerichte außerhalb der Karte.
+
+BESTELLUNG AUFNEHMEN:
+- Bei Bestellung hänge am ENDE diesen versteckten Block an (Gast sieht ihn nicht):
 {"order":[{"name":"Artikelname","qty":1,"price":8.90}]}
-- Nimm auch mehrere Artikel in einer Bestellung auf. Frage nach, ob es sonst noch etwas sein darf (Getränk, Vorspeise, Dessert).
-- Halte deine Antworten SEHR kurz (1-3 Sätze), da sie auch vorgelesen werden.
+- Mehrere Artikel möglich. Bei Gerichten wo der Preis von einer Wahl abhängt (z.B. Curry-Protein), frage kurz nach der Wahl.
+
+BESTÄTIGUNG (SEHR WICHTIG — immer so machen):
+- Wenn der Gast sagt, dass die Bestellung komplett ist (z.B. "das ist alles", "fertig", "mehr nicht"), dann LIES die GANZE Bestellung nochmal laut vor und frage: "Ich fasse zusammen: ... — passt das so für Sie?"
+- Wenn der Gast BESTÄTIGT (ja/passt/ok/richtig): hänge diesen versteckten Block an: {"confirm":true}
+- Wenn der Gast etwas KORRIGIEREN will: erst die Korrektur erledigen (Artikel ändern/entfernen — nutze wieder {"order":...} oder sag welcher Artikel raus soll mit {"remove":"Artikelname"}), dann NOCHMAL vorlesen und erneut nach Bestätigung fragen. NICHT bestätigen bevor der Gast wirklich zufrieden ist.
+- Sende {"confirm":true} NUR nach echter Zustimmung.
 
 Aktuelle Speisekarte:
 ${menuContext}
 
-Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(", ") : "noch nichts"}`;
+Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(", ") : "noch nichts"}${_custInfo}`;
 
   const startSession = () => {
     const greeting = curLang.greeting;
@@ -10287,6 +10384,62 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
     });
   };
 
+  // Verarbeitet versteckte AI-Blöcke (order / lookup / register) und gibt sauberen Text zurück
+  const processAiBlocks = (raw) => {
+    var text = raw;
+    // ORDER
+    var om = raw.match(/\{"order":\s*\[[\s\S]*?\]\}/);
+    if (om) {
+      try {
+        var parsed = JSON.parse(om[0]);
+        if (parsed.order && parsed.order.length) {
+          setOrder(function(prev){
+            var updated = [...prev];
+            parsed.order.forEach(function(ni){
+              var ex = updated.find(function(x){return x.name===ni.name;});
+              if (ex) ex.qty += ni.qty; else updated.push({...ni});
+            });
+            return updated;
+          });
+        }
+      } catch(e) {}
+    }
+    // LOOKUP (Kundennummer)
+    var lm = raw.match(/\{"lookup":\s*"([^"]+)"\}/);
+    if (lm) {
+      var found = findCustomer(lm[1]);
+      if (found) setAiCustomer(found);
+    }
+    // REGISTER (neuer Kunde)
+    var rm = raw.match(/\{"register":\s*\{[\s\S]*?\}\s*\}/);
+    if (rm) {
+      try {
+        var rp = JSON.parse(rm[0]);
+        if (rp.register && rp.register.phone) registerCustomer(rp.register.name, rp.register.phone);
+      } catch(e) {}
+    }
+    // REMOVE (Artikel aus Bestellung entfernen)
+    var rem = raw.match(/\{"remove":\s*"([^"]+)"\}/);
+    if (rem) {
+      var rn = rem[1];
+      setOrder(function(prev){ return (prev||[]).filter(function(o){ return o.name.toLowerCase() !== rn.toLowerCase(); }); });
+    }
+    // CONFIRM (Gast hat bestätigt → an Küche/Bar senden + Bon drucken)
+    var cm = raw.match(/\{"confirm":\s*true\}/);
+    if (cm) {
+      setTimeout(function(){ sendToTable(); }, 300);
+    }
+    // Alle versteckten Blöcke aus dem Text entfernen
+    text = text
+      .replace(/\{"order":\s*\[[\s\S]*?\]\}/g,"")
+      .replace(/\{"lookup":\s*"[^"]*"\}/g,"")
+      .replace(/\{"register":\s*\{[\s\S]*?\}\s*\}/g,"")
+      .replace(/\{"remove":\s*"[^"]*"\}/g,"")
+      .replace(/\{"confirm":\s*true\}/g,"")
+      .trim();
+    return text;
+  };
+
   const sendMsg = async (text) => {
     if (!text.trim() || loading) return;
     if (!geminiKey) { setMicError("⚠️ Bitte zuerst Gemini API Key in Drucker Einstellungen eingeben."); return; }
@@ -10300,7 +10453,8 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
         role: m.role === "assistant" ? "model" : "user",
         parts: [{text: m.text}]
       }));
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
+      const aiModel = cfg?.geminiModel || 'gemini-2.5-flash-lite';
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${geminiKey}`, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
@@ -10310,27 +10464,33 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
         })
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
-      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "...";
-      // Extract order JSON if present
-      const jsonMatch = raw.match(/\{"order":\s*\[[\s\S]*?\]\}/);
-      if (jsonMatch) {
-        try {
-          const parsed = JSON.parse(jsonMatch[0]);
-          if (parsed.order?.length) {
-            setOrder(prev => {
-              const updated = [...prev];
-              parsed.order.forEach(newItem => {
-                const ex = updated.find(x=>x.name===newItem.name);
-                if (ex) ex.qty += newItem.qty;
-                else updated.push({...newItem});
-              });
-              return updated;
-            });
-          }
-        } catch(e) {}
+      if (data.error) {
+        // Rate-Limit (429): freundlich abfangen + kurz warten + einmal automatisch wiederholen
+        var em = data.error.message || "";
+        if (data.error.code === 429 || /quota|rate|exceeded/i.test(em)) {
+          var waitS = 8;
+          var mm = em.match(/retry in ([\d.]+)s/i);
+          if (mm) waitS = Math.min(Math.ceil(parseFloat(mm[1])) + 1, 30);
+          setMsgs(p=>[...p, {role:"assistant", text:`⏳ Einen Moment bitte, ich bin gleich für Sie da... (${waitS}s)`}]);
+          await new Promise(r=>setTimeout(r, waitS*1000));
+          const res2 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${geminiKey}`, {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({ system_instruction:{parts:[{text: systemPrompt}]}, contents: history, generationConfig:{ maxOutputTokens:600, temperature:0.7 } })
+          });
+          const data2 = await res2.json();
+          if (data2.error) throw new Error("Zu viele Anfragen — bitte kurz warten.");
+          var raw2 = data2.candidates?.[0]?.content?.parts?.[0]?.text || "...";
+          var ct2 = processAiBlocks(raw2);
+          setMsgs(p=>{ var arr=[...p]; if(arr.length && arr[arr.length-1].text && arr[arr.length-1].text.indexOf("Einen Moment")>-1) arr.pop(); return [...arr, {role:"assistant", text: ct2}]; });
+          speak(ct2);
+          setLoading(false);
+          setTimeout(()=>msgsEndRef.current?.scrollIntoView({behavior:"smooth"}),100);
+          return;
+        }
+        throw new Error(em);
       }
-      const cleanText = raw.replace(/\{"order":\s*\[[\s\S]*?\]\}/g,"").trim();
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "...";
+      const cleanText = processAiBlocks(raw);
       setMsgs(p=>[...p, {role:"assistant", text: cleanText}]);
       speak(cleanText);
     } catch(e) {
@@ -10340,14 +10500,53 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
     setTimeout(()=>msgsEndRef.current?.scrollIntoView({behavior:"smooth"}),100);
   };
 
-  const sendToTable = () => {
+  // Bon-HTML für Küche/Bar aus Priya-Bestellung
+  const _priyaBonHtml = (title, lines, tischLabel) => {
+    var W = (printerSettings?.width || 384);
+    return `<html><head><meta name="viewport" content="width=device-width"><style>
+    body{font-family:monospace;font-size:18px;font-weight:700;width:${W}px;margin:0 auto;padding:8px;line-height:1.4}
+    .row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:800}
+    .line{border-top:2px solid #000;margin:6px 0}.center{text-align:center}
+    </style></head><body>
+    <div class="center bold" style="font-size:22px;margin:4px 0">${title}</div>
+    <div class="center bold" style="font-size:24px;margin:4px 0">Tisch ${tischLabel}</div>
+    <div class="line"></div>${lines}
+    <div>&nbsp;</div><div>&nbsp;</div><div>&nbsp;</div>
+    </body></html>`;
+  };
+  const _printPriyaBons = async (items) => {
+    try {
+      var addr = printerSettings?.btAddress;
+      if (!addr || !BTPrint.isNative()) return; // kein Drucker → still überspringen
+      var speisen = items.filter(function(i){ return !isDrink(i); });
+      var getraenke = items.filter(function(i){ return isDrink(i); });
+      var mkLines = function(list){ return list.map(function(i){
+        return `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.name}</div><div>&nbsp;</div>`;
+      }).join(""); };
+      await BTPrint.connect(addr);
+      if (speisen.length) { await BTPrint.printHtml(addr, _priyaBonHtml("🍳 KÜCHE — SPEISEN", mkLines(speisen), selTable), 0x01); }
+      if (getraenke.length) { await BTPrint.printHtml(addr, _priyaBonHtml("🍺 BAR — GETRÄNKE", mkLines(getraenke), selTable), 0x01); }
+    } catch(e) { /* Druck-Fehler nicht blockierend */ }
+  };
+
+  const sendToTable = (opts) => {
     if (order.length === 0) return;
     const posItems = order.map((o,i) => {
       const menuItem = Object.values(menuData||MENU).flat().find(m=>m.name===o.name) || {id:9000+i,nr:"AI",name:o.name,price:o.price||0};
       return {...menuItem, qty:o.qty, finalPrice:o.price||menuItem.price, _key:`ai_${menuItem.id}_${i}`, note:"AI Bestellung", kitchenNote:""};
     });
     setTableOrders(p=>({...p, [selTable]:{items:[...(p[selTable]?.items||[]),...posItems], time:new Date()}}));
-    setMsgs(p=>[...p,{role:"assistant",text:`✅ Bestellung für Tisch ${selTable} gesendet!`}]);
+    // Küche/Bar Bon automatisch drucken
+    _printPriyaBons(posItems);
+    // Kunde-lastItems merken (für nächsten Besuch)
+    if (aiCustomer && typeof setCustomers === "function") {
+      var names = order.map(function(o){ return o.qty+"x "+o.name; });
+      setCustomers(function(prev){ return (prev||[]).map(function(c){
+        return (c.kundenNr===aiCustomer.kundenNr||c.phone===aiCustomer.phone) ? {...c, lastItems:names} : c;
+      }); });
+    }
+    setMsgs(p=>[...p,{role:"assistant",text:`✅ Bestellung an Küche/Bar gesendet — Tisch ${selTable}! Vielen Dank. 😊`}]);
+    speak(`Perfekt, Ihre Bestellung geht raus. Vielen Dank!`);
     setOrder([]);
   };
 
@@ -10411,6 +10610,12 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
       /*#__PURE__*/React.createElement("div", { ref:msgsEndRef })
     ),
     // Order summary
+    aiCustomer && /*#__PURE__*/React.createElement("div", { style:{ background:"#fff8e1", padding:"6px 14px", borderTop:"2px solid #ffe082", flexShrink:0, display:"flex", alignItems:"center", gap:8 } },
+      /*#__PURE__*/React.createElement("span", { style:{ fontSize:16 } }, "⭐"),
+      /*#__PURE__*/React.createElement("span", { style:{ fontSize:13, fontWeight:700, color:"#f57f17" } }, aiCustomer.name || "Stammkunde"),
+      /*#__PURE__*/React.createElement("span", { style:{ fontSize:12, color:"#999" } }, (aiCustomer.points!=null?aiCustomer.points+" Punkte":"") + (aiCustomer.visits?" · "+aiCustomer.visits+" Besuche":"")),
+      /*#__PURE__*/React.createElement("button", { onClick:()=>setAiCustomer(null), style:{ marginLeft:"auto", background:"none", border:"none", color:"#999", cursor:"pointer", fontSize:16 } }, "✕")
+    ),
     order.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", padding:"8px 14px", borderTop:"2px solid #a5d6a7", flexShrink:0 } },
       /*#__PURE__*/React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 } },
         /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:C.green } }, "🛒 Bestellung (", order.reduce((s,o)=>s+o.qty,0), " Artikel)"),
@@ -18881,7 +19086,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v133"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v141"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -19907,6 +20112,10 @@ function App() {
   }, {
     id: "kiosk", l: "Kiosk", i: "🖥️"
   }, {
+    id: "qr_karten", l: "QR-Tischkarten", i: "🔳"
+  }, {
+    id: "channels", l: "Lieferando/UberEats", i: "🛵"
+  }, {
     id: "personalplanung", l: "Personal", i: "👥"
   }, {
     id: "saas_dashboard", l: "SaaS", i: "🏢"
@@ -20596,7 +20805,10 @@ function App() {
     setTableOrders: setTableOrders,
     setView: setView,
     setActiveTable: setActiveTable,
-    menuData: menuData
+    menuData: menuData,
+    customers: customers,
+    setCustomers: setCustomers,
+    loyaltySettings: loyaltySettings
   }), view === "online_orders" && /*#__PURE__*/React.createElement(OnlineOrdersLive, {
     pendingOrders: pendingOnlineOrders,
     onAccept: (order, prepMin) => {
@@ -20688,7 +20900,9 @@ function App() {
   ), view === "kds_pro" && React.createElement(KdsProView, {tableOrders:tableOrders,takeaway:takeaway,setTableOrders:setTableOrders,completedOrders:completedOrders,setCompletedOrders:setCompletedOrders,setTakeaway:setTakeaway}
   ), view === "rezeptkosten" && React.createElement(RezeptkostenView, {menuData:menuData}
   ), view === "lieferfahrer" && React.createElement(LieferfahrerView, null
-  ), view === "kiosk" && React.createElement(KioskView, {menuData:menuData}
+  ), view === "kiosk" && React.createElement(KioskView, {menuData:menuData, setView:setView}
+  ), view === "qr_karten" && React.createElement(QRKartenView, null
+  ), view === "channels" && React.createElement(ChannelsView, {menuData:menuData, completedOrders:completedOrders}
   ), view === "personalplanung" && React.createElement(PersonalplanungView, null
   ), view === "saas_dashboard" && React.createElement(SaasDashboardView, null
   ),
@@ -21156,6 +21370,418 @@ function MenuImportExportView({ menuData, onUpdate }) {
         'Menue importieren',
         R.createElement('input',{type:'file',accept:'.json',onChange:importMenu,style:{display:'none'}})
       )
+    )
+  );
+}
+
+/* ============================================================
+   🛵 LIEFERKANÄLE: Lieferando & Uber Eats (v140)
+   - Zugangsdaten-Verwaltung: API-Daten später vom Partner eintragen.
+     Echte Live-API braucht Partner-Freigabe + kleinen Server (Backend);
+     die Struktur (Felder + Order-Builder) ist hier schon vorbereitet.
+   - Manuelle Bestellerfassung JETZT nutzbar -> exakt gleiche Pipeline
+     wie Website-Bestellungen: Supabase eatdesi_orders + note '[NEU]'
+     => 🔔 Popup, Annehmen, Küchen-Bon, KDS Pro, kanalgetrennte
+     Umsatzstatistik (orderChannel erkennt LIEFERANDO/UBEREATS).
+   ============================================================ */
+// ---- Schnelleingabe-Helfer (pure, testbar) ----
+// Artikelnummer -> Menü-Artikel Map (Nr wie auf den Bons, z.B. "31", "60A")
+function buildNrMap(menuData){
+  var m={};
+  Object.keys(menuData||{}).forEach(function(cat){
+    (menuData[cat]||[]).forEach(function(it){
+      if(it && it.nr!=null) m[String(it.nr).trim().toUpperCase()]=it;
+    });
+  });
+  return m;
+}
+// Parst "2x31, 81, 211x3" -> Zeilen über Artikel-Nr. Liefert {lines,unknown}.
+function parseQuickLines(text, menuData){
+  var map=buildNrMap(menuData);
+  var lines=[], unknown=[];
+  String(text||'').split(/[,;\n]+/).forEach(function(tok){
+    tok=tok.trim(); if(!tok) return;
+    var qty=1, nr=tok, m;
+    if((m=tok.match(/^(\d+)\s*[x×*]\s*(\S+)$/i))){ qty=parseInt(m[1],10); nr=m[2]; }
+    else if((m=tok.match(/^(\S+)\s*[x×*]\s*(\d+)$/i))){ nr=m[1]; qty=parseInt(m[2],10); }
+    nr=String(nr).trim().toUpperCase();
+    var it=map[nr];
+    // "2x31": falls rechts unbekannt aber links eine gültige Nr ist -> tauschen
+    if(!it && m && map[String(m[1]).trim().toUpperCase()]){ var t=map[String(m[1]).trim().toUpperCase()]; it=t; qty=parseInt(m[2],10)||1; }
+    if(!it){ unknown.push(tok); return; }
+    lines.push({name:it.name,nr:it.nr,qty:Math.max(1,qty||1),price:it.price,taxRate:it.taxRate||'food'});
+  });
+  return {lines:lines, unknown:unknown};
+}
+// AI-Foto-Ergebnis ({items:[{nr,qty}...]}) auf Menü mappen. Liefert {lines,unknown}.
+function matchAILines(aiItems, menuData){
+  var map=buildNrMap(menuData);
+  // Fallback: Name-Suche (klein, ohne Sonderzeichen) falls Nr fehlt/falsch
+  var byName={};
+  Object.keys(menuData||{}).forEach(function(cat){(menuData[cat]||[]).forEach(function(it){ if(it&&it.name) byName[String(it.name).toLowerCase().replace(/[^a-zäöüß0-9]/g,'')]=it; });});
+  var lines=[], unknown=[];
+  (aiItems||[]).forEach(function(a){
+    if(!a) return;
+    var qty=Math.max(1,parseInt(a.qty,10)||1);
+    var it=a.nr!=null?map[String(a.nr).trim().toUpperCase()]:null;
+    if(!it && a.name){ it=byName[String(a.name).toLowerCase().replace(/[^a-zäöüß0-9]/g,'')]; }
+    if(!it && a.name){ // normalisierte Teilstring-Suche als letzte Chance
+      var key=String(a.name).toLowerCase().replace(/[^a-zäöüß0-9]/g,'');
+      if(key.length>=4){
+        Object.keys(menuData||{}).some(function(cat){return (menuData[cat]||[]).some(function(x){
+          if(!x||!x.name) return false;
+          var nn=String(x.name).toLowerCase().replace(/[^a-zäöüß0-9]/g,'');
+          if(nn.indexOf(key)>=0||key.indexOf(nn)>=0){it=x;return true;}
+          return false;
+        });});
+      }
+    }
+    if(!it){ unknown.push((a.qty||1)+'× '+(a.name||a.nr||'?')); return; }
+    lines.push({name:it.name,nr:it.nr,qty:qty,price:it.price,taxRate:it.taxRate||'food'});
+  });
+  return {lines:lines, unknown:unknown};
+}
+// Foto verkleinern -> JPEG-Base64 (ohne Prefix), spart Tokens & Ladezeit
+function fileToJpegBase64(file, maxDim){
+  return new Promise(function(res, rej){
+    var fr=new FileReader();
+    fr.onerror=function(){rej(new Error('Foto konnte nicht gelesen werden'));};
+    fr.onload=function(){
+      var img=new Image();
+      img.onerror=function(){rej(new Error('Bild ung\u00fcltig'));};
+      img.onload=function(){
+        var s=Math.min(1,(maxDim||1024)/Math.max(img.width,img.height));
+        var c=document.createElement('canvas');
+        c.width=Math.round(img.width*s); c.height=Math.round(img.height*s);
+        c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+        res(c.toDataURL('image/jpeg',0.82).split(',')[1]);
+      };
+      img.src=fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+// Pure Builder: baut den Supabase-Body für eine Kanal-Bestellung.
+// Wird auch die spätere echte API-Anbindung wiederverwenden.
+function buildChannelOrderBody(p){
+  var lines=p.lines||[];
+  if(!lines.length) throw new Error('Mindestens 1 Artikel hinzufügen.');
+  var kanal=(p.kanal==='UBEREATS')?'UBEREATS':'LIEFERANDO';
+  var isDeliv=p.typ==='lieferung';
+  var pre=kanal==='LIEFERANDO'?'L':'U';
+  var bonNr=pre+Date.now().toString().slice(-8);
+  var icon=kanal==='LIEFERANDO'?'\uD83D\uDEF5 LIEFERANDO':'\uD83D\uDE97 UBER EATS';
+  var items=lines.map(function(l){return {name:l.name,nr:l.nr,qty:l.qty,price:l.price,taxRate:l.taxRate||'food',options:[],note:l.note||''};});
+  var fee=parseFloat(p.fee)||0;
+  if(fee>0) items.push({name:'Liefergeb\u00fchr/Aufschlag',nr:'FEE',qty:1,price:fee,taxRate:'drinks',options:[],note:''});
+  var total=items.reduce(function(s,it){return s+it.price*it.qty;},0);
+  var noteArr=['[NEU]',icon,(isDeliv?'LIEFERUNG (eigener Fahrer)':'ABHOLUNG (Partner-Fahrer/Kunde)'),'\u23F0 Schnellstm\u00f6glich'];
+  if(p.pnr) noteArr.push('Partner-Nr: '+p.pnr);
+  if(isDeliv&&p.addr) noteArr.push(p.addr);
+  if(p.note) noteArr.push(p.note);
+  return {
+    location_id: LOCATION_ID,
+    bon_nr: bonNr,
+    table_id: (kanal==='LIEFERANDO'?'Lieferando':'UberEats')+(isDeliv?' Lieferung':' Abholung'),
+    items: JSON.stringify(items),
+    total: Math.round(total*100)/100,
+    payment: p.pay||'online',
+    customer_name: p.kname||null,
+    customer_phone: p.kphone||null,
+    customer_street: isDeliv?(p.addr||null):null,
+    note: noteArr.filter(Boolean).join(' \u00b7 '),
+    source: kanal,
+    created_at: new Date().toISOString(),
+    storniert: false
+  };
+}
+
+function ChannelsView({menuData, completedOrders}){
+  var R=React;
+  var [ch,setCh]=R.useState(function(){return LS.get('eatdesi_channels',{
+    lieferando:{active:false,partnerId:'',token:''},
+    ubereats:{active:false,clientId:'',clientSecret:'',storeId:''}
+  });});
+  var [kanal,setKanal]=R.useState('LIEFERANDO');
+  var [pnr,setPnr]=R.useState(''); var [kname,setKname]=R.useState(''); var [kphone,setKphone]=R.useState('');
+  var [typ,setTyp]=R.useState('abholung'); var [addr,setAddr]=R.useState('');
+  var [cat,setCat]=R.useState(''); var [itemId,setItemId]=R.useState(''); var [qty,setQty]=R.useState(1);
+  var [lines,setLines]=R.useState([]); var [fee,setFee]=R.useState(''); var [pay,setPay]=R.useState('online');
+  var [msg,setMsg]=R.useState(''); var [busy,setBusy]=R.useState(false);
+  var [quick,setQuick]=R.useState(''); var [scanning,setScanning]=R.useState(false);
+  function addQuick(){
+    var r=parseQuickLines(quick,menuData);
+    if(!r.lines.length&&!r.unknown.length){setMsg('Schnelleingabe leer. Beispiel: 2x31, 81, 211');return;}
+    if(r.lines.length) setLines(lines.concat(r.lines));
+    setQuick('');
+    setMsg(r.unknown.length?('\u26A0\uFE0F Unbekannte Nr: '+r.unknown.join(', ')+(r.lines.length?(' \u2013 '+r.lines.length+' Artikel hinzugef\u00fcgt'):'')):('\u2705 '+r.lines.length+' Artikel hinzugef\u00fcgt'));
+  }
+  function scanPhoto(e){
+    var file=e.target.files&&e.target.files[0];
+    e.target.value='';
+    if(!file) return;
+    setScanning(true); setMsg('\uD83D\uDCF7 Foto wird von der AI gelesen\u2026');
+    // Kompakte Nr-Liste f\u00fcrs Prompt (Nr|Name)
+    var menuList=[];
+    Object.keys(menuData||{}).forEach(function(cat){(menuData[cat]||[]).forEach(function(it){ if(it&&it.nr!=null) menuList.push(it.nr+'|'+it.name); });});
+    var prompt='Du siehst ein Foto einer Restaurant-Bestellung (z.B. Lieferando/Uber-Eats-Tablet oder Bon). '
+      +'Lies die bestellten Artikel heraus und ordne sie dieser Speisekarte zu (Format Nr|Name):\n'
+      +menuList.join('\n')
+      +'\n\nAntworte NUR mit JSON, ohne Markdown, ohne Erkl\u00e4rung, exakt so: '
+      +'{"items":[{"nr":"31","name":"Butter Curry","qty":2}],"partnerNr":"","kunde":"","typ":"abholung","adresse":"","gesamt":0} '
+      +'typ ist "lieferung" nur wenn eine Lieferadresse sichtbar ist, sonst "abholung". gesamt = Gesamtbetrag falls sichtbar, sonst 0. '
+      +'Wenn ein Artikel nicht auf der Speisekarte steht, trotzdem mit qty und name auff\u00fchren aber nr leer lassen.';
+    fileToJpegBase64(file,1024).then(function(b64){
+      return window.callAIVision(prompt,b64,900);
+    }).then(function(text){
+      var clean=String(text).replace(/```json|```/g,'').trim();
+      var j=JSON.parse(clean);
+      var r=matchAILines(j.items,menuData);
+      if(r.lines.length) setLines(lines.concat(r.lines));
+      if(j.partnerNr) setPnr(String(j.partnerNr));
+      if(j.kunde) setKname(String(j.kunde));
+      if(j.typ==='lieferung'){ setTyp('lieferung'); if(j.adresse) setAddr(String(j.adresse)); }
+      var parts=['\uD83E\uDD16 AI hat '+r.lines.length+' Artikel erkannt \u2013 bitte pr\u00fcfen!'];
+      if(r.unknown.length) parts.push('\u26A0\uFE0F Nicht zugeordnet: '+r.unknown.join(', '));
+      if(j.gesamt) parts.push('AI-Gesamt laut Foto: '+parseFloat(j.gesamt).toFixed(2)+'\u20AC (mit Summe unten vergleichen \u2013 Differenz ggf. als Aufschlag eintragen)');
+      setMsg(parts.join(' \u00b7 '));
+      setScanning(false);
+    }).catch(function(err){
+      setMsg('\u26A0\uFE0F Foto-Scan fehlgeschlagen: '+((err&&err.message)||err)+' \u2013 bitte Schnelleingabe oder Auswahl nutzen.');
+      setScanning(false);
+    });
+  }
+  var cats=Object.keys(menuData||{});
+  var curItems=(menuData&&menuData[cat])||[];
+  var iS={width:'100%',padding:'8px 10px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8};
+  var lbl=function(t){return R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},t);};
+  function saveCh(next){setCh(next);LS.set('eatdesi_channels',next);}
+  function updCh(which,k,v){var n=JSON.parse(JSON.stringify(ch));if(!n[which])n[which]={};n[which][k]=v;saveCh(n);}
+  function addLine(){
+    var it=curItems.filter(function(x){return String(x.id)===String(itemId);})[0];
+    if(!it){setMsg('Bitte erst Kategorie und Artikel w\u00e4hlen.');return;}
+    setLines(lines.concat([{name:it.name,nr:it.nr,qty:Math.max(1,parseInt(qty,10)||1),price:it.price,taxRate:it.taxRate||'food'}]));
+    setQty(1); setMsg('');
+  }
+  function rmLine(i){setLines(lines.filter(function(_,j){return j!==i;}));}
+  var sum=lines.reduce(function(s,l){return s+l.price*l.qty;},0)+(parseFloat(fee)||0);
+  // Heutige Zähler pro Kanal (kanalgetrennte Statistik lebt in Monatsstatistik/Kassenbuch)
+  var today=new Date().toDateString();
+  var cntL=0,cntU=0;
+  (completedOrders||[]).forEach(function(o){
+    try{ if(new Date(o.time||o.created_at||0).toDateString()!==today) return;
+      var c=orderChannel(o); if(c==='lieferando')cntL++; else if(c==='ubereats')cntU++;
+    }catch(e){}
+  });
+  function send(){
+    setBusy(true);setMsg('');
+    var body;
+    try{ body=buildChannelOrderBody({kanal:kanal,typ:typ,pnr:pnr,kname:kname,kphone:kphone,addr:addr,lines:lines,fee:fee,pay:pay}); }
+    catch(e){ setMsg('\u26A0\uFE0F '+e.message); setBusy(false); return; }
+    fetch(SUPA_URL+'/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr',{method:'POST',
+      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
+      body:JSON.stringify(body)})
+    .then(function(r){
+      if(!r.ok&&r.status!==201&&r.status!==409) throw new Error('HTTP '+r.status);
+      setLines([]);setPnr('');setKname('');setKphone('');setAddr('');setFee('');
+      setMsg('\u2705 Gesendet ('+body.bon_nr+') \u2013 erscheint gleich als \uD83D\uDD14 Online-Bestellung zum Annehmen.');
+      try{ if(window.runSync) window.runSync(); }catch(e){}
+      setBusy(false);
+    })
+    .catch(function(e){ setMsg('\u26A0\uFE0F Senden fehlgeschlagen: '+e.message+' \u2013 Internet pr\u00fcfen, Bestellung bleibt im Formular.'); setBusy(false); });
+  }
+  var card={background:'#fff',borderRadius:12,padding:14,border:'1px solid #eee',marginBottom:14,maxWidth:560};
+  var apiStatus=function(filled){return filled
+    ? R.createElement('div',{style:{fontSize:12,fontWeight:700,color:'#b26a00',marginBottom:8}},'\uD83D\uDFE1 Zugangsdaten gespeichert \u2013 wartet auf API-Freischaltung durch den Partner')
+    : R.createElement('div',{style:{fontSize:12,fontWeight:700,color:'#999',marginBottom:8}},'\u26AA Noch nicht verbunden \u2013 Zugangsdaten sp\u00e4ter vom Partner eintragen');};
+  return R.createElement('div',{style:{padding:16,overflowY:'auto',height:'calc(100vh - 90px)'}},
+    R.createElement('div',{style:{fontWeight:800,fontSize:17,color:'#C84B31',marginBottom:4}},'\uD83D\uDEF5 Lieferando & \uD83D\uDE97 Uber Eats'),
+    R.createElement('div',{style:{fontSize:12,color:'#777',marginBottom:12}},
+      'Heute: \uD83D\uDEF5 '+cntL+' Lieferando \u00b7 \uD83D\uDE97 '+cntU+' Uber Eats \u2013 Ums\u00e4tze erscheinen kanalgetrennt in \uD83D\uDCCA Monatsstatistik & Kassenbuch.'),
+    // ===== Manuelle Erfassung (JETZT nutzbar) =====
+    R.createElement('div',{style:card},
+      R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:8}},'\uD83D\uDCDD Bestellung vom Partner-Tablet \u00fcbertragen'),
+      lbl('Kanal'),
+      R.createElement('select',{value:kanal,onChange:function(e){setKanal(e.target.value);},style:iS},
+        R.createElement('option',{value:'LIEFERANDO'},'\uD83D\uDEF5 Lieferando'),
+        R.createElement('option',{value:'UBEREATS'},'\uD83D\uDE97 Uber Eats')),
+      lbl('Partner-Bestellnummer (vom Tablet, optional)'),
+      R.createElement('input',{value:pnr,onChange:function(e){setPnr(e.target.value);},style:iS,placeholder:'z.B. #ABC123'}),
+      R.createElement('div',{style:{display:'flex',gap:8}},
+        R.createElement('div',{style:{flex:1}},lbl('Kundenname'),R.createElement('input',{value:kname,onChange:function(e){setKname(e.target.value);},style:iS})),
+        R.createElement('div',{style:{flex:1}},lbl('Telefon (optional)'),R.createElement('input',{value:kphone,onChange:function(e){setKphone(e.target.value);},style:iS}))),
+      lbl('Typ'),
+      R.createElement('select',{value:typ,onChange:function(e){setTyp(e.target.value);},style:iS},
+        R.createElement('option',{value:'abholung'},'\uD83E\uDD61 Abholung (Partner-Fahrer/Kunde holt ab)'),
+        R.createElement('option',{value:'lieferung'},'\uD83D\uDEF5 Lieferung (eigener Fahrer)')),
+      typ==='lieferung'?R.createElement('div',null,lbl('Lieferadresse'),R.createElement('input',{value:addr,onChange:function(e){setAddr(e.target.value);},style:iS,placeholder:'Stra\u00dfe, PLZ Ort'})):null,
+      R.createElement('div',{style:{borderTop:'1px dashed #ddd',margin:'6px 0 10px'}}),
+      // ===== ⚡ Schnelleingabe per Artikel-Nr + 📷 AI Foto-Scan =====
+      lbl('\u26A1 Schnelleingabe per Artikel-Nr (z.B. 2x31, 81, 211)'),
+      R.createElement('div',{style:{display:'flex',gap:6}},
+        R.createElement('input',{value:quick,onChange:function(e){setQuick(e.target.value);},onKeyDown:function(e){if(e.key==='Enter')addQuick();},style:Object.assign({},iS,{flex:1,width:'auto'}),placeholder:'2x31, 81, 3x211'}),
+        R.createElement('button',{onClick:addQuick,style:{flex:'0 0 auto',padding:'8px 14px',borderRadius:8,border:'none',background:'#e65100',color:'#fff',fontWeight:800,cursor:'pointer',fontFamily:'inherit',marginBottom:8}},'\u26A1')),
+      R.createElement('input',{type:'file',accept:'image/*',capture:'environment',id:'chScanFile',style:{display:'none'},onChange:scanPhoto}),
+      R.createElement('button',{onClick:function(){var el=document.getElementById('chScanFile');if(el)el.click();},disabled:scanning,
+        style:{width:'100%',padding:10,borderRadius:10,border:'2px dashed #7b1fa2',background:scanning?'#eee':'#f7f0fb',color:'#7b1fa2',fontWeight:800,fontSize:13,cursor:'pointer',fontFamily:'inherit',marginBottom:10}},
+        scanning?'\uD83D\uDCF7 AI liest das Foto\u2026':'\uD83D\uDCF7 Foto vom Partner-Tablet scannen (AI f\u00fcllt automatisch aus)'),
+      lbl('Artikel hinzuf\u00fcgen'),
+      R.createElement('div',{style:{display:'flex',gap:6,flexWrap:'wrap'}},
+        R.createElement('select',{value:cat,onChange:function(e){setCat(e.target.value);setItemId('');},style:Object.assign({},iS,{flex:'1 1 140px',width:'auto'})},
+          R.createElement('option',{value:''},'Kategorie\u2026'),
+          cats.map(function(c){return R.createElement('option',{key:c,value:c},c);})),
+        R.createElement('select',{value:itemId,onChange:function(e){setItemId(e.target.value);},style:Object.assign({},iS,{flex:'2 1 180px',width:'auto'})},
+          R.createElement('option',{value:''},'Artikel\u2026'),
+          curItems.map(function(it){return R.createElement('option',{key:it.id,value:it.id},it.name+' \u2013 '+(it.price!=null?it.price.toFixed(2):'')+'\u20AC');})),
+        R.createElement('input',{type:'number',min:1,value:qty,onChange:function(e){setQty(e.target.value);},style:Object.assign({},iS,{flex:'0 0 60px',width:'auto'})}),
+        R.createElement('button',{onClick:addLine,style:{flex:'0 0 auto',padding:'8px 14px',borderRadius:8,border:'none',background:'#1565c0',color:'#fff',fontWeight:800,cursor:'pointer',fontFamily:'inherit',marginBottom:8}},'+')),
+      lines.length?R.createElement('div',{style:{marginBottom:8}},
+        lines.map(function(l,i){return R.createElement('div',{key:i,style:{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:13,padding:'4px 0',borderBottom:'1px solid #f2f2f2'}},
+          R.createElement('span',null,l.qty+'\u00d7 '+l.name),
+          R.createElement('span',null,(l.qty*l.price).toFixed(2)+'\u20AC ',
+            R.createElement('button',{onClick:function(){rmLine(i);},style:{border:'none',background:'#eee',borderRadius:6,cursor:'pointer',marginLeft:6,fontFamily:'inherit'}},'\u2715')));})
+      ):R.createElement('div',{style:{fontSize:12,color:'#aaa',marginBottom:8}},'Noch keine Artikel.'),
+      R.createElement('div',{style:{display:'flex',gap:8}},
+        R.createElement('div',{style:{flex:1}},lbl('Liefergeb\u00fchr/Aufschlag \u20AC (optional)'),R.createElement('input',{type:'number',step:'0.1',value:fee,onChange:function(e){setFee(e.target.value);},style:iS})),
+        R.createElement('div',{style:{flex:1}},lbl('Zahlung'),
+          R.createElement('select',{value:pay,onChange:function(e){setPay(e.target.value);},style:iS},
+            R.createElement('option',{value:'online'},'Online bezahlt (Partner)'),
+            R.createElement('option',{value:'bar'},'Bar bei Lieferung'),
+            R.createElement('option',{value:'ec'},'EC bei Lieferung')))),
+      R.createElement('div',{style:{fontWeight:800,fontSize:15,margin:'2px 0 10px'}},'Gesamt: '+sum.toFixed(2)+' \u20AC'),
+      msg?R.createElement('div',{style:{fontSize:12,fontWeight:700,marginBottom:8,color:msg.indexOf('\u2705')===0?'#2e7d32':'#c62828'}},msg):null,
+      R.createElement('button',{onClick:send,disabled:busy,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:busy?'#999':'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},busy?'Sende\u2026':'\uD83D\uDD14 Bestellung ins POS senden')),
+    // ===== Lieferando API =====
+    R.createElement('div',{style:card},
+      R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:6}},'\uD83D\uDEF5 Lieferando \u2013 API-Zugangsdaten'),
+      apiStatus(!!(ch.lieferando&&(ch.lieferando.partnerId||ch.lieferando.token))),
+      lbl('Restaurant-/Partner-ID'),
+      R.createElement('input',{value:(ch.lieferando&&ch.lieferando.partnerId)||'',onChange:function(e){updCh('lieferando','partnerId',e.target.value);},style:iS}),
+      lbl('API-Token / Passwort'),
+      R.createElement('input',{value:(ch.lieferando&&ch.lieferando.token)||'',onChange:function(e){updCh('lieferando','token',e.target.value);},style:iS,type:'password'})),
+    // ===== Uber Eats API =====
+    R.createElement('div',{style:card},
+      R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:6}},'\uD83D\uDE97 Uber Eats \u2013 API-Zugangsdaten'),
+      apiStatus(!!(ch.ubereats&&(ch.ubereats.clientId||ch.ubereats.storeId))),
+      lbl('Client ID'),
+      R.createElement('input',{value:(ch.ubereats&&ch.ubereats.clientId)||'',onChange:function(e){updCh('ubereats','clientId',e.target.value);},style:iS}),
+      lbl('Client Secret'),
+      R.createElement('input',{value:(ch.ubereats&&ch.ubereats.clientSecret)||'',onChange:function(e){updCh('ubereats','clientSecret',e.target.value);},style:iS,type:'password'}),
+      lbl('Store ID'),
+      R.createElement('input',{value:(ch.ubereats&&ch.ubereats.storeId)||'',onChange:function(e){updCh('ubereats','storeId',e.target.value);},style:iS})),
+    R.createElement('div',{style:{fontSize:11,color:'#999',maxWidth:560,lineHeight:1.7}},
+      '\u2139\uFE0F Die automatische Live-API (Bestellungen kommen von selbst rein) ben\u00f6tigt die Partner-Freigabe von Lieferando/Uber Eats plus einen kleinen Server. Sobald du die Zugangsdaten vom Partner hast: hier eintragen \u2013 die Bestell-Struktur (buildChannelOrderBody) ist daf\u00fcr schon vorbereitet. Bis dahin: Bestellung vom Partner-Tablet oben manuell \u00fcbertragen \u2013 sie l\u00e4uft durch dieselbe K\u00fcchen-Pipeline wie Website-Bestellungen.')
+  );
+}
+
+/* ============================================================
+   🔳 QR-TISCHKARTEN GENERATOR (v139)
+   White-Label-fähig: Name/Adresse aus Firmendaten, eigene URL.
+   Jede Tochter-App generiert ihre Karten selbst (Self-Service).
+   Nutzt window.QRCode (qrcode@1.5.3, bereits im <head> geladen).
+   ============================================================ */
+function qrEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+async function buildQRCardsHTML(cfg, firma){
+  var n=Math.max(1,Math.min(200,parseInt(cfg.count,10)||30));
+  var base=String(cfg.url||'').trim();
+  if(!base) throw new Error('Bitte Website-URL eingeben.');
+  var sep=base.indexOf('?')>=0?'&':'?';
+  var sub=cfg.subtitle||'';
+  var foot=[firma&&firma.street,firma&&firma.city].filter(Boolean).join(' · ');
+  var brand=(firma&&firma.name)||'eatDeSi';
+  var html='';
+  for(var i=1;i<=n;i++){
+    var link=base+sep+'tisch='+i;
+    var svg=await window.QRCode.toString(link,{type:'svg',errorCorrectionLevel:'H',margin:0});
+    if(i%4===1) html+='<div class="qr-sheet">';
+    html+='<div class="qr-card"><div class="qr-frame">'
+      +'<div class="qr-brand">'+qrEsc(brand)+'</div>'
+      +(sub?('<div class="qr-sub">'+qrEsc(sub)+'</div>'):'')
+      +'<div class="qr-line"></div>'
+      +'<div class="qr-tisch">TISCH '+i+'</div>'
+      +'<div class="qr-panel">'+svg+'</div>'
+      +'<div class="qr-cta">Scannen &amp; direkt am Tisch bestellen</div>'
+      +'<div class="qr-steps">1. Kamera auf den QR-Code richten<br>2. Speisekarte ansehen &amp; ausw\u00e4hlen<br>3. Bestellen \u2013 wir bringen es an deinen Tisch!</div>'
+      +(foot?('<div class="qr-foot">'+qrEsc(foot)+'</div>'):'')
+      +'</div></div>';
+    if(i%4===0||i===n) html+='</div>';
+  }
+  return html;
+}
+function ensureQRCardCSS(){
+  if(document.getElementById('qrCardCSS')) return;
+  var st=document.createElement('style'); st.id='qrCardCSS';
+  st.textContent=[
+  '#qrPrintOverlay{position:fixed;inset:0;z-index:99990;background:#e8e4da;overflow:auto;padding:0 0 40px}',
+  '#qrPrintOverlay .qr-toolbar{position:sticky;top:0;z-index:5;display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#1a1a1e;color:#fff;padding:12px 16px;box-shadow:0 2px 10px #0005}',
+  '#qrPrintOverlay .qr-toolbar button{padding:10px 18px;border:none;border-radius:10px;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit}',
+  '.qr-sheet{width:19cm;max-width:96vw;margin:14px auto;background:#fff;display:grid;grid-template-columns:1fr 1fr;gap:.5cm;padding:.6cm;box-shadow:0 4px 18px #0002;box-sizing:border-box}',
+  '.qr-card{background:#0d0d0f;border-radius:6px;padding:10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}',
+  '.qr-frame{border:2px solid #c9a227;box-shadow:inset 0 0 0 3px #0d0d0f,inset 0 0 0 4px #c9a227;padding:16px 10px 12px;text-align:center;-webkit-print-color-adjust:exact;print-color-adjust:exact}',
+  '.qr-brand{font-family:Georgia,\'Times New Roman\',serif;font-style:italic;font-weight:800;font-size:24px;color:#e8c95a}',
+  '.qr-sub{letter-spacing:3px;font-size:8px;color:#f5f0e6;margin-top:3px;text-transform:uppercase}',
+  '.qr-line{width:110px;height:1px;background:#c9a227;margin:8px auto}',
+  '.qr-tisch{font-weight:900;font-size:30px;color:#e8c95a;margin:4px 0 10px;letter-spacing:1px}',
+  '.qr-panel{background:#f5f0e6;border-radius:8px;width:4.6cm;height:4.6cm;margin:0 auto;padding:.35cm;box-sizing:border-box}',
+  '.qr-panel svg{width:100%;height:100%;display:block}',
+  '.qr-cta{font-weight:800;font-size:12.5px;color:#f5f0e6;margin-top:12px}',
+  '.qr-steps{font-size:9.5px;color:#b8b2a4;line-height:1.7;margin-top:6px}',
+  '.qr-foot{font-size:8px;color:#c9a227;margin-top:12px}',
+  '@media print{',
+  ' body.qrprint>*:not(#qrPrintOverlay){display:none!important}',
+  ' #qrPrintOverlay{position:static!important;background:#fff!important;overflow:visible!important;padding:0!important}',
+  ' #qrPrintOverlay .qr-toolbar{display:none!important}',
+  ' .qr-sheet{box-shadow:none;margin:0 auto;page-break-after:always}',
+  '}'
+  ].join('\n');
+  document.head.appendChild(st);
+}
+async function openQRCardOverlay(cfg){
+  ensureQRCardCSS();
+  if(!window.QRCode||!window.QRCode.toString) throw new Error('QR-Bibliothek nicht geladen. Bitte Internetverbindung pr\u00fcfen und App neu laden.');
+  var firma=LS.get('eatdesi_firma',{name:'eatDeSi BW',street:'Brunnenallee 30',city:'34521 Bad Wildungen'});
+  var cards=await buildQRCardsHTML(cfg,firma);
+  var ov=document.getElementById('qrPrintOverlay');
+  if(!ov){ov=document.createElement('div');ov.id='qrPrintOverlay';document.body.appendChild(ov);}
+  ov.innerHTML='<div class="qr-toolbar">'
+    +'<button style="background:#c9a227;color:#111" onclick="window.print()">\uD83D\uDDA8\uFE0F Drucken / Als PDF speichern</button>'
+    +'<button style="background:#444;color:#fff" onclick="closeQRCardOverlay()">\u2715 Schlie\u00dfen</button>'
+    +'<span style="font-size:11px;opacity:.85">Tipp: Im Druck-Dialog \u201eHintergrundgrafiken\u201c aktivieren</span>'
+    +'</div>'+cards;
+  document.body.classList.add('qrprint');
+  ov.scrollTop=0;
+}
+function closeQRCardOverlay(){
+  var ov=document.getElementById('qrPrintOverlay'); if(ov) ov.remove();
+  document.body.classList.remove('qrprint');
+}
+
+function QRKartenView(){
+  var R=React;
+  var [cfg,setCfg]=R.useState(function(){return LS.get('eatdesi_qrcfg',{count:30,url:'https://eatdesi.github.io/eatdesi-pos/eatdesi-website.html',subtitle:'Fusion Kitchen & Grill'});});
+  var [busy,setBusy]=R.useState(false);
+  var [err,setErr]=R.useState('');
+  var iS={width:'100%',padding:'8px 10px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8};
+  function upd(k,v){var c=Object.assign({},cfg);c[k]=v;setCfg(c);LS.set('eatdesi_qrcfg',c);}
+  function go(){
+    setErr('');setBusy(true);
+    openQRCardOverlay(cfg).then(function(){setBusy(false);}).catch(function(e){setErr((e&&e.message)||String(e));setBusy(false);});
+  }
+  return R.createElement('div',{style:{padding:16,overflowY:'auto',height:'calc(100vh - 90px)'}},
+    R.createElement('div',{style:{fontWeight:800,fontSize:17,color:'#C84B31',marginBottom:4}},'\uD83D\uDD33 QR-Tischkarten'),
+    R.createElement('div',{style:{fontSize:12,color:'#777',marginBottom:12}},'G\u00e4ste scannen den Code am Tisch und bestellen selbst \u2013 die Bestellung kommt mit Tischnummer im POS an.'),
+    R.createElement('div',{style:{background:'#fff',borderRadius:12,padding:14,border:'1px solid #eee',maxWidth:520}},
+      R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},'Anzahl Tische'),
+      R.createElement('input',{type:'number',min:1,max:200,value:cfg.count,onChange:function(e){upd('count',e.target.value);},style:iS}),
+      R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},'Website-URL (Gast-Bestellseite)'),
+      R.createElement('input',{value:cfg.url||'',onChange:function(e){upd('url',e.target.value);},style:iS}),
+      R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},'Untertitel auf der Karte (optional)'),
+      R.createElement('input',{value:cfg.subtitle||'',onChange:function(e){upd('subtitle',e.target.value);},style:iS}),
+      R.createElement('div',{style:{fontSize:11,color:'#999',margin:'2px 0 10px'}},'Name & Adresse auf den Karten kommen automatisch aus \uD83C\uDFE2 Firmendaten.'),
+      err?R.createElement('div',{style:{color:'#c62828',fontSize:12,fontWeight:700,marginBottom:8}},'\u26A0\uFE0F '+err):null,
+      R.createElement('button',{onClick:go,disabled:busy,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:busy?'#999':'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},busy?'Erstelle Karten\u2026':'\uD83D\uDDA8\uFE0F Karten erstellen & drucken'),
+      R.createElement('div',{style:{fontSize:11,color:'#999',marginTop:10,lineHeight:1.6}},'\uD83D\uDCA1 Zum Drucken die App am besten im Browser (Chrome am PC) unter derselben Adresse \u00f6ffnen. Im Druck-Dialog \u201eHintergrundgrafiken\u201c aktivieren, damit Schwarz/Gold gedruckt wird. Alternativ \u201eAls PDF speichern\u201c.')
     )
   );
 }
@@ -21701,13 +22327,50 @@ function LieferfahrerView() {
 }
 
 
-function KioskView({ menuData }) {
+function KioskView({ menuData, setView }) {
   var R = React;
   var [cart, setCart] = R.useState([]);
   var [step, setStep] = R.useState('welcome');
   var [activeCat, setActiveCat] = R.useState(Object.keys(menuData||{})[0]||'');
   var [orderType, setOrderType] = R.useState(null);
   var [optionModal, setOptionModal] = R.useState(null); // {name, description, options}
+  var [kLang, setKLang] = R.useState('de');
+
+  // Kiosk-Übersetzungen (DE / EN / Punjabi)
+  var KLANGS = [{code:'de',flag:'🇩🇪',name:'Deutsch'},{code:'en',flag:'🇬🇧',name:'English'},{code:'pa',flag:'🇮🇳',name:'ਪੰਜਾਬੀ'},{code:'tr',flag:'🇹🇷',name:'Türkçe'},{code:'ru',flag:'🇷🇺',name:'Русский'},{code:'ar',flag:'🇸🇦',name:'العربية'}];
+  var KT_ALL = {
+    de:{ welcome:'Willkommen bei eatDeSi', chooseOption:'Bitte wählen Sie eine Option', hereEat:'🪑  Hier essen', takeaway:'🛍️  Zum Mitnehmen',
+      chooseIngredient:'Bitte Zutat wählen:', choose:'Wählen', close:'Schließen', hereEatShort:'Hier essen', takeawayShort:'Zum Mitnehmen',
+      cart:'Warenkorb', from:'ab', chooseZutat:'Zutat wählen', add:'+ Hinzufügen', confirmHere:'Hier essen – Bestätigen', confirmTakeaway:'Mitnehmen – Bestätigen',
+      cartEmpty:'Warenkorb ist leer', articles:'Artikel', orderNow:'Jetzt bestellen', orderDone:'Bestellung aufgegeben!',
+      bringTable:'Ihr Essen wird zu Ihrem Tisch gebracht.', readySoon:'Ihr Essen wird gleich fertig sein.', newOrder:'Neue Bestellung', talkPriya:'🎙️ Mit Priya sprechen' },
+    en:{ welcome:'Welcome to eatDeSi', chooseOption:'Please choose an option', hereEat:'🪑  Dine in', takeaway:'🛍️  Takeaway',
+      chooseIngredient:'Please choose:', choose:'Choose', close:'Close', hereEatShort:'Dine in', takeawayShort:'Takeaway',
+      cart:'Cart', from:'from', chooseZutat:'Choose option', add:'+ Add', confirmHere:'Dine in – Confirm', confirmTakeaway:'Takeaway – Confirm',
+      cartEmpty:'Cart is empty', articles:'items', orderNow:'Order now', orderDone:'Order placed!',
+      bringTable:'Your food will be brought to your table.', readySoon:'Your food will be ready shortly.', newOrder:'New order', talkPriya:'🎙️ Talk to Priya' },
+    pa:{ welcome:'eatDeSi ਵਿੱਚ ਜੀ ਆਇਆਂ ਨੂੰ', chooseOption:'ਕਿਰਪਾ ਕਰਕੇ ਇੱਕ ਚੋਣ ਕਰੋ', hereEat:'🪑  ਇੱਥੇ ਖਾਣਾ', takeaway:'🛍️  ਨਾਲ ਲੈ ਜਾਣਾ',
+      chooseIngredient:'ਕਿਰਪਾ ਕਰਕੇ ਚੁਣੋ:', choose:'ਚੁਣੋ', close:'ਬੰਦ ਕਰੋ', hereEatShort:'ਇੱਥੇ ਖਾਣਾ', takeawayShort:'ਨਾਲ ਲੈ ਜਾਣਾ',
+      cart:'ਟੋਕਰੀ', from:'ਤੋਂ', chooseZutat:'ਚੋਣ ਕਰੋ', add:'+ ਸ਼ਾਮਲ ਕਰੋ', confirmHere:'ਇੱਥੇ ਖਾਣਾ – ਪੱਕਾ ਕਰੋ', confirmTakeaway:'ਨਾਲ ਲੈ ਜਾਣਾ – ਪੱਕਾ ਕਰੋ',
+      cartEmpty:'ਟੋਕਰੀ ਖਾਲੀ ਹੈ', articles:'ਚੀਜ਼ਾਂ', orderNow:'ਹੁਣ ਆਰਡਰ ਕਰੋ', orderDone:'ਆਰਡਰ ਹੋ ਗਿਆ!',
+      bringTable:'ਤੁਹਾਡਾ ਖਾਣਾ ਮੇਜ਼ ਤੇ ਲਿਆਂਦਾ ਜਾਵੇਗਾ।', readySoon:'ਤੁਹਾਡਾ ਖਾਣਾ ਜਲਦੀ ਤਿਆਰ ਹੋਵੇਗਾ।', newOrder:'ਨਵਾਂ ਆਰਡਰ', talkPriya:'🎙️ Priya ਨਾਲ ਗੱਲ ਕਰੋ' },
+    tr:{ welcome:'eatDeSi\'ye hoş geldiniz', chooseOption:'Lütfen bir seçenek seçin', hereEat:'🪑  Burada ye', takeaway:'🛍️  Paket servis',
+      chooseIngredient:'Lütfen seçin:', choose:'Seç', close:'Kapat', hereEatShort:'Burada ye', takeawayShort:'Paket',
+      cart:'Sepet', from:'itibaren', chooseZutat:'Seçenek seç', add:'+ Ekle', confirmHere:'Burada ye – Onayla', confirmTakeaway:'Paket – Onayla',
+      cartEmpty:'Sepet boş', articles:'ürün', orderNow:'Şimdi sipariş ver', orderDone:'Sipariş verildi!',
+      bringTable:'Yemeğiniz masanıza getirilecek.', readySoon:'Yemeğiniz birazdan hazır olacak.', newOrder:'Yeni sipariş', talkPriya:'🎙️ Priya ile konuş' },
+    ru:{ welcome:'Добро пожаловать в eatDeSi', chooseOption:'Пожалуйста, выберите вариант', hereEat:'🪑  Здесь поесть', takeaway:'🛍️  На вынос',
+      chooseIngredient:'Пожалуйста, выберите:', choose:'Выбрать', close:'Закрыть', hereEatShort:'Здесь', takeawayShort:'На вынос',
+      cart:'Корзина', from:'от', chooseZutat:'Выбрать', add:'+ Добавить', confirmHere:'Здесь поесть – Подтвердить', confirmTakeaway:'На вынос – Подтвердить',
+      cartEmpty:'Корзина пуста', articles:'товаров', orderNow:'Заказать', orderDone:'Заказ принят!',
+      bringTable:'Ваша еда будет принесена к столу.', readySoon:'Ваша еда скоро будет готова.', newOrder:'Новый заказ', talkPriya:'🎙️ Говорить с Priya' },
+    ar:{ welcome:'مرحبًا بكم في eatDeSi', chooseOption:'يرجى اختيار خيار', hereEat:'🪑  تناول هنا', takeaway:'🛍️  طلب خارجي',
+      chooseIngredient:'يرجى الاختيار:', choose:'اختر', close:'إغلاق', hereEatShort:'هنا', takeawayShort:'خارجي',
+      cart:'السلة', from:'من', chooseZutat:'اختر', add:'+ أضف', confirmHere:'تناول هنا – تأكيد', confirmTakeaway:'خارجي – تأكيد',
+      cartEmpty:'السلة فارغة', articles:'عناصر', orderNow:'اطلب الآن', orderDone:'تم الطلب!',
+      bringTable:'سيتم إحضار طعامك إلى طاولتك.', readySoon:'سيكون طعامك جاهزًا قريبًا.', newOrder:'طلب جديد', talkPriya:'🎙️ تحدث مع Priya' }
+  };
+  var KT = KT_ALL[kLang] || KT_ALL.de;
 
   var total = cart.reduce(function(s,i){return s+(i.price||0)*i.qty;}, 0);
   var itemCount = cart.reduce(function(s,i){return s+i.qty;}, 0);
@@ -21741,7 +22404,7 @@ function KioskView({ menuData }) {
     return R.createElement('div',{style:{height:'100vh',display:'flex',flexDirection:'column',background:'rgba(0,0,0,.6)',justifyContent:'flex-end'}},
       R.createElement('div',{style:{background:'#fff',borderRadius:'20px 20px 0 0',padding:24,maxHeight:'80vh',overflowY:'auto'}},
         R.createElement('div',{style:{fontWeight:900,fontSize:18,marginBottom:4,color:'#C84B31'}},optionModal.name),
-        R.createElement('div',{style:{fontSize:13,color:'#888',marginBottom:20}},optionModal.description||'Bitte Zutat waehlen:'),
+        R.createElement('div',{style:{fontSize:13,color:'#888',marginBottom:20}},optionModal.description||KT.chooseIngredient),
         (optionModal.options||[]).map(function(opt,oi) {
           var qty = getCartQty(optionModal.id, opt.name);
           return R.createElement('div',{key:oi,style:{display:'flex',alignItems:'center',padding:'12px 0',borderBottom:'1px solid #f0f0f0'}},
@@ -21758,12 +22421,12 @@ function KioskView({ menuData }) {
               : R.createElement('button',{
                   onClick:function(){addToCart(optionModal.id,optionModal.name,opt.price,opt.name);setOptionModal(null);},
                   style:{padding:'8px 16px',borderRadius:10,border:'none',background:'#C84B31',color:'#fff',fontWeight:700,cursor:'pointer',fontFamily:'inherit',fontSize:13}
-                },'Waehlen')
+                },KT.choose)
           );
         }),
         R.createElement('button',{onClick:function(){setOptionModal(null);},
           style:{width:'100%',padding:13,borderRadius:10,border:'none',background:'#f5f5f5',color:'#555',fontWeight:700,cursor:'pointer',fontFamily:'inherit',marginTop:16,fontSize:14}
-        },'Schliessen')
+        },KT.close)
       )
     );
   }
@@ -21772,15 +22435,26 @@ function KioskView({ menuData }) {
   if (step === 'welcome') {
     return R.createElement('div',{style:{height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'linear-gradient(135deg,#C84B31,#8B1A1A)',padding:24}},
       R.createElement('div',{style:{fontSize:64,marginBottom:16}},'🍽️'),
-      R.createElement('div',{style:{fontSize:32,fontWeight:900,color:'#fff',marginBottom:8,textAlign:'center'}},'Willkommen bei eatDeSi'),
-      R.createElement('div',{style:{fontSize:16,color:'rgba(255,255,255,.8)',marginBottom:48,textAlign:'center'}},'Bitte waehlen Sie eine Option'),
+      R.createElement('div',{style:{fontSize:32,fontWeight:900,color:'#fff',marginBottom:8,textAlign:'center'}},KT.welcome),
+      R.createElement('div',{style:{fontSize:16,color:'rgba(255,255,255,.8)',marginBottom:24,textAlign:'center'}},KT.chooseOption),
+      // Sprach-Auswahl
+      R.createElement('div',{style:{display:'flex',gap:10,marginBottom:32}},
+        KLANGS.map(function(l){
+          return R.createElement('button',{key:l.code,onClick:function(){setKLang(l.code);},
+            style:{padding:'8px 14px',borderRadius:20,border:kLang===l.code?'2px solid #fff':'2px solid rgba(255,255,255,.3)',background:kLang===l.code?'rgba(255,255,255,.25)':'transparent',color:'#fff',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}
+          }, l.flag+' '+l.name);
+        })
+      ),
       R.createElement('div',{style:{display:'flex',flexDirection:'column',gap:16,width:'100%',maxWidth:320}},
         R.createElement('button',{onClick:function(){setOrderType('here');setStep('menu');},
           style:{padding:'20px 24px',borderRadius:16,border:'none',background:'#fff',color:'#C84B31',fontWeight:900,fontSize:18,cursor:'pointer',fontFamily:'inherit',textAlign:'center'}},
-          '🪑  Hier essen'),
+          KT.hereEat),
         R.createElement('button',{onClick:function(){setOrderType('takeaway');setStep('menu');},
           style:{padding:'20px 24px',borderRadius:16,border:'2px solid rgba(255,255,255,.5)',background:'transparent',color:'#fff',fontWeight:900,fontSize:18,cursor:'pointer',fontFamily:'inherit',textAlign:'center'}},
-          '🛍️  Zum Mitnehmen')
+          KT.takeaway),
+        setView && R.createElement('button',{onClick:function(){ try{ localStorage.setItem('eatdesi_kiosk_lang', kLang); }catch(e){} setView('ai_kellnerin'); },
+          style:{padding:'18px 24px',borderRadius:16,border:'none',background:'linear-gradient(135deg,#8e24aa,#c2185b)',color:'#fff',fontWeight:900,fontSize:17,cursor:'pointer',fontFamily:'inherit',textAlign:'center',boxShadow:'0 4px 14px rgba(142,36,170,.4)'}},
+          KT.talkPriya)
       )
     );
   }
@@ -21790,7 +22464,7 @@ function KioskView({ menuData }) {
     return R.createElement('div',{style:{height:'100vh',display:'flex',flexDirection:'column',background:'#f5f5f5'}},
       R.createElement('div',{style:{background:'#C84B31',padding:'16px 20px',color:'#fff',display:'flex',alignItems:'center',gap:12}},
         R.createElement('button',{onClick:function(){setStep('menu');},style:{background:'transparent',border:'none',color:'#fff',fontSize:22,cursor:'pointer'}}, '←'),
-        R.createElement('div',{style:{fontWeight:900,fontSize:18}},orderType==='here'?'Hier essen - Bestaetigen':'Mitnehmen - Bestaetigen')
+        R.createElement('div',{style:{fontWeight:900,fontSize:18}},orderType==='here'?KT.confirmHere:KT.confirmTakeaway)
       ),
       R.createElement('div',{style:{flex:1,overflowY:'auto',padding:16}},
         cart.map(function(cartItem) {
@@ -21806,17 +22480,17 @@ function KioskView({ menuData }) {
             )
           );
         }),
-        cart.length === 0 && R.createElement('div',{style:{textAlign:'center',color:'#bbb',padding:40}},'Warenkorb ist leer')
+        cart.length === 0 && R.createElement('div',{style:{textAlign:'center',color:'#bbb',padding:40}},KT.cartEmpty)
       ),
       R.createElement('div',{style:{padding:16,background:'#fff',borderTop:'2px solid #eee'}},
         R.createElement('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:12}},
-          R.createElement('span',{style:{fontWeight:700,fontSize:16}},itemCount+' Artikel'),
+          R.createElement('span',{style:{fontWeight:700,fontSize:16}},itemCount+' '+KT.articles),
           R.createElement('span',{style:{fontWeight:900,fontSize:20,color:'#C84B31'}},total.toFixed(2)+' EUR')
         ),
         R.createElement('button',{
           onClick:function(){if(cart.length>0){setCart([]);setStep('done');}},
           style:{width:'100%',padding:16,borderRadius:12,border:'none',background:cart.length>0?'#C84B31':'#ccc',color:'#fff',fontWeight:900,cursor:cart.length>0?'pointer':'default',fontFamily:'inherit',fontSize:16}
-        },'Jetzt bestellen')
+        },KT.orderNow)
       )
     );
   }
@@ -21825,12 +22499,12 @@ function KioskView({ menuData }) {
   if (step === 'done') {
     return R.createElement('div',{style:{height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'#e8f5e9',padding:24}},
       R.createElement('div',{style:{fontSize:80,marginBottom:16}},'✅'),
-      R.createElement('div',{style:{fontSize:28,fontWeight:900,color:'#2e7d32',marginBottom:8,textAlign:'center'}},'Bestellung aufgegeben!'),
+      R.createElement('div',{style:{fontSize:28,fontWeight:900,color:'#2e7d32',marginBottom:8,textAlign:'center'}},KT.orderDone),
       R.createElement('div',{style:{fontSize:16,color:'#555',marginBottom:48,textAlign:'center'}},
-        orderType==='here'?'Ihr Essen wird zu Ihrem Tisch gebracht.':'Ihr Essen wird gleich fertig sein.'),
+        orderType==='here'?KT.bringTable:KT.readySoon),
       R.createElement('button',{onClick:function(){setStep('welcome');setOrderType(null);setCart([]);},
         style:{padding:'16px 40px',borderRadius:16,border:'none',background:'#2e7d32',color:'#fff',fontWeight:900,fontSize:18,cursor:'pointer',fontFamily:'inherit'}
-      },'Neue Bestellung')
+      },KT.newOrder)
     );
   }
 
@@ -21841,11 +22515,11 @@ function KioskView({ menuData }) {
   return R.createElement('div',{style:{height:'100vh',display:'flex',flexDirection:'column',background:'#f5f5f5'}},
     R.createElement('div',{style:{background:'#C84B31',padding:'12px 16px',color:'#fff',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}},
       R.createElement('button',{onClick:function(){setStep('welcome');setCart([]);},style:{background:'transparent',border:'none',color:'#fff',fontSize:22,cursor:'pointer',padding:4}},'←'),
-      R.createElement('div',{style:{fontWeight:900,fontSize:15}},orderType==='here'?'Hier essen':'Zum Mitnehmen'),
+      R.createElement('div',{style:{fontWeight:900,fontSize:15}},orderType==='here'?KT.hereEatShort:KT.takeawayShort),
       R.createElement('div',{
         onClick:function(){if(cart.length>0)setStep('checkout');},
         style:{background:cart.length>0?'#fff':'rgba(255,255,255,.3)',color:cart.length>0?'#C84B31':'#fff',borderRadius:20,padding:'6px 12px',fontWeight:900,fontSize:12,cursor:cart.length>0?'pointer':'default',whiteSpace:'nowrap'}
-      },itemCount>0?(itemCount+' | '+total.toFixed(2)+' EUR'):'Warenkorb')
+      },itemCount>0?(itemCount+' | '+total.toFixed(2)+' EUR'):KT.cart)
     ),
     R.createElement('div',{style:{display:'flex',overflowX:'auto',padding:'8px 12px',gap:8,background:'#fff',borderBottom:'1px solid #eee',flexShrink:0}},
       cats.map(function(cat){
@@ -21873,7 +22547,7 @@ function KioskView({ menuData }) {
                 ? R.createElement('div',{style:{fontSize:10,color:'#999',marginBottom:4,lineHeight:1.3}},item.description)
                 : null,
               hasOpts
-                ? R.createElement('div',{style:{fontWeight:900,color:'#C84B31',fontSize:12,marginBottom:6}},'ab '+minPrice.toFixed(2)+' EUR')
+                ? R.createElement('div',{style:{fontWeight:900,color:'#C84B31',fontSize:12,marginBottom:6}},KT.from+' '+minPrice.toFixed(2)+' EUR')
                 : R.createElement('div',{style:{fontWeight:900,color:'#C84B31',fontSize:13,marginBottom:6}},'€'+(item.price||0).toFixed(2)),
               hasOpts
                 ? R.createElement('button',{
@@ -21881,7 +22555,7 @@ function KioskView({ menuData }) {
                       setOptionModal({id:iid, name:iname, description:item.description||'', options:item.options});
                     },
                     style:{width:'100%',padding:'7px 0',borderRadius:8,border:'none',background:'#C84B31',color:'#fff',fontWeight:700,fontSize:11,cursor:'pointer',fontFamily:'inherit'}
-                  },'Zutat waehlen')
+                  },KT.chooseZutat)
                 : qty > 0
                   ? R.createElement('div',{style:{display:'flex',alignItems:'center',gap:6,justifyContent:'center'}},
                       R.createElement('button',{onClick:function(){removeFromCart(iid+'_');},style:{width:28,height:28,borderRadius:14,border:'none',background:'#ffebee',color:'#c62828',fontWeight:900,fontSize:16,cursor:'pointer'}},'-'),
@@ -21891,7 +22565,7 @@ function KioskView({ menuData }) {
                   : R.createElement('button',{
                       onClick:function(){addToCart(iid,iname,item.price||0,null);},
                       style:{width:'100%',padding:'7px 0',borderRadius:8,border:'none',background:'#C84B31',color:'#fff',fontWeight:700,fontSize:11,cursor:'pointer',fontFamily:'inherit'}
-                    },'+ Hinzufuegen')
+                    },KT.add)
             )
           );
         })
