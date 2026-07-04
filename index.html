@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v144</title>
+<title>eatDeSi POS v147</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v144';",
+    "var CACHE='eatdesi-v147';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -374,15 +374,22 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
 window.RESTAURANT = {
   LOCATION_ID : (function(){
     try{
+      // Einmalige Migration: Geraete, die VOR dem Passwort-System liefen, sind freigeschaltet
+      if(!localStorage.getItem('eatdesi_guard_v')){
+        localStorage.setItem('eatdesi_guard_v','1');
+        var pre = localStorage.getItem('eatdesi_location_id');
+        if(pre) localStorage.setItem('eatdesi_tenant_ok_'+pre,'1');
+      }
       var p = new URLSearchParams(location.search).get('restaurant');
       if(p && /^[a-z0-9-]{2,40}$/i.test(p.trim())){
         p = p.trim().toLowerCase();
         localStorage.setItem('eatdesi_location_id', p);
-        return p;
+        return p; // Passwort-Pruefung macht belksTenantGuard() beim Start
       }
       var saved = localStorage.getItem('eatdesi_location_id');
       if(saved) return saved;
       localStorage.setItem('eatdesi_location_id','eatdesi-bw');
+      localStorage.setItem('eatdesi_tenant_ok_eatdesi-bw','1');
       return 'eatdesi-bw';
     }catch(e){ return 'eatdesi-bw'; }
   })(),
@@ -6479,7 +6486,36 @@ const MENU = {
 };
 const SUPA_URL = window.RESTAURANT.SUPA_URL;
 const SUPA_KEY = window.RESTAURANT.SUPA_KEY;
-const TABLES = Array.from({length:30},function(_,i){return {id:i+1};});
+// ===== TISCHE PRO RESTAURANT (v147, Multi-Tenant) =====
+// Anzahl kommt aus eatdesi_tablecount (synct automatisch pro Restaurant-Code).
+// Jede Tochter stellt ihre Tisch-Anzahl selbst in 🏢 Firmendaten ein (1-200).
+function getTableCount(){
+  try{
+    var n=parseInt(localStorage.getItem('eatdesi_tablecount'),10);
+    if(n>=1&&n<=200) return n;
+  }catch(e){}
+  return 30;
+}
+function _buildTables(n){ return Array.from({length:n},function(_,i){return {id:i+1};}); }
+var TABLES = _buildTables(getTableCount());
+function applyTableCount(n){
+  n=parseInt(n,10);
+  if(isNaN(n)) n=30;
+  n=Math.max(1,Math.min(200,n));
+  TABLES=_buildTables(n);
+  return n;
+}
+function setTableCount(n){
+  n=applyTableCount(n);
+  try{ localStorage.setItem('eatdesi_tablecount', String(n)); }catch(e){}
+  return n;
+}
+window.getTableCount=getTableCount; window.setTableCount=setTableCount;
+// Live-Update, wenn ein anderes Geraet desselben Restaurants die Anzahl aendert
+try{
+  window.addEventListener('eatdesi_tablecount_synced', function(){ applyTableCount(getTableCount()); });
+  window.addEventListener('eatdesi_state_synced', function(ev){ if(ev&&ev.detail&&ev.detail.key==='eatdesi_tablecount') applyTableCount(getTableCount()); });
+}catch(e){}
 
 var fmt = function(n){return (+(n||0)).toFixed(2)+' €';};
 
@@ -10118,7 +10154,7 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
   ];
 
   const geminiKey = printerSettings?.geminiKey || "";
-  const allTables = Array.from({length:30},(_,i)=>i+1);
+  const allTables = TABLES.map(function(t){return t.id;});
   const floorTables = (floors||[]).flatMap(f=>(f.tables||[]).filter(t=>!(f.hidden||[]).includes(t)));
 
   const [lang, setLang] = React.useState(function(){ try{ var k=localStorage.getItem('eatdesi_kiosk_lang'); if(k){ localStorage.removeItem('eatdesi_kiosk_lang'); return k; } }catch(e){} return "de"; });
@@ -17366,7 +17402,7 @@ function FloorsView({ floors, onSave }) {
   const [showNewFloor, setShowNewFloor] = React.useState(false);
   const [confirmDelFloor, setConfirmDelFloor] = React.useState(null);
   const ICONS = ["🏠","🌿","🍺","🍽️","⭐","🎉","🌙","☀️","🛋️","🏋️","🎭","🧊"];
-  const ALL_TABLES = Array.from({length:30},(_,i)=>i+1);
+  const ALL_TABLES = TABLES.map(function(t){return t.id;});
 
   const persist = (updated) => { setLocalFloors(updated); onSave(updated); };
 
@@ -19100,7 +19136,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v144"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v147"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21337,7 +21373,30 @@ function FirmendatenView() {
         );
       }),
       R.createElement('button',{onClick:save,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'Speichern')
-    )
+    ),
+    R.createElement(TischAnzahlCard,null)
+  );
+}
+
+// 🪑 Tisch-Anzahl pro Restaurant (v147) — gilt sofort, synct auf alle Geraete dieses Restaurants
+function TischAnzahlCard(){
+  var R=React;
+  var [n,setN]=R.useState(function(){ return window.getTableCount?window.getTableCount():30; });
+  var [msg,setMsg]=R.useState('');
+  var iS={width:'100%',padding:'8px 10px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8};
+  function saveN(){
+    var applied=window.setTableCount?window.setTableCount(n):30;
+    setN(applied);
+    setMsg('\u2705 Gespeichert: '+applied+' Tische \u2013 gilt sofort auf diesem Ger\u00e4t und synct auf alle Ger\u00e4te dieses Restaurants.');
+    try{ if(window.runSync) window.runSync(); }catch(e){}
+  }
+  return R.createElement('div',{style:{background:'#fff',borderRadius:12,padding:14,border:'1px solid #eee',marginTop:14}},
+    R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:6}},'\uD83E\uDE91 Tische'),
+    R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},'Anzahl Tische in diesem Restaurant (1\u2013200)'),
+    R.createElement('input',{type:'number',min:1,max:200,value:n,onChange:function(e){setN(e.target.value);},style:iS}),
+    R.createElement('div',{style:{fontSize:11,color:'#999',marginBottom:8,lineHeight:1.6}},'Gilt nur f\u00fcr DIESES Restaurant \u2013 jede Tochter stellt ihre eigene Anzahl ein (auch mehr f\u00fcr Au\u00dfenbereich, z.B. 40). Beim Verkleinern darauf achten, dass auf hohen Tischnummern keine offenen Bestellungen liegen (Cloud-Daten bleiben erhalten \u2013 beim Vergr\u00f6\u00dfern wieder sichtbar). QR-Tischkarten danach ggf. neu drucken.'),
+    msg?R.createElement('div',{style:{color:'#2e7d32',fontSize:12,fontWeight:700,marginBottom:8}},msg):null,
+    R.createElement('button',{onClick:saveN,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'\uD83E\uDE91 Tisch-Anzahl speichern')
   );
 }
 
@@ -21404,8 +21463,22 @@ function slugifyTenant(s){
     .replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss')
     .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,30);
 }
+// Restaurant-Passwort generieren (gut lesbar, ohne 0/O/1/l)
+function belksRandPw(){
+  var chars='ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  var out='';
+  for(var i=0;i<10;i++) out+=chars[Math.floor(Math.random()*chars.length)];
+  return out;
+}
+async function belksGetTenant(code){
+  var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(code)+'&select=*',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
+  if(!r.ok) return null;
+  var j=await r.json();
+  return (j&&j[0])||null;
+}
 function BelksZentraleView(){
   var R=React;
+  var [gate,setGate]=R.useState({state:'load',pw:'',pw2:'',err:''});
   var [tenants,setTenants]=R.useState(null);
   var [err,setErr]=R.useState('');
   var [okMsg,setOk]=R.useState('');
@@ -21426,52 +21499,136 @@ function BelksZentraleView(){
     .then(function(j){ setTenants(j); setErr(''); })
     .catch(function(e){ setTenants([]); setErr(String(e.message||e)); });
   }
-  R.useEffect(function(){ load(); },[]);
+  R.useEffect(function(){
+    load();
+    try{
+      if(sessionStorage.getItem('belks_master_ok')==='1'){ setGate({state:'open',pw:'',pw2:'',err:''}); return; }
+    }catch(e){}
+    belksGetTenant('belks-master').then(function(m){
+      if(m&&m.secret) setGate({state:'login',pw:'',pw2:'',err:'',expect:m.secret});
+      else setGate({state:'setup',pw:'',pw2:'',err:''});
+    }).catch(function(){ setGate({state:'setup',pw:'',pw2:'',err:''}); });
+  },[]);
+  function gateSetup(){
+    if((gate.pw||'').length<6){ setGate(Object.assign({},gate,{err:'Mindestens 6 Zeichen.'})); return; }
+    if(gate.pw!==gate.pw2){ setGate(Object.assign({},gate,{err:'Passw\u00f6rter stimmen nicht \u00fcberein.'})); return; }
+    fetch(SUPA_URL+'/rest/v1/belks_tenants',{method:'POST',
+      headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},
+      body:JSON.stringify({location_id:'belks-master',name:'BELKS MASTER',secret:gate.pw,plan:'master',active:false})})
+    .then(function(r){
+      if(!r.ok&&r.status!==201&&r.status!==409) throw new Error('HTTP '+r.status);
+      try{sessionStorage.setItem('belks_master_ok','1');}catch(e){}
+      setGate({state:'open',pw:'',pw2:'',err:''});
+    })
+    .catch(function(e){ setGate(Object.assign({},gate,{err:String(e.message||e)})); });
+  }
+  function gateLogin(){
+    if(String(gate.pw)===String(gate.expect)){
+      try{sessionStorage.setItem('belks_master_ok','1');}catch(e){}
+      setGate({state:'open',pw:'',pw2:'',err:''});
+    } else setGate(Object.assign({},gate,{err:'Falsches Master-Passwort.'}));
+  }
   var effCode=slugifyTenant(codeTouched?code:name);
   function create(){
     if(!name.trim()){setErr('Bitte Restaurant-Name eingeben.');return;}
     if(!effCode||effCode.length<2){setErr('Restaurant-Code ung\u00fcltig.');return;}
+    if(effCode==='belks-master'){setErr('Dieser Code ist reserviert.');return;}
+    var pw=belksRandPw();
     setBusy(true);setErr('');setOk('');
     fetch(SUPA_URL+'/rest/v1/belks_tenants',{method:'POST',
       headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},
-      body:JSON.stringify({location_id:effCode,name:name.trim(),street:street.trim(),city:city.trim(),phone:phone.trim(),plan:'free',active:true})})
+      body:JSON.stringify({location_id:effCode,name:name.trim(),street:street.trim(),city:city.trim(),phone:phone.trim(),plan:'free',active:true,secret:pw})})
     .then(function(r){
       if(r.status===409) throw new Error('Code "'+effCode+'" existiert schon \u2013 bitte anderen Code w\u00e4hlen.');
       if(!r.ok&&r.status!==201) throw new Error('HTTP '+r.status);
-      setOk('\u2705 Tochter-Restaurant "'+name.trim()+'" angelegt! Restaurant-Code: '+effCode);
+      setOk('\u2705 "'+name.trim()+'" angelegt! Code: '+effCode+' \u00b7 Restaurant-Passwort: '+pw+' \u2013 gut aufbewahren! (Steht auch unter \uD83D\uDD17 Links)');
       setName('');setCode('');setCodeTouched(false);setStreet('');setCity('');setPhone('');
       setShowLinks(effCode); load(); setBusy(false);
     })
     .catch(function(e){ setErr(String(e.message||e)); setBusy(false); });
   }
   function switchTo(c){
-    if(!window.confirm('Zu Restaurant "'+c+'" wechseln?\n\nDie App l\u00e4dt neu und zeigt dann NUR die Daten dieses Restaurants.\nLokale Daten des aktuellen Restaurants werden auf diesem Ger\u00e4t geleert (Cloud-Daten bleiben sicher \u2013 vorher am besten einmal syncen).')) return;
-    try{ if(window.runSync) window.runSync(); }catch(e){}
-    setTimeout(function(){
+    (async function(){
       try{
-        var keep=['eatdesi_location_id','eatdesi_sb_url','eatdesi_sb_key','eatdesi_printer'];
-        var kill=[];
-        for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k&&k.indexOf('eatdesi_')===0&&keep.indexOf(k)<0) kill.push(k); }
-        kill.forEach(function(k){ localStorage.removeItem(k); });
-        localStorage.setItem('eatdesi_location_id',c);
-      }catch(e){}
-      location.reload();
-    },1200);
+        var t=await belksGetTenant(c);
+        if(t&&t.secret){
+          var pw=window.prompt('Restaurant-Passwort f\u00fcr "'+c+'" eingeben:');
+          if(pw===null) return;
+          if(String(pw)!==String(t.secret)){ window.alert('Falsches Passwort.'); return; }
+        }
+        if(!window.confirm('Zu Restaurant "'+c+'" wechseln?\n\nDie App l\u00e4dt neu und zeigt dann NUR die Daten dieses Restaurants.\nLokale Daten des aktuellen Restaurants werden auf diesem Ger\u00e4t geleert (Cloud-Daten bleiben sicher \u2013 vorher am besten einmal syncen).')) return;
+        try{ if(window.runSync) window.runSync(); }catch(e){}
+        setTimeout(function(){
+          try{
+            var keep=['eatdesi_location_id','eatdesi_sb_url','eatdesi_sb_key','eatdesi_printer','eatdesi_guard_v'];
+            var kill=[];
+            for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k&&k.indexOf('eatdesi_')===0&&keep.indexOf(k)<0&&k.indexOf('eatdesi_tenant_ok_')!==0) kill.push(k); }
+            kill.forEach(function(k){ localStorage.removeItem(k); });
+            localStorage.setItem('eatdesi_location_id',c);
+            localStorage.setItem('eatdesi_tenant_ok_'+c,'1');
+          }catch(e){}
+          location.reload();
+        },1200);
+      }catch(e){ window.alert('Fehler: '+e); }
+    })();
+  }
+  function regenPw(c){
+    if(!window.confirm('Neues Restaurant-Passwort f\u00fcr "'+c+'" erzeugen?\n\nDas alte Passwort gilt danach NICHT mehr f\u00fcr neue Ger\u00e4te-Aktivierungen. Bereits aktivierte Ger\u00e4te laufen normal weiter.')) return;
+    var pw=belksRandPw();
+    fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(c),{method:'PATCH',
+      headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},
+      body:JSON.stringify({secret:pw})})
+    .then(function(r){
+      if(!r.ok&&r.status!==204) throw new Error('HTTP '+r.status);
+      setOk('\uD83D\uDD11 Neues Passwort f\u00fcr '+c+': '+pw+' \u2013 gut aufbewahren und dem Restaurant mitteilen!');
+      setShowLinks(c); load();
+    })
+    .catch(function(e){ setErr(String(e.message||e)); });
   }
   var posBase=location.origin+location.pathname;
   var webBase=posBase.replace(/index\.html?$/i,'')+'eatdesi-website.html';
   var sqlLines=[
-    "create table if not exists belks_tenants (location_id text primary key, name text, street text, city text, phone text, plan text default 'free', active boolean default true, created_at timestamptz default now());",
+    "create table if not exists belks_tenants (location_id text primary key, name text, street text, city text, phone text, plan text default 'free', active boolean default true, secret text, created_at timestamptz default now());",
     "alter table belks_tenants enable row level security;",
-    "create policy \"belks_anon_all\" on belks_tenants for all using (true) with check (true);"
+    "create policy \"belks_anon_all\" on belks_tenants for all using (true) with check (true);",
+    "alter table belks_tenants add column if not exists secret text;"
   ];
+  // ===== Master-Gate =====
+  if(gate.state!=='open'){
+    return R.createElement('div',{style:{padding:16}},
+      R.createElement('div',{style:{fontWeight:800,fontSize:17,color:'#C84B31',marginBottom:8}},'\uD83C\uDFE2 Belks AI POS \u2014 Zentrale'),
+      err==='TABLE_MISSING'?R.createElement('div',{style:Object.assign({},card,{border:'2px solid #e65100',background:'#fff8f0'})},
+        R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:6,color:'#e65100'}},'\u26A0\uFE0F Einmalige Einrichtung: Supabase-Tabelle fehlt'),
+        R.createElement('div',{style:{fontSize:12,color:'#555',marginBottom:8,lineHeight:1.6}},'Supabase \u2192 SQL Editor \u2192 Befehle NACHEINANDER ausf\u00fchren (je EINE Zeile), dann App neu laden.'),
+        sqlLines.map(function(q,i){return R.createElement('div',{key:i,style:{background:'#1a1a1e',color:'#9fe870',fontFamily:'monospace',fontSize:10.5,padding:'8px 10px',borderRadius:8,marginBottom:6,wordBreak:'break-all',userSelect:'all'}},q);})
+      ):null,
+      R.createElement('div',{style:Object.assign({},card,{maxWidth:420})},
+        R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:6}},'\uD83D\uDD10 Belks Master-Zugang'),
+        gate.state==='load'?R.createElement('div',{style:{fontSize:12,color:'#999'}},'Pr\u00fcfe\u2026'):null,
+        gate.state==='setup'?R.createElement('div',null,
+          R.createElement('div',{style:{fontSize:12,color:'#555',marginBottom:8,lineHeight:1.6}},'Erster Start: Lege jetzt das Master-Passwort f\u00fcr die Zentrale fest. Nur der Belks-Betreiber (du) kennt es \u2013 Tochter-Restaurants haben KEINEN Zugang zur Zentrale.'),
+          lbl('Master-Passwort (mind. 6 Zeichen)'),
+          R.createElement('input',{type:'password',value:gate.pw,onChange:function(e){setGate(Object.assign({},gate,{pw:e.target.value,err:''}));},style:iS}),
+          lbl('Master-Passwort wiederholen'),
+          R.createElement('input',{type:'password',value:gate.pw2,onChange:function(e){setGate(Object.assign({},gate,{pw2:e.target.value,err:''}));},style:iS}),
+          gate.err?R.createElement('div',{style:{color:'#c62828',fontSize:12,fontWeight:700,marginBottom:8}},'\u26A0\uFE0F '+gate.err):null,
+          R.createElement('button',{onClick:gateSetup,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD10 Festlegen & \u00f6ffnen')):null,
+        gate.state==='login'?R.createElement('div',null,
+          lbl('Master-Passwort'),
+          R.createElement('input',{type:'password',value:gate.pw,onChange:function(e){setGate(Object.assign({},gate,{pw:e.target.value,err:''}));},onKeyDown:function(e){if(e.key==='Enter')gateLogin();},style:iS}),
+          gate.err?R.createElement('div',{style:{color:'#c62828',fontSize:12,fontWeight:700,marginBottom:8}},'\u26A0\uFE0F '+gate.err):null,
+          R.createElement('button',{onClick:gateLogin,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD13 \u00d6ffnen')):null
+      ));
+  }
+  // ===== Zentrale (entsperrt) =====
+  var list=(tenants||[]).filter(function(t){return t.location_id!=='belks-master';});
   return R.createElement('div',{style:{padding:16,overflowY:'auto',height:'calc(100vh - 90px)'}},
     R.createElement('div',{style:{fontWeight:800,fontSize:17,color:'#C84B31',marginBottom:2}},'\uD83C\uDFE2 Belks AI POS \u2014 Zentrale'),
-    R.createElement('div',{style:{fontSize:12,color:'#777',marginBottom:4}},'Mutter-Firma verwaltet hier alle Tochter-Restaurants \u2013 anlegen, Links erzeugen, wechseln. Eine App-Datei f\u00fcr alle: jedes Update gilt sofort f\u00fcr jede Tochter.'),
+    R.createElement('div',{style:{fontSize:12,color:'#777',marginBottom:4}},'Mutter-Firma verwaltet hier alle Tochter-Restaurants \u2013 anlegen, Links + Passw\u00f6rter, wechseln. Eine App-Datei f\u00fcr alle: jedes Update gilt sofort f\u00fcr jede Tochter.'),
     R.createElement('div',{style:{display:'inline-block',background:'#1a1a1e',color:'#e8c95a',fontWeight:800,fontSize:12,padding:'5px 12px',borderRadius:999,marginBottom:14}},'Dieses Ger\u00e4t: '+LOCATION_ID),
     err==='TABLE_MISSING'?R.createElement('div',{style:Object.assign({},card,{border:'2px solid #e65100',background:'#fff8f0'})},
       R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:6,color:'#e65100'}},'\u26A0\uFE0F Einmalige Einrichtung: Supabase-Tabelle fehlt'),
-      R.createElement('div',{style:{fontSize:12,color:'#555',marginBottom:8,lineHeight:1.6}},'Supabase \u2192 SQL Editor \u2192 diese 3 Befehle NACHEINANDER ausf\u00fchren (jeder ist EINE Zeile \u2013 einzeln einf\u00fcgen, vorher Feld leeren, dann RUN). Danach hier unten auf \u201eNeu laden\u201c.'),
+      R.createElement('div',{style:{fontSize:12,color:'#555',marginBottom:8,lineHeight:1.6}},'Supabase \u2192 SQL Editor \u2192 diese Befehle NACHEINANDER ausf\u00fchren (jeder ist EINE Zeile \u2013 einzeln einf\u00fcgen, vorher Feld leeren, dann RUN). Danach \u201eNeu laden\u201c.'),
       sqlLines.map(function(q,i){return R.createElement('div',{key:i,style:{background:'#1a1a1e',color:'#9fe870',fontFamily:'monospace',fontSize:10.5,padding:'8px 10px',borderRadius:8,marginBottom:6,wordBreak:'break-all',userSelect:'all'}},q);}),
       R.createElement('button',{onClick:load,style:{padding:'10px 16px',borderRadius:10,border:'none',background:'#e65100',color:'#fff',fontWeight:800,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD04 Neu laden')
     ):null,
@@ -21486,14 +21643,15 @@ function BelksZentraleView(){
         R.createElement('div',{style:{flex:1}},lbl('PLZ Ort'),R.createElement('input',{value:city,onChange:function(e){setCity(e.target.value);},style:iS}))),
       lbl('Telefon'),
       R.createElement('input',{value:phone,onChange:function(e){setPhone(e.target.value);},style:iS}),
+      R.createElement('div',{style:{fontSize:11,color:'#7b1fa2',fontWeight:700,margin:'2px 0 8px'}},'\uD83D\uDD10 Beim Anlegen wird automatisch ein Restaurant-Passwort erzeugt \u2013 damit aktiviert die Tochter ihre Ger\u00e4te. So bleiben alle Restaurants strikt getrennt.'),
       err&&err!=='TABLE_MISSING'?R.createElement('div',{style:{color:'#c62828',fontSize:12,fontWeight:700,marginBottom:8}},'\u26A0\uFE0F '+err):null,
-      okMsg?R.createElement('div',{style:{color:'#2e7d32',fontSize:12,fontWeight:700,marginBottom:8}},okMsg):null,
+      okMsg?R.createElement('div',{style:{color:'#2e7d32',fontSize:12,fontWeight:700,marginBottom:8,userSelect:'all'}},okMsg):null,
       R.createElement('button',{onClick:create,disabled:busy,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:busy?'#999':'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},busy?'Lege an\u2026':'\uD83C\uDFEA Tochter anlegen')),
     R.createElement('div',{style:card},
       R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:8}},'\uD83C\uDFEA Alle Tochter-Restaurants'),
       tenants===null?R.createElement('div',{style:{fontSize:12,color:'#999'}},'L\u00e4dt\u2026'):
-      !tenants.length?R.createElement('div',{style:{fontSize:12,color:'#999'}},'Noch keine Restaurants angelegt.'):
-      tenants.map(function(t){
+      !list.length?R.createElement('div',{style:{fontSize:12,color:'#999'}},'Noch keine Restaurants angelegt.'):
+      list.map(function(t){
         var c=t.location_id;
         var isCur=c===LOCATION_ID;
         return R.createElement('div',{key:c,style:{borderBottom:'1px solid #f2f2f2',padding:'8px 0'}},
@@ -21506,14 +21664,18 @@ function BelksZentraleView(){
               R.createElement('button',{onClick:function(){setShowLinks(showLinks===c?'':c);},style:{padding:'6px 10px',borderRadius:8,border:'1px solid #1565c0',background:'#fff',color:'#1565c0',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD17 Links'),
               isCur?null:R.createElement('button',{onClick:function(){switchTo(c);},style:{padding:'6px 10px',borderRadius:8,border:'none',background:'#7b1fa2',color:'#fff',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD04 Wechseln'))),
           showLinks===c?R.createElement('div',{style:{marginTop:6,fontSize:11}},
-            lbl('POS-Link (auf neuem Ger\u00e4t EINMAL \u00f6ffnen \u2013 Code wird gespeichert):'),
+            lbl('Restaurant-Passwort (f\u00fcr Ger\u00e4te-Aktivierung \u2013 geheim halten!):'),
+            R.createElement('div',{style:{display:'flex',gap:6}},
+              R.createElement('input',{readOnly:true,value:t.secret||'\u2014 (keins gesetzt)',style:Object.assign({},iS,{fontFamily:'monospace',fontSize:11,fontWeight:700,flex:1,width:'auto'}),onFocus:function(e){e.target.select();}}),
+              R.createElement('button',{onClick:function(){regenPw(c);},style:{flex:'0 0 auto',padding:'8px 10px',borderRadius:8,border:'none',background:'#e65100',color:'#fff',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit',marginBottom:8}},'\uD83D\uDD11 Neues Passwort')),
+            lbl('POS-Link (auf neuem Ger\u00e4t EINMAL \u00f6ffnen \u2013 fragt dann das Restaurant-Passwort):'),
             R.createElement('input',{readOnly:true,value:posBase+'?restaurant='+c,style:Object.assign({},iS,{fontFamily:'monospace',fontSize:10.5}),onFocus:function(e){e.target.select();}}),
             lbl('Website-Link (Gast-Bestellseite \u2013 Website-Umbau folgt als n\u00e4chster Schritt):'),
             R.createElement('input',{readOnly:true,value:webBase+'?r='+c,style:Object.assign({},iS,{fontFamily:'monospace',fontSize:10.5}),onFocus:function(e){e.target.select();}})
           ):null);
       })),
     R.createElement('div',{style:{fontSize:11,color:'#999',maxWidth:620,lineHeight:1.7}},
-      '\u2139\uFE0F So funktioniert Belks Multi-Tenant: Jede Tochter hat einen Restaurant-Code. Der Code steckt in localStorage (oder im Link ?restaurant=CODE) \u2013 alle Daten (Bestellungen, Men\u00fc, Firmendaten) sind in der Cloud strikt pro Code getrennt. Neue Tochter einrichten: 1) hier anlegen, 2) POS-Link auf dem Ger\u00e4t der Tochter \u00f6ffnen, 3) dort Firmendaten + Men\u00fc + Benutzer einstellen. Fertig \u2013 ohne neue Datei, ohne Programmierer.')
+      '\u2139\uFE0F Belks-Sicherheit Stufe 1: Zentrale = Master-Passwort (nur Betreiber). Jede Tochter = eigener Code + eigenes Restaurant-Passwort f\u00fcr die Ger\u00e4te-Aktivierung. Daten liegen in der Cloud strikt pro Code getrennt. Stufe 2 (vor Verkauf an fremde Restaurants): echte Server-Trennung per Supabase-Auth \u2013 geplanter eigener Schritt.')
   );
 }
 
@@ -21939,7 +22101,7 @@ function closeQRCardOverlay(){
 
 function QRKartenView(){
   var R=React;
-  var [cfg,setCfg]=R.useState(function(){return LS.get('eatdesi_qrcfg',{count:30,url:'https://eatdesi.github.io/eatdesi-pos/eatdesi-website.html',subtitle:'Fusion Kitchen & Grill'});});
+  var [cfg,setCfg]=R.useState(function(){return LS.get('eatdesi_qrcfg',{count:(window.getTableCount?window.getTableCount():30),url:'https://eatdesi.github.io/eatdesi-pos/eatdesi-website.html',subtitle:'Fusion Kitchen & Grill'});});
   var [busy,setBusy]=R.useState(false);
   var [err,setErr]=R.useState('');
   var iS={width:'100%',padding:'8px 10px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8};
@@ -23598,6 +23760,55 @@ function printHtml(htmlContent) {
 
 // APK-kompatibler Druck (Alias, falls woanders genutzt)
 function printInAPK(htmlContent) { printHtml(htmlContent); }
+
+// ===== BELKS TENANT-GUARD: neuer Restaurant-Code braucht Restaurant-Passwort =====
+function belksTenantGuard(){
+  try{
+    var code = LOCATION_ID;
+    if(localStorage.getItem('eatdesi_tenant_ok_'+code)==='1') return;
+    var ov=document.createElement('div');
+    ov.id='belksGuard';
+    ov.style.cssText='position:fixed;inset:0;z-index:999999;background:#1a1a1e;display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML='<div style="background:#fff;border-radius:16px;padding:22px;max-width:380px;width:100%;font-family:sans-serif">'
+      +'<div style="font-weight:800;font-size:17px;margin-bottom:6px">\uD83C\uDFE2 Belks AI POS</div>'
+      +'<div style="font-size:13px;color:#555;margin-bottom:12px;line-height:1.5">Restaurant <b>'+code+'</b> auf diesem Ger\u00e4t aktivieren \u2013 bitte das <b>Restaurant-Passwort</b> eingeben (steht in der Belks-Zentrale unter \uD83D\uDD17 Links).</div>'
+      +'<input id="belksGuardPw" type="password" style="width:100%;padding:11px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;box-sizing:border-box;margin-bottom:6px" placeholder="Restaurant-Passwort">'
+      +'<div id="belksGuardErr" style="color:#c62828;font-size:12px;font-weight:700;min-height:16px;margin-bottom:6px"></div>'
+      +'<button id="belksGuardOk" style="width:100%;padding:12px;border:none;border-radius:10px;background:#2e7d32;color:#fff;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">\uD83D\uDD13 Freischalten</button>'
+      +'<button id="belksGuardBack" style="width:100%;padding:10px;border:none;border-radius:10px;background:#eee;color:#555;font-weight:700;font-size:12px;cursor:pointer;margin-top:8px;font-family:inherit">Abbrechen</button>'
+      +'</div>';
+    document.body.appendChild(ov);
+    var checking=false;
+    async function check(){
+      if(checking) return; checking=true;
+      var errEl=document.getElementById('belksGuardErr');
+      errEl.textContent='Pr\u00fcfe\u2026';
+      try{
+        var pw=document.getElementById('belksGuardPw').value;
+        var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(code)+'&select=location_id,secret',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
+        var j=r.ok?await r.json():[];
+        var t=j&&j[0];
+        if(!t || !t.secret || String(pw)===String(t.secret)){
+          localStorage.setItem('eatdesi_tenant_ok_'+code,'1');
+          location.reload();
+          return;
+        }
+        errEl.textContent='Falsches Passwort.';
+      }catch(e){ errEl.textContent='Netzwerkfehler \u2013 bitte erneut versuchen.'; }
+      checking=false;
+    }
+    document.getElementById('belksGuardOk').onclick=check;
+    document.getElementById('belksGuardPw').addEventListener('keydown',function(e){ if(e.key==='Enter') check(); });
+    document.getElementById('belksGuardBack').onclick=function(){
+      try{
+        localStorage.setItem('eatdesi_location_id','eatdesi-bw');
+        localStorage.setItem('eatdesi_tenant_ok_eatdesi-bw','1');
+      }catch(e){}
+      location.href=location.pathname;
+    };
+  }catch(e){}
+}
+belksTenantGuard();
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(React.createElement(App));
