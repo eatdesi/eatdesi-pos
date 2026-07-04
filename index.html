@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v143</title>
+<title>eatDeSi POS v144</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v143';",
+    "var CACHE='eatdesi-v144';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -363,15 +363,29 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
 </script>
 <script>
 // ╔═══════════════════════════════════════════════════════════════╗
-// ║   RESTAURANT CONFIG  —  NUR DIESEN BLOCK PRO FILIALE ÄNDERN     ║
-// ║   Für neue Tochter-App: LOCATION_ID ändern, Rest bleibt gleich  ║
-// ║   (Firmenname/Adresse/Menü werden IN DER APP eingestellt)       ║
-// ╠═══════════════════════════════════════════════════════════════╣
-// ║   eatDeSi BW (Bad Wildungen) → LOCATION_ID: 'eatdesi-bw'        ║
-// ║   eatDeSi FS (Felsberg)      → LOCATION_ID: 'eatdesi-fs'        ║
+// ║   BELKS AI POS — MULTI-TENANT CONFIG                            ║
+// ║   Restaurant-Code kommt aus: 1) URL ?restaurant=CODE            ║
+// ║   2) localStorage 'eatdesi_location_id'                         ║
+// ║   3) Fallback 'eatdesi-bw' (Migration: bestehende Geräte        ║
+// ║      laufen unverändert weiter)                                 ║
+// ║   Neue Töchter werden in der 🏢 Belks-Zentrale angelegt —      ║
+// ║   KEINE Datei-Kopien mehr nötig!                                ║
 // ╚═══════════════════════════════════════════════════════════════╝
 window.RESTAURANT = {
-  LOCATION_ID : 'eatdesi-bw',
+  LOCATION_ID : (function(){
+    try{
+      var p = new URLSearchParams(location.search).get('restaurant');
+      if(p && /^[a-z0-9-]{2,40}$/i.test(p.trim())){
+        p = p.trim().toLowerCase();
+        localStorage.setItem('eatdesi_location_id', p);
+        return p;
+      }
+      var saved = localStorage.getItem('eatdesi_location_id');
+      if(saved) return saved;
+      localStorage.setItem('eatdesi_location_id','eatdesi-bw');
+      return 'eatdesi-bw';
+    }catch(e){ return 'eatdesi-bw'; }
+  })(),
   SUPA_URL    : 'https://myaidcfmssfhzdatsqiv.supabase.co',
   SUPA_KEY    : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15YWlkY2Ztc3NmaHpkYXRzcWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NTM0OTYsImV4cCI6MjA5NjQyOTQ5Nn0.zJl2j5EEgz6NQmhp0reyyool0RdEbt8PC0kdqrRDpaA'
 };
@@ -19086,7 +19100,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v143"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v144"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -20116,6 +20130,8 @@ function App() {
   }, {
     id: "channels", l: "Lieferando/UberEats", i: "🛵"
   }, {
+    id: "belks", l: "Belks-Zentrale", i: "🏢"
+  }, {
     id: "personalplanung", l: "Personal", i: "👥"
   }, {
     id: "saas_dashboard", l: "SaaS", i: "🏢"
@@ -20903,6 +20919,7 @@ function App() {
   ), view === "kiosk" && React.createElement(KioskView, {menuData:menuData, setView:setView}
   ), view === "qr_karten" && React.createElement(QRKartenView, null
   ), view === "channels" && React.createElement(ChannelsView, {menuData:menuData, completedOrders:completedOrders}
+  ), view === "belks" && React.createElement(BelksZentraleView, null
   ), view === "personalplanung" && React.createElement(PersonalplanungView, null
   ), view === "saas_dashboard" && React.createElement(SaasDashboardView, null
   ),
@@ -21375,6 +21392,132 @@ function MenuImportExportView({ menuData, onUpdate }) {
 }
 
 /* ============================================================
+   🏢 BELKS AI POS — ZENTRALE (v144, Multi-Tenant SaaS)
+   Hier legt der Belks-Betreiber SELBST neue Tochter-Restaurants
+   an — keine Datei-Kopien mehr! Tenants liegen in der Supabase-
+   Tabelle belks_tenants. Jede Tochter = eigener Restaurant-Code
+   (= LOCATION_ID). Gleiche App-Datei für alle: ein Update auf
+   GitHub gilt sofort für alle Töchter.
+   ============================================================ */
+function slugifyTenant(s){
+  return String(s||'').toLowerCase()
+    .replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss')
+    .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,30);
+}
+function BelksZentraleView(){
+  var R=React;
+  var [tenants,setTenants]=R.useState(null);
+  var [err,setErr]=R.useState('');
+  var [okMsg,setOk]=R.useState('');
+  var [busy,setBusy]=R.useState(false);
+  var [name,setName]=R.useState('');
+  var [code,setCode]=R.useState('');
+  var [codeTouched,setCodeTouched]=R.useState(false);
+  var [street,setStreet]=R.useState('');
+  var [city,setCity]=R.useState('');
+  var [phone,setPhone]=R.useState('');
+  var [showLinks,setShowLinks]=R.useState('');
+  var iS={width:'100%',padding:'8px 10px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8};
+  var lbl=function(t){return R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},t);};
+  var card={background:'#fff',borderRadius:12,padding:14,border:'1px solid #eee',marginBottom:14,maxWidth:620};
+  function load(){
+    fetch(SUPA_URL+'/rest/v1/belks_tenants?select=*&order=created_at.asc',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}})
+    .then(function(r){ if(r.status===404) throw new Error('TABLE_MISSING'); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(function(j){ setTenants(j); setErr(''); })
+    .catch(function(e){ setTenants([]); setErr(String(e.message||e)); });
+  }
+  R.useEffect(function(){ load(); },[]);
+  var effCode=slugifyTenant(codeTouched?code:name);
+  function create(){
+    if(!name.trim()){setErr('Bitte Restaurant-Name eingeben.');return;}
+    if(!effCode||effCode.length<2){setErr('Restaurant-Code ung\u00fcltig.');return;}
+    setBusy(true);setErr('');setOk('');
+    fetch(SUPA_URL+'/rest/v1/belks_tenants',{method:'POST',
+      headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},
+      body:JSON.stringify({location_id:effCode,name:name.trim(),street:street.trim(),city:city.trim(),phone:phone.trim(),plan:'free',active:true})})
+    .then(function(r){
+      if(r.status===409) throw new Error('Code "'+effCode+'" existiert schon \u2013 bitte anderen Code w\u00e4hlen.');
+      if(!r.ok&&r.status!==201) throw new Error('HTTP '+r.status);
+      setOk('\u2705 Tochter-Restaurant "'+name.trim()+'" angelegt! Restaurant-Code: '+effCode);
+      setName('');setCode('');setCodeTouched(false);setStreet('');setCity('');setPhone('');
+      setShowLinks(effCode); load(); setBusy(false);
+    })
+    .catch(function(e){ setErr(String(e.message||e)); setBusy(false); });
+  }
+  function switchTo(c){
+    if(!window.confirm('Zu Restaurant "'+c+'" wechseln?\n\nDie App l\u00e4dt neu und zeigt dann NUR die Daten dieses Restaurants.\nLokale Daten des aktuellen Restaurants werden auf diesem Ger\u00e4t geleert (Cloud-Daten bleiben sicher \u2013 vorher am besten einmal syncen).')) return;
+    try{ if(window.runSync) window.runSync(); }catch(e){}
+    setTimeout(function(){
+      try{
+        var keep=['eatdesi_location_id','eatdesi_sb_url','eatdesi_sb_key','eatdesi_printer'];
+        var kill=[];
+        for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k&&k.indexOf('eatdesi_')===0&&keep.indexOf(k)<0) kill.push(k); }
+        kill.forEach(function(k){ localStorage.removeItem(k); });
+        localStorage.setItem('eatdesi_location_id',c);
+      }catch(e){}
+      location.reload();
+    },1200);
+  }
+  var posBase=location.origin+location.pathname;
+  var webBase=posBase.replace(/index\.html?$/i,'')+'eatdesi-website.html';
+  var sqlLines=[
+    "create table if not exists belks_tenants (location_id text primary key, name text, street text, city text, phone text, plan text default 'free', active boolean default true, created_at timestamptz default now());",
+    "alter table belks_tenants enable row level security;",
+    "create policy \"belks_anon_all\" on belks_tenants for all using (true) with check (true);"
+  ];
+  return R.createElement('div',{style:{padding:16,overflowY:'auto',height:'calc(100vh - 90px)'}},
+    R.createElement('div',{style:{fontWeight:800,fontSize:17,color:'#C84B31',marginBottom:2}},'\uD83C\uDFE2 Belks AI POS \u2014 Zentrale'),
+    R.createElement('div',{style:{fontSize:12,color:'#777',marginBottom:4}},'Mutter-Firma verwaltet hier alle Tochter-Restaurants \u2013 anlegen, Links erzeugen, wechseln. Eine App-Datei f\u00fcr alle: jedes Update gilt sofort f\u00fcr jede Tochter.'),
+    R.createElement('div',{style:{display:'inline-block',background:'#1a1a1e',color:'#e8c95a',fontWeight:800,fontSize:12,padding:'5px 12px',borderRadius:999,marginBottom:14}},'Dieses Ger\u00e4t: '+LOCATION_ID),
+    err==='TABLE_MISSING'?R.createElement('div',{style:Object.assign({},card,{border:'2px solid #e65100',background:'#fff8f0'})},
+      R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:6,color:'#e65100'}},'\u26A0\uFE0F Einmalige Einrichtung: Supabase-Tabelle fehlt'),
+      R.createElement('div',{style:{fontSize:12,color:'#555',marginBottom:8,lineHeight:1.6}},'Supabase \u2192 SQL Editor \u2192 diese 3 Befehle NACHEINANDER ausf\u00fchren (jeder ist EINE Zeile \u2013 einzeln einf\u00fcgen, vorher Feld leeren, dann RUN). Danach hier unten auf \u201eNeu laden\u201c.'),
+      sqlLines.map(function(q,i){return R.createElement('div',{key:i,style:{background:'#1a1a1e',color:'#9fe870',fontFamily:'monospace',fontSize:10.5,padding:'8px 10px',borderRadius:8,marginBottom:6,wordBreak:'break-all',userSelect:'all'}},q);}),
+      R.createElement('button',{onClick:load,style:{padding:'10px 16px',borderRadius:10,border:'none',background:'#e65100',color:'#fff',fontWeight:800,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD04 Neu laden')
+    ):null,
+    R.createElement('div',{style:card},
+      R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:8}},'\u2795 Neues Tochter-Restaurant anlegen'),
+      lbl('Restaurant-Name *'),
+      R.createElement('input',{value:name,onChange:function(e){setName(e.target.value);},style:iS,placeholder:'z.B. Kleine Kneipe Felsberg'}),
+      lbl('Restaurant-Code (= LOCATION_ID, klein, ohne Leerzeichen)'),
+      R.createElement('input',{value:codeTouched?code:effCode,onChange:function(e){setCode(e.target.value);setCodeTouched(true);},style:Object.assign({},iS,{fontFamily:'monospace'}),placeholder:'z.B. eatdesi-fs'}),
+      R.createElement('div',{style:{display:'flex',gap:8}},
+        R.createElement('div',{style:{flex:1}},lbl('Stra\u00dfe'),R.createElement('input',{value:street,onChange:function(e){setStreet(e.target.value);},style:iS})),
+        R.createElement('div',{style:{flex:1}},lbl('PLZ Ort'),R.createElement('input',{value:city,onChange:function(e){setCity(e.target.value);},style:iS}))),
+      lbl('Telefon'),
+      R.createElement('input',{value:phone,onChange:function(e){setPhone(e.target.value);},style:iS}),
+      err&&err!=='TABLE_MISSING'?R.createElement('div',{style:{color:'#c62828',fontSize:12,fontWeight:700,marginBottom:8}},'\u26A0\uFE0F '+err):null,
+      okMsg?R.createElement('div',{style:{color:'#2e7d32',fontSize:12,fontWeight:700,marginBottom:8}},okMsg):null,
+      R.createElement('button',{onClick:create,disabled:busy,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:busy?'#999':'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},busy?'Lege an\u2026':'\uD83C\uDFEA Tochter anlegen')),
+    R.createElement('div',{style:card},
+      R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:8}},'\uD83C\uDFEA Alle Tochter-Restaurants'),
+      tenants===null?R.createElement('div',{style:{fontSize:12,color:'#999'}},'L\u00e4dt\u2026'):
+      !tenants.length?R.createElement('div',{style:{fontSize:12,color:'#999'}},'Noch keine Restaurants angelegt.'):
+      tenants.map(function(t){
+        var c=t.location_id;
+        var isCur=c===LOCATION_ID;
+        return R.createElement('div',{key:c,style:{borderBottom:'1px solid #f2f2f2',padding:'8px 0'}},
+          R.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,flexWrap:'wrap'}},
+            R.createElement('div',null,
+              R.createElement('span',{style:{fontWeight:800,fontSize:13}},(isCur?'\u2B50 ':'')+(t.name||c)),
+              R.createElement('span',{style:{fontSize:11,color:'#888',marginLeft:6,fontFamily:'monospace'}},c),
+              t.city?R.createElement('span',{style:{fontSize:11,color:'#aaa',marginLeft:6}},'\u00b7 '+t.city):null),
+            R.createElement('div',{style:{display:'flex',gap:6}},
+              R.createElement('button',{onClick:function(){setShowLinks(showLinks===c?'':c);},style:{padding:'6px 10px',borderRadius:8,border:'1px solid #1565c0',background:'#fff',color:'#1565c0',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD17 Links'),
+              isCur?null:R.createElement('button',{onClick:function(){switchTo(c);},style:{padding:'6px 10px',borderRadius:8,border:'none',background:'#7b1fa2',color:'#fff',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD04 Wechseln'))),
+          showLinks===c?R.createElement('div',{style:{marginTop:6,fontSize:11}},
+            lbl('POS-Link (auf neuem Ger\u00e4t EINMAL \u00f6ffnen \u2013 Code wird gespeichert):'),
+            R.createElement('input',{readOnly:true,value:posBase+'?restaurant='+c,style:Object.assign({},iS,{fontFamily:'monospace',fontSize:10.5}),onFocus:function(e){e.target.select();}}),
+            lbl('Website-Link (Gast-Bestellseite \u2013 Website-Umbau folgt als n\u00e4chster Schritt):'),
+            R.createElement('input',{readOnly:true,value:webBase+'?r='+c,style:Object.assign({},iS,{fontFamily:'monospace',fontSize:10.5}),onFocus:function(e){e.target.select();}})
+          ):null);
+      })),
+    R.createElement('div',{style:{fontSize:11,color:'#999',maxWidth:620,lineHeight:1.7}},
+      '\u2139\uFE0F So funktioniert Belks Multi-Tenant: Jede Tochter hat einen Restaurant-Code. Der Code steckt in localStorage (oder im Link ?restaurant=CODE) \u2013 alle Daten (Bestellungen, Men\u00fc, Firmendaten) sind in der Cloud strikt pro Code getrennt. Neue Tochter einrichten: 1) hier anlegen, 2) POS-Link auf dem Ger\u00e4t der Tochter \u00f6ffnen, 3) dort Firmendaten + Men\u00fc + Benutzer einstellen. Fertig \u2013 ohne neue Datei, ohne Programmierer.')
+  );
+}
+
+/* ============================================================
    🛵 LIEFERKANÄLE: Lieferando & Uber Eats (v140)
    - Zugangsdaten-Verwaltung: API-Daten später vom Partner eintragen.
      Echte Live-API braucht Partner-Freigabe + kleinen Server (Backend);
@@ -21646,19 +21789,22 @@ function ChannelsView({menuData, completedOrders}){
       R.createElement('div',{style:{display:'flex',gap:6}},
         R.createElement('input',{value:quick,onChange:function(e){setQuick(e.target.value);},onKeyDown:function(e){if(e.key==='Enter')addQuick();},style:Object.assign({},iS,{flex:1,width:'auto'}),placeholder:'2x31, 81, 3x211'}),
         R.createElement('button',{onClick:addQuick,style:{flex:'0 0 auto',padding:'8px 14px',borderRadius:8,border:'none',background:'#e65100',color:'#fff',fontWeight:800,cursor:'pointer',fontFamily:'inherit',marginBottom:8}},'\u26A1')),
-      R.createElement('input',{type:'file',accept:'image/*',id:'chScanFile',onChange:scanPhoto,
-        style:{position:'absolute',width:1,height:1,opacity:0,overflow:'hidden',pointerEvents:'none',left:-9999}}),
       (function(){
-        var btnStyle={display:'block',width:'100%',padding:10,borderRadius:10,border:'2px dashed #7b1fa2',background:scanning?'#eee':'#f7f0fb',color:'#7b1fa2',fontWeight:800,fontSize:13,cursor:'pointer',fontFamily:'inherit',marginBottom:10,textAlign:'center',boxSizing:'border-box'};
+        var btnStyle={display:'block',width:'100%',padding:10,borderRadius:10,border:'2px dashed #7b1fa2',background:scanning?'#eee':'#f7f0fb',color:'#7b1fa2',fontWeight:800,fontSize:13,cursor:'pointer',fontFamily:'inherit',textAlign:'center',boxSizing:'border-box'};
         var btnText=scanning?'\uD83D\uDCF7 AI liest das Foto\u2026':'\uD83D\uDCF7 Foto vom Partner-Tablet scannen (AI f\u00fcllt automatisch aus)';
         var c=window.Capacitor;
         var hasNativeCam=!!(c&&c.isNativePlatform&&c.isNativePlatform()&&c.Plugins&&c.Plugins.Camera&&c.Plugins.Camera.getPhoto);
         if(hasNativeCam){
-          return R.createElement('button',{onClick:pickScanPhoto,disabled:scanning,style:btnStyle},btnText);
+          return R.createElement('button',{onClick:pickScanPhoto,disabled:scanning,style:Object.assign({},btnStyle,{marginBottom:10})},btnText);
         }
-        // WebView/Browser: <label for=input> = native Aktivierung, braucht KEIN JS-click (zuverl\u00e4ssiger im APK)
-        return R.createElement('label',{htmlFor:'chScanFile',style:btnStyle,
-          onClick:function(){ if(!scanning) setMsg('\uD83D\uDCF7 Foto-Auswahl \u00f6ffnet\u2026 (falls nichts passiert: App neu starten \u2013 Version pr\u00fcfen)'); }},btnText);
+        // WebView/Browser: unsichtbares file-input LIEGT DIREKT AUF dem Button
+        // -> Nutzer tippt das Input selbst an (kein label, kein JS-click; primitivster Pfad)
+        return R.createElement('div',{style:{position:'relative',marginBottom:10}},
+          R.createElement('div',{style:btnStyle},btnText),
+          R.createElement('input',{type:'file',accept:'image/*',id:'chScanFile',onChange:scanPhoto,disabled:scanning,
+            title:'Foto w\u00e4hlen',
+            style:{position:'absolute',top:0,left:0,width:'100%',height:'100%',opacity:0,cursor:'pointer',zIndex:2}})
+        );
       })(),
       lbl('Artikel hinzuf\u00fcgen'),
       R.createElement('div',{style:{display:'flex',gap:6,flexWrap:'wrap'}},
