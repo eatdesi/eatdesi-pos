@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- eatDeSi Website · Update 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
+<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -511,6 +511,7 @@ footer .fl:hover{color:var(--gold)}
       <a href="#kontakt">Kontakt</a>
     </nav>
     <div class="nav-right">
+      <button class="cart-btn" style="background:#3d3d44;box-shadow:0 2px 10px rgba(0,0,0,.25)" onclick="openAccount()" title="Mein Konto">👤</button>
       <button class="cart-btn" onclick="openCart()">🛒 <span class="badge" id="cartBadge">0</span></button>
       <button class="burger" onclick="toggleMenu()">☰</button>
     </div>
@@ -826,7 +827,17 @@ footer .fl:hover{color:var(--gold)}
 
 const SUPA_URL = 'https://myaidcfmssfhzdatsqiv.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15YWlkY2Ztc3NmaHpkYXRzcWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NTM0OTYsImV4cCI6MjA5NjQyOTQ5Nn0.zJl2j5EEgz6NQmhp0reyyool0RdEbt8PC0kdqrRDpaA';
-const LOCATION_ID = 'eatdesi-bw';
+// BELKS MULTI-TENANT: Eine Website-Datei für ALLE Tochter-Restaurants.
+// Tenant kommt aus URL ?r=CODE (oder ?restaurant=CODE). Ohne Param: eatdesi-bw
+// (bestehende Links/QR-Codes laufen unverändert weiter).
+const LOCATION_ID = (function(){
+  try{
+    var u=new URLSearchParams(location.search);
+    var p=u.get('r')||u.get('restaurant');
+    if(p && /^[a-z0-9-]{2,40}$/i.test(p.trim())) return p.trim().toLowerCase();
+  }catch(e){}
+  return 'eatdesi-bw';
+})();
 /* ===== Anfrage-Benachrichtigung (Email + WhatsApp) ===== */
 const NOTIFY = {
   email: 'eatdesi.bw@gmail.com',
@@ -1001,17 +1012,17 @@ async function geocodeStructured(street, number, plz, city){
 }
 // Zone aus Koordinaten finden (je nach zoneMode). Gibt {idx,zone,dist} oder null.
 function findZoneByCoords(lat,lng){
-  if(DELIVERY_CFG.zoneMode==='polygon'){
-    for(let i=0;i<ZONES.length;i++){
-      if(geoInPoly(lat,lng,ZONES[i].poly)) return {idx:i,zone:ZONES[i],dist:geoDistKm(REST_LOC.lat,REST_LOC.lng,lat,lng)};
-    }
-    return null;
-  }
-  // radius (Standard)
+  // FIX (Liefergebiet): hybrid & fehlertolerant. Vorher blockierte der
+  // Polygon-Modus ALLE Adressen, wenn kein Polygon gezeichnet/gespeichert war.
+  // Jetzt: pro Zone zählt Polygon (falls vorhanden) ODER Umkreis-km (falls >0).
+  // zoneMode bestimmt nur noch, was zuerst geprüft wird.
   const d=geoDistKm(REST_LOC.lat,REST_LOC.lng,lat,lng);
-  for(let i=0;i<ZONES.length;i++){
-    if(d<=(ZONES[i].km||0)) return {idx:i,zone:ZONES[i],dist:d};
-  }
+  const matchPoly=function(z){ return z && Array.isArray(z.poly) && z.poly.length>=3 && geoInPoly(lat,lng,z.poly); };
+  const matchKm=function(z){ const km=parseFloat(z&&z.km); return km>0 && d<=km; };
+  const first = DELIVERY_CFG.zoneMode==='polygon' ? matchPoly : matchKm;
+  const second= DELIVERY_CFG.zoneMode==='polygon' ? matchKm  : matchPoly;
+  for(let i=0;i<ZONES.length;i++){ if(first(ZONES[i]))  return {idx:i,zone:ZONES[i],dist:d}; }
+  for(let i=0;i<ZONES.length;i++){ if(second(ZONES[i])) return {idx:i,zone:ZONES[i],dist:d}; }
   return null;
 }
 /* Prüft ob eine PLZ zur Zone des gewählten Ortes passt.
@@ -1207,6 +1218,13 @@ function cartTotal(){return cart.reduce((s,c)=>s+c.unit*c.qty,0);}
 function cartCount(){return cart.reduce((s,c)=>s+c.qty,0);}
 function updateCart(){const n=cartCount();$('#cartBadge').textContent=n;var cb=document.querySelector('.cart-btn');if(cb)cb.classList.toggle('has',n>0);renderCartList();}
 
+function prefillFromAccount(){
+  try{
+    var c=getCust(); if(!c) return;
+    var fn=document.getElementById('f_name');  if(fn&&!fn.value&&c.name)  fn.value=c.name;
+    var fp=document.getElementById('f_phone'); if(fp&&!fp.value&&c.phone) fp.value=c.phone;
+  }catch(e){}
+}
 function renderCartList(){
   const list=$('#cartList'),foot=$('#drawerFoot');
   if(!cart.length){list.innerHTML=`<div class="cart-empty"><div class="big">🛒</div><p>Dein Warenkorb ist noch leer.<br>Such dir was Leckeres aus!</p></div>`;foot.innerHTML='';return;}
@@ -1302,6 +1320,8 @@ function goCheckout(){
     var zEl=document.getElementById('f_zip'); if(zEl && p.zip) zEl.value=p.zip;
     var cEl=document.getElementById('f_city'); if(cEl && p.city) cEl.value=p.city;
   }
+  // 👤 Konto: Name/Telefon vorbefüllen (angemeldete Kunden)
+  prefillFromAccount();
 }
 function setWishTime(t){
   document.querySelectorAll('#timePills button').forEach(b=>b.classList.toggle('on',b.dataset.time===t));
@@ -1393,7 +1413,7 @@ async function placeOrder(){
   try{
     const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr',{method:'POST',
       headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
-    if(r.ok||r.status===201||r.status===409){cart=[];updateCart();showDone(bonNr,total,isDeliv);}
+    if(r.ok||r.status===201||r.status===409){cart=[];updateCart();showDone(bonNr,total,isDeliv);try{var _oc=getCust()||{};setCust({phone:phone,name:name||_oc.name||'',points:_oc.points!=null?_oc.points:null});}catch(e){}}
     else{ const ok=await retryMinimal(bonNr,isDeliv?('Lieferung '+z.name):'Abholung',items,total,pay,name,phone,orderNote);
       if(ok){cart=[];updateCart();showDone(bonNr,total,isDeliv);} else throw new Error('HTTP '+r.status);}
   }catch(e){btn.disabled=false;btn.textContent='Erneut absenden';toast('⚠️ Senden fehlgeschlagen');console.warn(e);}
@@ -1707,10 +1727,112 @@ function closeDelivCheck(){
   if(ov){ ov.classList.remove('show'); }
   document.body.style.overflow='';
 }
+
+/* ===== 👤 KUNDENKONTO (Telefon-Login, ohne Passwort) =====
+   Handynummer = Kundennummer (wie Priya/Loyalty). Pro Restaurant getrennt
+   gespeichert (Multi-Tenant). Zeigt Name, Punkte (falls Stammkunde) und
+   die eigene Bestellhistorie mit Live-Status. */
+function custKey(){ return 'eatdesi_cust_'+LOCATION_ID; }
+function getCust(){ try{ return JSON.parse(localStorage.getItem(custKey())||'null'); }catch(e){ return null; } }
+function setCust(c){ try{ localStorage.setItem(custKey(), JSON.stringify(c)); }catch(e){} }
+function normPhone(p){ return String(p||'').replace(/[^0-9]/g,'').replace(/^49/,'0'); }
+function acctOverlay(html){
+  var ov=document.getElementById('acctOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='acctOverlay'; ov.className='dc-overlay'; document.body.appendChild(ov); }
+  ov.innerHTML=html; ov.classList.add('show'); document.body.style.overflow='hidden';
+}
+function closeAccount(){
+  var ov=document.getElementById('acctOverlay');
+  if(ov) ov.classList.remove('show');
+  document.body.style.overflow='';
+}
+function openAccount(){
+  var c=getCust();
+  if(c && c.phone) renderAccount(c);
+  else renderAcctLogin();
+}
+function renderAcctLogin(err){
+  acctOverlay('<div class="dc-box">'
+    +'<h3>👤 Mein Konto</h3>'
+    +'<p class="dc-sub">Einfach mit deiner Handynummer anmelden – kein Passwort nötig. Du siehst deine Bestellungen und deren Status.</p>'
+    +'<label class="dc-l">Handynummer</label>'
+    +'<input id="ac_phone" class="dc-i" inputmode="tel" placeholder="z.B. 0151 2345678">'
+    +'<div class="dc-err" id="ac_err">'+(err||'')+'</div>'
+    +'<button class="checkout" onclick="acctLogin()">🔓 Anmelden</button>'
+    +'<button class="dc-cancel" onclick="closeAccount()">Schließen</button>'
+    +'</div>');
+  var inp=document.getElementById('ac_phone');
+  if(inp) inp.addEventListener('keydown',function(e){ if(e.key==='Enter') acctLogin(); });
+}
+async function acctLogin(){
+  var raw=String((document.getElementById('ac_phone')||{}).value||'').trim();
+  var phone=normPhone(raw);
+  var err=document.getElementById('ac_err');
+  if(phone.length<6){ if(err) err.textContent='Bitte gültige Handynummer eingeben.'; return; }
+  if(err) err.textContent='Anmelden…';
+  var c={phone:raw, name:'', points:null};
+  // Name + Punkte aus der Kundenkartei (falls Stammkunde) – optional
+  try{
+    var g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_customers&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
+    if(g.ok){ var j=await g.json();
+      if(j&&j[0]&&j[0].value){
+        var list=JSON.parse(j[0].value)||[];
+        var found=list.find(function(k){ return normPhone(k.phone)===phone || normPhone(k.kundenNr)===phone; });
+        if(found){ c.name=found.name||''; if(typeof found.points==='number') c.points=found.points; }
+      }
+    }
+  }catch(e){}
+  setCust(c);
+  renderAccount(c);
+}
+function acctStatusLabel(o){
+  var n=String(o.note||'');
+  if(o.storniert || n.indexOf('[ABGELEHNT]')>=0) return {t:'❌ Storniert', c:'#c62828'};
+  if(n.indexOf('[NEU]')>=0) return {t:'🕐 Eingegangen', c:'#f57c00'};
+  var m=n.match(/\[OK:(\d+)\]/);
+  if(m) return {t:'👨‍🍳 In Arbeit (ca. '+m[1]+' Min)', c:'#1565c0'};
+  return {t:'✅ Abgeschlossen', c:'#2e7d32'};
+}
+async function renderAccount(c){
+  var hallo=c.name?('Hallo, '+c.name+'!'):('Hallo!');
+  var pts=(c.points!=null)?('<div style="font-size:13px;margin:4px 0 0">⭐ Deine Punkte: <b>'+c.points+'</b> (100 Punkte = 1€)</div>'):'';
+  acctOverlay('<div class="dc-box">'
+    +'<h3>👤 '+hallo+'</h3>'
+    +'<div style="font-size:12px;color:#888">Kundennummer: '+String(c.phone).replace(/</g,'&lt;')+'</div>'+pts
+    +'<div id="ac_orders" style="margin-top:12px;font-size:13px;color:#888">Lade Bestellungen…</div>'
+    +'<button class="checkout" style="margin-top:12px" onclick="closeAccount()">Weiter bestellen</button>'
+    +'<button class="dc-cancel" onclick="acctLogout()">Abmelden</button>'
+    +'</div>');
+  var box=document.getElementById('ac_orders');
+  try{
+    var phone=normPhone(c.phone);
+    var r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders?location_id=eq.'+LOCATION_ID+'&customer_phone=not.is.null&order=created_at.desc&limit=200&select=bon_nr,created_at,total,note,storniert,customer_phone',
+      {headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    var all=await r.json();
+    var mine=(all||[]).filter(function(o){ return normPhone(o.customer_phone)===phone; }).slice(0,15);
+    if(!box) return;
+    if(!mine.length){ box.innerHTML='Noch keine Bestellungen mit dieser Nummer. Bei deiner nächsten Bestellung einfach dieselbe Handynummer angeben. 😊'; return; }
+    box.innerHTML='<div style="font-weight:800;color:#333;margin-bottom:6px">🧾 Deine letzten Bestellungen</div>'+mine.map(function(o){
+      var d=new Date(o.created_at);
+      var st=acctStatusLabel(o);
+      return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #eee">'
+        +'<div><div style="font-weight:700;color:#333">'+d.toLocaleDateString('de-DE')+' · '+d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})+'</div>'
+        +'<div style="font-size:11px;color:#999">Bon '+String(o.bon_nr).replace(/</g,'&lt;')+'</div></div>'
+        +'<div style="text-align:right"><div style="font-weight:800;color:#333">'+eur(o.total||0)+'</div>'
+        +'<div style="font-size:11px;font-weight:700;color:'+st.c+'">'+st.t+'</div></div>'
+        +'</div>';
+    }).join('');
+  }catch(e){ if(box) box.innerHTML='⚠️ Bestellungen konnten nicht geladen werden – bitte später erneut versuchen.'; }
+}
+function acctLogout(){
+  try{ localStorage.removeItem(custKey()); }catch(e){}
+  renderAcctLogin('Abgemeldet. Bis bald! 👋');
+}
 async function confirmDelivCheck(){
-  var street=(document.getElementById('dc_street')||{}).value.trim();
-  var city=(document.getElementById('dc_city')||{}).value.trim();
-  var zip=(document.getElementById('dc_zip')||{}).value.trim();
+  var street=String((document.getElementById('dc_street')||{}).value||'').trim();
+  var city=String((document.getElementById('dc_city')||{}).value||'').trim();
+  var zip=String((document.getElementById('dc_zip')||{}).value||'').trim();
   var err=document.getElementById('dc_err');
   var btn=document.getElementById('dc_btn');
   if(!street||!city){ if(err) err.textContent='Bitte Straße und Ort ausfüllen.'; return; }
@@ -1877,7 +1999,23 @@ let GALLERY = [
   {url:'indisches-essen.jpg', cap:'Indische Küche'}
 ];
 
+// Belks: Basis-Branding (Name/Adresse/Telefon) der Tochter aus belks_tenants laden.
+// websiteconfig (falls die Tochter eine gepflegt hat) überschreibt das danach.
+async function loadTenantBranding(){
+  if(LOCATION_ID==='eatdesi-bw') return;
+  try{
+    const r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(LOCATION_ID)+'&select=name,street,city,phone',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
+    if(!r.ok) return;
+    const j=await r.json(); const t=j&&j[0]; if(!t) return;
+    if(t.name){ COMPANY.name=t.name; COMPANY.tagline=''; try{document.title=t.name+' · Online bestellen';}catch(e){} }
+    if(t.street) COMPANY.street=t.street;
+    if(t.city){ const m=String(t.city).match(/^(\d{4,5})\s+(.+)$/); if(m){COMPANY.zip=m[1];COMPANY.city=m[2];} else COMPANY.city=t.city; }
+    if(t.phone){ COMPANY.phone=t.phone; COMPANY.whatsapp=String(t.phone).replace(/[^0-9]/g,'').replace(/^0/,'49'); }
+    COMPANY.maps='https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(COMPANY.street+' '+COMPANY.zip+' '+COMPANY.city);
+  }catch(e){}
+}
 async function loadConfig(){
+  try{ await loadTenantBranding(); }catch(e){}
   try{
     const g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+CONFIG_KEY+'&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
     if(g.ok){const j=await g.json(); if(j&&j[0]&&j[0].value){const c=JSON.parse(j[0].value);
@@ -1929,6 +2067,7 @@ function socialIcon(icon){
   return svg[key] || icon || '🔗';
 }
 function applyCompany(){
+  document.querySelectorAll('[data-co-name]').forEach(el=>{el.textContent=COMPANY.name;});
   // Footer-Adresse/Telefon, Hero-Badge etc. aktualisieren
   document.querySelectorAll('[data-co-phone]').forEach(el=>{el.textContent='📞 '+COMPANY.phone;el.href='tel:'+COMPANY.phone.replace(/\s/g,'');});
   document.querySelectorAll('[data-co-addr]').forEach(el=>{el.innerHTML='📍 '+COMPANY.street+'<br>'+COMPANY.zip+' '+COMPANY.city;});
