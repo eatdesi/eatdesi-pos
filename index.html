@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v151</title>
+<title>eatDeSi POS v152</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v151';",
+    "var CACHE='eatdesi-v152';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -8292,7 +8292,7 @@ function BonModal({
       fontSize: 11,
       color: "#666"
     }
-  }, "Brunnenallee 30 \xB7 Bad Wildungen")), /*#__PURE__*/React.createElement("div", {
+  }, tenantAddressLine())), /*#__PURE__*/React.createElement("div", {
     style: {
       borderBottom: "1px dashed #ccc",
       margin: "6px 0"
@@ -11067,7 +11067,7 @@ function TableView({
 
   return /*#__PURE__*/React.createElement("div", { style: { padding: 12 } },
     /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 } },
-      /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: C.green, fontSize: 14 } }, "eatDeSi · 30 Tische"),
+      /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: C.green, fontSize: 14 } }, tenantDisplayName()+" · "+TABLES.length+" Tische"),
       /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6 } },
         /*#__PURE__*/React.createElement("button", { onClick:()=>setViewMode(viewMode==="grid"?"map":"grid"),
           style:{ padding:"5px 10px", borderRadius:8, border:"none", background:"#e8f5e9", color:C.green, cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
@@ -19141,7 +19141,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, "eatDeSi POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v151"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v152"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -19447,7 +19447,7 @@ function App() {
   }, []);
   const [loyaltySettings, setLoyaltySettings] = useState(() => LS.get("eatdesi_loyalty_settings", { pointsPerEuro:3, redeemRate:100, minRedeem:100, active:true }));
   const [happyHours, setHappyHours] = useState(() => LS.get("eatdesi_happyhours", []));
-  const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); const merged = Object.assign({ name: "eatDeSi", address: "Brunnenallee 30 · 34537 Bad Wildungen", phone: "05621 9449087", footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: "Belks Direktvertrieb GmbH", firmaZusatz: "eatDeSi – Fusion Kitchen & Grill", firmaStrasse: "Brunnenallee 30", firmaPlzOrt: "34537 Bad Wildungen", firmaStNr: "26/229/25450", firmaUst: "DE361161517", firmaGericht: "Amtsgericht Kassel", firmaEmail: "eatdesi.bw@gmail.com", firmaWeb: "www.eatdesi-bw.de", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal", notifVolume: "laut", emailOn: true, emailServiceId: "service_b27x5h9", emailTemplateId: "template_6d8or1d", emailPublicKey: "eYBKtltVeOaq9pa0B", waOn: true, waAuto: true }, saved); if (!merged.emailServiceId) merged.emailServiceId = "service_b27x5h9"; if (!merged.emailTemplateId) merged.emailTemplateId = "template_6d8or1d"; if (!merged.emailPublicKey) merged.emailPublicKey = "eYBKtltVeOaq9pa0B"; if (!merged.width || merged.width < 384) merged.width = 384; return merged; });
+  const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); const _isBW = (LOCATION_ID === "eatdesi-bw"); const _ti = window.TENANT_INFO || {}; const _tn = (typeof tenantDisplayName === "function") ? tenantDisplayName() : "eatDeSi"; const merged = Object.assign({ name: _isBW ? "eatDeSi" : _tn, address: _isBW ? "Brunnenallee 30 · 34537 Bad Wildungen" : ([_ti.street, _ti.city].filter(Boolean).join(" · ")), phone: _isBW ? "05621 9449087" : (_ti.phone || ""), footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: _isBW ? "Belks Direktvertrieb GmbH" : (_ti.name || _tn), firmaZusatz: _isBW ? "eatDeSi – Fusion Kitchen & Grill" : "", firmaStrasse: _isBW ? "Brunnenallee 30" : (_ti.street || ""), firmaPlzOrt: _isBW ? "34537 Bad Wildungen" : (_ti.city || ""), firmaStNr: _isBW ? "26/229/25450" : "", firmaUst: _isBW ? "DE361161517" : "", firmaGericht: _isBW ? "Amtsgericht Kassel" : "", firmaEmail: _isBW ? "eatdesi.bw@gmail.com" : "", firmaWeb: _isBW ? "www.eatdesi-bw.de" : "", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal", notifVolume: "laut", emailOn: true, emailServiceId: "service_b27x5h9", emailTemplateId: "template_6d8or1d", emailPublicKey: "eYBKtltVeOaq9pa0B", waOn: true, waAuto: true }, saved); if (!merged.emailServiceId) merged.emailServiceId = "service_b27x5h9"; if (!merged.emailTemplateId) merged.emailTemplateId = "template_6d8or1d"; if (!merged.emailPublicKey) merged.emailPublicKey = "eYBKtltVeOaq9pa0B"; if (!merged.width || merged.width < 384) merged.width = 384; return merged; });
   // ANFRAGE-Pull: Setter global verfügbar machen + alle 8s aus Cloud holen
   React.useEffect(() => {
     window._setWebRequests = setWebRequests;
@@ -20251,7 +20251,7 @@ function App() {
   const loginScreen = !loggedInUser ? /*#__PURE__*/React.createElement("div", { style:{ position:"fixed", inset:0, background:"linear-gradient(135deg, #C84B31 0%, #6B1200 100%)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:16, overflowY:"auto" } },
     /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:20, padding:28, width:320, maxWidth:"100%", boxShadow:"0 8px 40px #0006", textAlign:"center" } },
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:32 } }, "🔒"),
-      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:900, fontSize:20, color:"#C84B31", marginBottom:4 } }, "eatDeSi POS"),
+      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:900, fontSize:20, color:"#C84B31", marginBottom:4 } }, tenantDisplayName()+" POS"),
 
       // SCHRITT 1: Mitarbeiter waehlen
       !loginUser ? /*#__PURE__*/React.createElement("div", null,
@@ -20447,7 +20447,7 @@ function App() {
       color: "#fff",
       fontSize: 16
     }
-  }, "eatDeSi POS"), /*#__PURE__*/React.createElement("button", {
+  }, tenantDisplayName()+" POS"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setMenuOpen(false),
     style: {
       background: "none",
@@ -20507,7 +20507,7 @@ function App() {
       color: "#aaa",
       textAlign: "center"
     }
-  }, "eatDeSi POS \xB7 Brunnenallee 30", /*#__PURE__*/React.createElement("br", null), "Bad Wildungen \xB7 05621 9449087"),
+  }, tenantDisplayName()+" POS", /*#__PURE__*/React.createElement("br", null), tenantAddressLine()),
   loggedInUser && /*#__PURE__*/React.createElement("button", {
     onClick:()=>{setLoggedInUser(null);LS.set("eatdesi_session",null);setMenuOpen(false);},
     style:{marginTop:10,width:"100%",padding:"8px 0",borderRadius:8,border:"2px solid #ef5350",background:"#ffebee",color:"#ef5350",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12}
@@ -20550,7 +20550,7 @@ function App() {
       color: "#fff",
       letterSpacing: 1
     }
-  }, "eatDeSi", /*#__PURE__*/React.createElement("span", {
+  }, tenantDisplayName(), /*#__PURE__*/React.createElement("span", {
     style: {
       fontWeight: 400,
       fontSize: 12,
@@ -21563,6 +21563,21 @@ function belksQuickSwitch(code, name){
       },1200);
     }catch(e){ window.alert('Fehler: '+e); }
   })();
+}
+/* WHITE-LABEL ANZEIGE (v152): App zeigt ueberall den Namen/Adresse des
+   AKTUELLEN Restaurants (klare Trennung zwischen Toechtern!).
+   Quelle: 1) Firmendaten der Tochter, 2) belks_tenants (TENANT_INFO), 3) Fallback. */
+function tenantDisplayName(){
+  try{ var f=JSON.parse(localStorage.getItem('eatdesi_firma')||'null'); if(f&&f.name) return f.name; }catch(e){}
+  try{ if(window.TENANT_INFO&&window.TENANT_INFO.name) return window.TENANT_INFO.name; }catch(e){}
+  return LOCATION_ID==='eatdesi-bw' ? 'eatDeSi' : LOCATION_ID;
+}
+function tenantAddressLine(){
+  try{ var f=JSON.parse(localStorage.getItem('eatdesi_firma')||'null');
+    if(f&&(f.street||f.city)) return [f.street,f.city].filter(Boolean).join(' \u00b7 ')+(f.phone?(' \u00b7 '+f.phone):''); }catch(e){}
+  var t=window.TENANT_INFO||{};
+  if(t.street||t.city||t.phone) return [t.street,t.city].filter(Boolean).join(' \u00b7 ')+(t.phone?(' \u00b7 '+t.phone):'');
+  return LOCATION_ID==='eatdesi-bw' ? 'Brunnenallee 30 \u00b7 Bad Wildungen \u00b7 05621 9449087' : '';
 }
 function belksIsOperator(){
   try{ return localStorage.getItem('eatdesi_belks_operator')==='1'; }catch(e){ return false; }
@@ -24033,6 +24048,22 @@ function belksTenantGuard(){
     renderEmailLogin('');
   }catch(e){}
 }
+// TENANT-INFO laden (Name/Adresse der aktuellen Tochter fuer White-Label-Anzeige)
+window.TENANT_INFO=(function(){ try{ return JSON.parse(localStorage.getItem('eatdesi_tenant_info')||'null'); }catch(e){ return null; } })();
+(function(){
+  try{
+    if(localStorage.getItem('eatdesi_tenant_ok_'+LOCATION_ID)!=='1') return;
+    belksGetTenant(LOCATION_ID).then(function(t){
+      if(!t) return;
+      var info={name:t.name||'',street:t.street||'',city:t.city||'',phone:t.phone||''};
+      var hadCache=!!localStorage.getItem('eatdesi_tenant_info');
+      localStorage.setItem('eatdesi_tenant_info',JSON.stringify(info));
+      window.TENANT_INFO=info;
+      if(!hadCache && info.name){ location.reload(); } // erster Start auf dieser Tochter: Branding sofort zeigen
+    }).catch(function(){});
+  }catch(e){}
+})();
+
 if(!belksRecoveryCheck()) belksTenantGuard();
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
