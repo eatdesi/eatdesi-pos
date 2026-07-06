@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v159</title>
+<title>eatDeSi POS v161</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v159';",
+    "var CACHE='eatdesi-v161';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -13948,8 +13948,10 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
 
   var resetMenu = function(){
     if(!window.confirm('Speisekarte auf die Standard-Version zuruecksetzen? Alle eigenen Aenderungen am Menue gehen verloren (Bestellungen bleiben).')) return;
-    // frische Kopie des Standard-MENU aus dem Code
-    var fresh = JSON.parse(JSON.stringify(MENU));
+    // frische Kopie des Standards — Tochter-Restaurants haben KEIN BW-Standardmenue!
+    var fresh = (typeof LOCATION_ID!=='undefined' && LOCATION_ID==='eatdesi-bw')
+      ? JSON.parse(JSON.stringify(MENU))
+      : { "\uD83D\uDCCB Men\u00fc importieren": [] };
     onUpdate(fresh);                              // setzt menuData + speichert + sync
     try{localStorage.setItem('eatdesi_cat_order', JSON.stringify(Object.keys(fresh)));}catch(e){}
     setActiveCat(Object.keys(fresh)[0]||'');
@@ -19152,7 +19154,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v159"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v161"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -19296,7 +19298,21 @@ function App() {
   }, []);
   const [activeTable, setActiveTable] = useState(null);
   const [isTakeaway, setIsTakeaway] = useState(false);
-  const [loggedInUser, setLoggedInUser] = useState(() => LS.get("eatdesi_session", null));
+  const [loggedInUser, setLoggedInUser] = useState(() => {
+    // v161: Master-Passwort = vollwertiger Login — kein zusaetzlicher PIN-Schritt.
+    try {
+      if (sessionStorage.getItem('eatdesi_master_auto') === '1') {
+        sessionStorage.removeItem('eatdesi_master_auto');
+        var _us = LS.get('eatdesi_users', []) || [];
+        var _adm = _us.find(function(u){ return u && !u.deleted && u.role === 'Admin'; })
+                || _us.find(function(u){ return u && !u.deleted; })
+                || { name: 'Betreiber (Belks)', role: 'Admin', pin: '' };
+        LS.set('eatdesi_session', _adm);
+        return _adm;
+      }
+    } catch(e) {}
+    return LS.get("eatdesi_session", null);
+  });
   const [loginPin, setLoginPin] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginUser, setLoginUser] = useState(null); // im Login-Screen gewaehlter Mitarbeiter
@@ -19635,6 +19651,23 @@ function App() {
     if (!window._menuHydrated) return; // FIX v159: Anzeige-Fallback nie persistieren
     LS.set("eatdesi_menu", menuData);
   }, [menuData]);
+  // v160: Sicherheitsnetz — wenn beim Start nur der Platzhalter da ist,
+  // Menue dieses Restaurants DIREKT aus der Cloud holen (unabhaengig vom Sync-Timing)
+  useEffect(() => {
+    if (window._menuHydrated) return;
+    const _t = setTimeout(async () => {
+      try {
+        if (window._menuHydrated) return;
+        const r = await fetch(SUPA_URL + "/rest/v1/pos_state?key=eq." + LOCATION_ID + "_eatdesi_menu&select=value", { headers: { "apikey": SUPA_KEY, "Authorization": "Bearer " + SUPA_KEY } });
+        if (!r.ok) return;
+        const j = await r.json();
+        const v = (j && j[0] && j[0].value) ? JSON.parse(j[0].value) : null;
+        const cnt = v ? Object.keys(v).reduce((a, c) => a + (((v[c] || []).length) || 0), 0) : 0;
+        if (v && cnt > 0) { window._menuHydrated = true; setMenuData(v); LS.set("eatdesi_menu", v); console.log("Menue aus Cloud geladen (" + cnt + " Artikel)"); }
+      } catch (e) {}
+    }, 1800);
+    return () => clearTimeout(_t);
+  }, []);
 
   // tableOrders - localStorage + Supabase sync
   useEffect(() => {
@@ -20228,14 +20261,14 @@ function App() {
   }, {
     id: "channels", l: "Lieferando/UberEats", i: "🛵"
   }, {
-    id: "belks", l: "Belks-Zentrale", i: "🏢"
+    id: "belks", l: "MUTTER-EBENE (Belks)", i: "🏢"
   }, {
     id: "personalplanung", l: "Personal", i: "👥"
   }, {
     id: "saas_dashboard", l: "SaaS", i: "🏢"
-  }, {
-    id: "rswitch", l: "Restaurant wechseln", i: "🔀"
-  }].filter(function(t){ return (t.id!=="belks" && t.id!=="rswitch") || belksIsOperator(); });
+  }].filter(function(t){ return t.id!=="belks" || belksIsOperator(); });
+  // v160: "Restaurant wechseln" lebt jetzt in der MUTTER-EBENE (Zentrale) —
+  // Tochter-Menü bleibt sauber; nur Betreiber-Geräte sehen den Mutter-Eintrag.
   // 🏢 Belks-Zentrale-Kachel: nur auf Betreiber-Geraeten sichtbar (?belks=1 einmal oeffnen).
   // Tochter-Restaurants sehen sie NICHT. Inhalt bleibt zusaetzlich Master-Passwort-geschuetzt.
   // === Berechtigungspruefung ===
@@ -21511,6 +21544,22 @@ function MenuImportExportView({ menuData, onUpdate }) {
     } catch(e) { setMsg('Fehler: ' + e.message); }
   };
 
+  var [pasteVal,setPasteVal] = R.useState('');
+  var applyImported = function(imported){
+    var cnt = Object.keys(imported||{}).reduce(function(a,c){ return a + (((imported[c]||[]).length)||0); }, 0);
+    if (!imported || typeof imported !== 'object' || Array.isArray(imported) || cnt === 0) {
+      setMsg('Fehler: JSON enthaelt kein gueltiges Menue (0 Artikel).');
+      return;
+    }
+    onUpdate(imported);
+    LS.set('eatdesi_menu', imported);
+    setPasteVal('');
+    setMsg('Import erfolgreich! ' + Object.keys(imported).length + ' Kategorien, ' + cnt + ' Artikel geladen.');
+  };
+  var importPaste = function(){
+    try { applyImported(JSON.parse(String(pasteVal||''))); }
+    catch(err){ setMsg('Fehler: Ungueltiger JSON-Text.'); }
+  };
   var importMenu = function(e) {
     var file = e.target.files[0];
     if (!file) return;
@@ -21518,9 +21567,7 @@ function MenuImportExportView({ menuData, onUpdate }) {
     reader.onload = function(ev) {
       try {
         var imported = JSON.parse(ev.target.result);
-        onUpdate(imported);
-        LS.set('eatdesi_menu', imported);
-        setMsg('Import erfolgreich! ' + Object.keys(imported).length + ' Kategorien geladen.');
+        applyImported(imported);
       } catch(err) { setMsg('Fehler: Ungueltige JSON Datei'); }
     };
     reader.readAsText(file);
@@ -21540,7 +21587,10 @@ function MenuImportExportView({ menuData, onUpdate }) {
       R.createElement('label',{style:{display:'block',width:'100%',padding:11,borderRadius:9,border:'none',background:'#e65100',color:'#fff',fontWeight:800,fontSize:13,cursor:'pointer',textAlign:'center',boxSizing:'border-box'}},
         'Menue importieren',
         R.createElement('input',{type:'file',accept:'.json',onChange:importMenu,style:{display:'none'}})
-      )
+      ),
+      R.createElement('div',{style:{fontSize:12,color:'#999',margin:'12px 0 6px',fontWeight:700}},'\uD83D\uDCCB Oder: JSON-Text einf\u00fcgen (falls die Datei-Auswahl in der App nicht \u00f6ffnet)'),
+      R.createElement('textarea',{value:pasteVal,onChange:function(e){setPasteVal(e.target.value);},placeholder:'Kompletten JSON-Inhalt hier einf\u00fcgen\u2026',style:{width:'100%',minHeight:90,padding:10,borderRadius:9,border:'1.5px solid #ddd',fontFamily:'monospace',fontSize:11,boxSizing:'border-box'}}),
+      R.createElement('button',{onClick:importPaste,style:{width:'100%',padding:11,borderRadius:9,border:'none',background:'#6a1b9a',color:'#fff',fontWeight:800,fontSize:13,cursor:'pointer',fontFamily:'inherit',marginTop:8}},'\uD83D\uDCCB Eingef\u00fcgtes JSON importieren')
     )
   );
 }
@@ -21590,7 +21640,7 @@ async function belksAuthLogin(email, pw){
 async function belksAuthRecover(email){
   var r=await fetch(SUPA_URL+'/auth/v1/recover',{method:'POST',
     headers:{apikey:SUPA_KEY,'Content-Type':'application/json'},
-    body:JSON.stringify({email:String(email).trim().toLowerCase(), redirect_to:location.origin+location.pathname})});
+    body:JSON.stringify({email:String(email).trim().toLowerCase(), redirect_to:'https://eatdesi.github.io/eatdesi-pos/'})});
   if(!r.ok){ var j=await r.json().catch(function(){return {};}); throw new Error(belksAuthErr(j,r)); }
   return true;
 }
@@ -21750,7 +21800,7 @@ window.belksAccountOverlay=function(){
         if(err){ err.style.color='#555'; err.textContent='Pr\u00fcfe\u2026'; }
         belksGetTenant('belks-master').then(function(t){
           if(t && t.secret && String(pw)===String(t.secret)){
-            try{ localStorage.setItem('eatdesi_belks_operator','1'); localStorage.setItem('eatdesi_belks_home','1'); }catch(e){}
+            try{ localStorage.setItem('eatdesi_belks_operator','1'); localStorage.setItem('eatdesi_belks_home','1'); sessionStorage.setItem('eatdesi_master_auto','1'); }catch(e){}
             window.alert('\u2705 Betreiber-Modus aktiviert \u2013 du landest jetzt auf der MUTTER-EBENE (\uD83C\uDFE2 Belks-Zentrale).');
             location.reload();
           } else {
@@ -23577,6 +23627,15 @@ async function pushStateToSupabase(key, value) {
     if (_NEVER_EMPTY_KEYS[key] && Array.isArray(value) && value.filter(function(e){return e && !e.deleted;}).length === 0) {
       console.warn('pushState blockiert: leere ' + key + '-Liste wuerde Cloud-Daten loeschen');
       return;
+    }
+    // v160 (MENUE-SCHUTZ): leeres/Platzhalter-Menue NIE in die Cloud schreiben —
+    // sonst loescht ein frisches Geraet das importierte Tochter-Menue!
+    if (String(key).indexOf('eatdesi_menu') >= 0) {
+      try {
+        var _mm = (typeof value === 'string') ? JSON.parse(value) : value;
+        var _cnt = _mm ? Object.keys(_mm).reduce(function(a, c) { return a + (((_mm[c] || []).length) || 0); }, 0) : 0;
+        if (_cnt === 0) { console.warn('pushState blockiert: leeres Menue wird nicht gesynct (' + key + ')'); return; }
+      } catch (e) {}
     }
     var stamp = new Date().toISOString();
     // on_conflict=key + merge-duplicates => bestehende Zeile wird UEBERSCHRIEBEN statt ignoriert
