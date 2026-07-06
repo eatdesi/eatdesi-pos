@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
+<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -1265,7 +1265,22 @@ function renderCartList(){
    ==================================================================== */
 function goCheckout(){
   const sub=cartTotal(), isDeliv=mode==='lieferung', isDine=mode==='dinein';
-  const z=ZONES[activeZone]||{fee:0,min:0,name:''}; const fee=isDeliv?z.fee:0, tot=sub+fee;
+  const z=ZONES[activeZone]||{fee:0,min:0,name:''}; const fee=isDeliv?z.fee:0;
+  const _rd=computeRedeem(sub);
+  const tot=Math.max(0, sub+fee-(_rd?_rd.val:0));
+  // ⭐ Punkte-Einlösen-Box (nur eingeloggt & Wert >= 5€)
+  let redeemBox='';
+  try{
+    const _c=getCust();
+    if(_c&&_c.phone&&(_c.points>0)){
+      const _valAll=pointsValueEur(_c.points);
+      if(_valAll>=5){
+        redeemBox='<div style="background:rgba(230,180,60,0.10);border:1px solid rgba(230,180,60,0.45);border-radius:10px;padding:10px;margin:10px 0"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px"><input type="checkbox" id="redeemChk" '+(window._redeemWanted?'checked':'')+' onchange="window._redeemWanted=this.checked;goCheckout();" style="width:18px;height:18px;accent-color:#d4a934"> ⭐ <b>'+_c.points+' Punkte einlösen</b> (−'+eur(Math.min(_valAll,sub))+')</label></div>';
+      } else {
+        redeemBox='<div style="font-size:11px;color:#999;margin:8px 0">⭐ '+_c.points+' Punkte ('+_valAll.toFixed(2).replace('.',',')+' €) – einlösbar ab 5,00 €</div>';
+      }
+    }
+  }catch(e){}
   const ortChosen = isDeliv && activeOrt && buildOrtList().some(x=>x.ort===activeOrt);
   const belowMin = isDeliv && ortChosen && sub < z.min;
   const modeTitle = isDeliv?'Lieferung':(isDine?(TABLE_NO?('Tisch '+TABLE_NO):'Vor Ort essen'):'Abholung');
@@ -1282,6 +1297,7 @@ function goCheckout(){
     <div class="field"><label>Name *</label><input id="f_name" placeholder="Dein Name"><div class="err">Bitte Namen angeben</div></div>
     <div class="field"><label>Telefon *</label><input id="f_phone" inputmode="tel" placeholder="Für Rückfragen"><div class="err">Bitte Telefonnummer angeben</div></div>
     <div class="field"><label>E-Mail (optional)</label><input id="f_email" inputmode="email" placeholder="für Bestätigung per E-Mail"></div>
+    <div class="field"><label style="display:flex;align-items:center;gap:8px;font-weight:500;cursor:pointer"><input type="checkbox" id="f_saveacct" checked style="width:18px;height:18px;accent-color:#d4a934"> 💾 Daten speichern & ⭐ Punkte sammeln (Kundenkonto)</label></div>
     ${isDeliv?`<div class="field"><label>Straße & Hausnummer *</label><input id="f_street" placeholder="z.B. Brunnenallee 12"><div class="err">Bitte Adresse angeben</div></div>
       <div class="row2"><div class="field"><label>Ort / Stadtteil *</label>
         <select id="f_city" onchange="onCityChange(this.value)" style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:11px;color:var(--cream);font-size:14px">
@@ -1311,6 +1327,8 @@ function goCheckout(){
     ${(isDeliv&&ortChosen)?`<div class="sumrow"><span>Liefergebühr (${z.name})</span><span>${eur(fee)}</span></div>`:''}
     <div class="sumrow tot"><span>${isDine?'Summe (Vorbestellung)':'Zu zahlen'}</span><b>${eur(tot)}</b></div>
     ${belowMin?`<div class="deliv-note">🛵 Mindestbestellwert ${z.name}: <b>${eur(z.min)}</b> — dir fehlen noch ${eur(z.min-sub)}. Bitte lege noch etwas in den Warenkorb.</div>`:''}
+    ${redeemBox}
+    ${_rd?`<div class="row" style="display:flex;justify-content:space-between;font-weight:800;color:#b8860b;margin:4px 0">⭐ Punkte-Rabatt<span>−${eur(_rd.val)}</span></div>`:''}
     <button class="checkout" id="placeBtn" ${belowMin?'disabled':''} onclick="placeOrder()">${belowMin?('Noch '+eur(z.min-sub)+' bis Mindestbestellwert'):('Zahlungspflichtig bestellen · '+eur(tot))}</button>
     <button style="width:100%;margin-top:9px;color:var(--paper-2);font-size:13px;font-weight:600" onclick="renderCartList()">← Zurück zum Warenkorb</button>`;
   // Adresse aus Liefer-Check übernehmen (falls vorhanden)
@@ -1395,7 +1413,11 @@ async function placeOrder(){
   const z=ZONES[activeZone]||{name:'',fee:0};
   const bonNr='W'+Date.now().toString().slice(-8);
   const items=cart.map(c=>({name:c.name,nr:c.nr,qty:c.qty,price:c.unit,taxRate:c.taxRate||'food',options:c.opts.map(o=>({label:o.label,value:o.name,price:o.price})),note:c.note||''}));
-  const sub=cartTotal(), fee=isDeliv?z.fee:0, total=sub+fee;
+  const sub=cartTotal(), fee=isDeliv?z.fee:0;
+  // ⭐ Punkte einlösen (falls gewählt & berechtigt)
+  const _redeem=computeRedeem(sub);
+  if(_redeem){ items.push({name:'⭐ Punkte-Rabatt ('+_redeem.use+' P.)',nr:'',qty:1,price:-_redeem.val,taxRate:'food',options:[],note:''}); }
+  const total=Math.max(0, sub+fee-(_redeem?_redeem.val:0));
   const addr=isDeliv?`${street}, ${zip} ${city}`:'';
   // Bestellweg-Text (mit gewähltem Ortsteil zur Kontrolle im POS)
   // Bestellweg-Text (mit Ortsteil + Richtung/km zur Kontrolle im POS)
@@ -1413,7 +1435,18 @@ async function placeOrder(){
   try{
     const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr',{method:'POST',
       headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
-    if(r.ok||r.status===201||r.status===409){cart=[];updateCart();showDone(bonNr,total,isDeliv);try{var _oc=getCust()||{};setCust({phone:phone,name:name||_oc.name||'',points:_oc.points!=null?_oc.points:null});}catch(e){}}
+    if(r.ok||r.status===201||r.status===409){
+      var consent=true; try{ var cb=document.getElementById('f_saveacct'); if(cb) consent=!!cb.checked; }catch(e){}
+      cart=[];updateCart();window._redeemWanted=false;showDone(bonNr,total,isDeliv);
+      try{
+        upsertCustomerAfterOrder({phone:phone,name:name,email:email,street:street,zip:zip,city:city,total:total,bonNr:bonNr,consent:consent,redeemUse:(_redeem?_redeem.use:0)}).then(function(k){
+          try{
+            var _oc=getCust()||{};
+            if(k){ setCust({phone:phone,name:k.name||name||_oc.name||'',points:(typeof k.points==='number')?k.points:(_oc.points!=null?_oc.points:null),email:k.email||_oc.email||'',street:k.street||'',zip:k.zip||'',city:k.city||''}); }
+            else if(consent){ setCust({phone:phone,name:name||_oc.name||'',points:_oc.points!=null?_oc.points:null}); }
+          }catch(e){}
+        });
+      }catch(e){}}
     else{ const ok=await retryMinimal(bonNr,isDeliv?('Lieferung '+z.name):'Abholung',items,total,pay,name,phone,orderNote);
       if(ok){cart=[];updateCart();showDone(bonNr,total,isDeliv);} else throw new Error('HTTP '+r.status);}
   }catch(e){btn.disabled=false;btn.textContent='Erneut absenden';toast('⚠️ Senden fehlgeschlagen');console.warn(e);}
@@ -1736,6 +1769,84 @@ function custKey(){ return 'eatdesi_cust_'+LOCATION_ID; }
 function getCust(){ try{ return JSON.parse(localStorage.getItem(custKey())||'null'); }catch(e){ return null; } }
 function setCust(c){ try{ localStorage.setItem(custKey(), JSON.stringify(c)); }catch(e){} }
 function normPhone(p){ return String(p||'').replace(/[^0-9]/g,'').replace(/^49/,'0'); }
+/* ===== 👤 KONTO 2.0 (Passwort + Punkte + Bewertung) ===== */
+async function shaHex(str){
+  const b=new TextEncoder().encode(String(str));
+  const h=await crypto.subtle.digest('SHA-256',b);
+  return Array.from(new Uint8Array(h)).map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+async function custHashPw(phone,pw){ return shaHex(normPhone(phone)+':'+String(pw)); }
+async function fetchCustomers(){
+  try{
+    const r=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_customers&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
+    if(!r.ok) return [];
+    const j=await r.json();
+    if(j&&j[0]&&j[0].value){ try{ return JSON.parse(j[0].value)||[]; }catch(e){} }
+  }catch(e){}
+  return [];
+}
+async function saveCustomers(list){
+  await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
+    headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
+    body:JSON.stringify({key:LOCATION_ID+'_customers',value:JSON.stringify(list),updated_at:new Date().toISOString()})});
+}
+window.LOY={pointsPerEuro:3,redeemRate:100,active:true};
+async function loadLoyaltyCfg(){
+  try{
+    const r=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_eatdesi_loyalty_settings&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
+    if(r.ok){ const j=await r.json(); if(j&&j[0]&&j[0].value){ const v=JSON.parse(j[0].value); if(v&&typeof v==='object') window.LOY=Object.assign(window.LOY,v); } }
+  }catch(e){}
+}
+try{ loadLoyaltyCfg(); }catch(e){}
+function pointsValueEur(pts){ const rate=(window.LOY&&window.LOY.redeemRate)||100; return Math.floor(((pts||0)/rate)*100)/100; }
+// Einlöse-Berechnung: nur eingeloggt, Wert >= 5€, gedeckelt auf Zwischensumme
+function computeRedeem(sub){
+  try{
+    if(!window._redeemWanted) return null;
+    const c=getCust();
+    if(!c||!c.phone||!(c.points>0)) return null;
+    const valAll=pointsValueEur(c.points);
+    if(valAll<5) return null;
+    const rate=(window.LOY&&window.LOY.redeemRate)||100;
+    const val=Math.min(valAll, Math.floor(sub*100)/100);
+    if(val<=0) return null;
+    const use=Math.min(c.points, Math.round(val*rate));
+    return {use:use, val:Math.floor((use/rate)*100)/100};
+  }catch(e){ return null; }
+}
+// Nach erfolgreicher Bestellung: Kunde anlegen/aktualisieren + Punkte (sammeln & einlösen)
+async function upsertCustomerAfterOrder(o){
+  try{
+    const consent = o.consent!==false;
+    const list=await fetchCustomers();
+    const np=normPhone(o.phone);
+    let k=list.find(function(c){ return normPhone(c.phone)===np || normPhone(c.kundenNr)===np; });
+    let isNew=false;
+    if(!k){
+      if(!consent) return null;
+      isNew=true;
+      k={name:o.name||'Gast',phone:o.phone,kundenNr:o.phone,points:0,visits:0,since:new Date().toISOString(),pointsHistory:[]};
+      list.push(k);
+    }
+    if(o.name && (!k.name||k.name==='Gast')) k.name=o.name;
+    if(consent){
+      if(o.email) k.email=o.email;
+      if(o.street){ k.street=o.street; k.zip=o.zip||k.zip; k.city=o.city||k.city; }
+    }
+    k.visits=(k.visits||0)+1;
+    k.pointsHistory=k.pointsHistory||[];
+    if(o.redeemUse>0){
+      k.points=Math.max(0,(k.points||0)-o.redeemUse);
+      k.pointsHistory.push({d:new Date().toISOString(),delta:-o.redeemUse,note:'⭐ Eingelöst · Webshop Bon '+o.bonNr});
+    }
+    if(consent && window.LOY && window.LOY.active!==false){
+      const earn=Math.floor((o.total||0)*((window.LOY.pointsPerEuro)||3));
+      if(earn>0){ k.points=(k.points||0)+earn; k.pointsHistory.push({d:new Date().toISOString(),delta:earn,note:'Webshop Bon '+o.bonNr}); }
+    }
+    await saveCustomers(list);
+    return k;
+  }catch(e){ return null; }
+}
 function acctOverlay(html){
   var ov=document.getElementById('acctOverlay');
   if(!ov){ ov=document.createElement('div'); ov.id='acctOverlay'; ov.className='dc-overlay'; document.body.appendChild(ov); }
@@ -1754,34 +1865,119 @@ function openAccount(){
 function renderAcctLogin(err){
   acctOverlay('<div class="dc-box">'
     +'<h3>👤 Mein Konto</h3>'
-    +'<p class="dc-sub">Einfach mit deiner Handynummer anmelden – kein Passwort nötig. Du siehst deine Bestellungen und deren Status.</p>'
+    +'<p class="dc-sub">Mit Handynummer + Passwort anmelden. Neu hier? Einfach Nummer eingeben – wir legen dein Konto an. ⭐ Punkte sammeln & einlösen inklusive.</p>'
     +'<label class="dc-l">Handynummer</label>'
     +'<input id="ac_phone" class="dc-i" inputmode="tel" placeholder="z.B. 0151 2345678">'
     +'<div class="dc-err" id="ac_err">'+(err||'')+'</div>'
-    +'<button class="checkout" onclick="acctLogin()">🔓 Anmelden</button>'
+    +'<button class="checkout" onclick="acctPhoneNext()">Weiter ➜</button>'
     +'<button class="dc-cancel" onclick="closeAccount()">Schließen</button>'
     +'</div>');
   var inp=document.getElementById('ac_phone');
-  if(inp) inp.addEventListener('keydown',function(e){ if(e.key==='Enter') acctLogin(); });
+  if(inp) inp.addEventListener('keydown',function(e){ if(e.key==='Enter') acctPhoneNext(); });
 }
-async function acctLogin(){
+async function acctPhoneNext(){
   var raw=String((document.getElementById('ac_phone')||{}).value||'').trim();
   var phone=normPhone(raw);
   var err=document.getElementById('ac_err');
   if(phone.length<6){ if(err) err.textContent='Bitte gültige Handynummer eingeben.'; return; }
+  if(err) err.textContent='Prüfe…';
+  var list=await fetchCustomers();
+  var found=list.find(function(k){ return normPhone(k.phone)===phone || normPhone(k.kundenNr)===phone; });
+  if(found && found.pw) return renderAcctPw(raw, found);
+  if(found) return renderAcctSetPw(raw, found, false);
+  return renderAcctCreate(raw);
+}
+function renderAcctPw(raw, found){
+  acctOverlay('<div class="dc-box">'
+    +'<h3>🔐 Willkommen zurück'+(found.name?(', '+String(found.name).replace(/</g,'&lt;')):'')+'!</h3>'
+    +'<label class="dc-l">Passwort</label>'
+    +'<input id="ac_pw" type="password" class="dc-i" placeholder="Dein Konto-Passwort">'
+    +'<div class="dc-err" id="ac_err"></div>'
+    +'<button class="checkout" onclick="acctPwLogin(\''+normPhone(raw)+'\')">🔓 Anmelden</button>'
+    +'<div style="font-size:11px;color:#999;margin-top:8px;text-align:center">Passwort vergessen? Ruf uns kurz an – wir setzen es an der Kasse zurück.</div>'
+    +'<button class="dc-cancel" onclick="renderAcctLogin()">← Zurück</button>'
+    +'</div>');
+  var inp=document.getElementById('ac_pw');
+  if(inp) inp.addEventListener('keydown',function(e){ if(e.key==='Enter') acctPwLogin(normPhone(raw)); });
+}
+async function acctPwLogin(np){
+  var pw=String((document.getElementById('ac_pw')||{}).value||'');
+  var err=document.getElementById('ac_err');
+  if(!pw){ if(err) err.textContent='Bitte Passwort eingeben.'; return; }
   if(err) err.textContent='Anmelden…';
-  var c={phone:raw, name:'', points:null};
-  // Name + Punkte aus der Kundenkartei (falls Stammkunde) – optional
-  try{
-    var g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_customers&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
-    if(g.ok){ var j=await g.json();
-      if(j&&j[0]&&j[0].value){
-        var list=JSON.parse(j[0].value)||[];
-        var found=list.find(function(k){ return normPhone(k.phone)===phone || normPhone(k.kundenNr)===phone; });
-        if(found){ c.name=found.name||''; if(typeof found.points==='number') c.points=found.points; }
-      }
-    }
-  }catch(e){}
+  var list=await fetchCustomers();
+  var found=list.find(function(k){ return normPhone(k.phone)===np || normPhone(k.kundenNr)===np; });
+  if(!found){ if(err) err.textContent='Konto nicht gefunden.'; return; }
+  var h=await custHashPw(np, pw);
+  if(h!==found.pw){ if(err) err.textContent='❌ Falsches Passwort.'; return; }
+  var c={phone:found.phone||np, name:found.name||'', points:(typeof found.points==='number')?found.points:null, email:found.email||'', street:found.street||'', zip:found.zip||'', city:found.city||''};
+  setCust(c);
+  renderAccount(c);
+}
+function renderAcctSetPw(raw, found, isNew){
+  acctOverlay('<div class="dc-box">'
+    +'<h3>🔐 Konto schützen</h3>'
+    +'<p class="dc-sub">'+(isNew?'Fast fertig!':'Wir kennen dich schon'+(found&&found.name?(', '+String(found.name).replace(/</g,'&lt;')):'')+' 😊')+' Lege jetzt ein Passwort fest, damit NUR du deine Bestellungen und Punkte sehen kannst.</p>'
+    +'<label class="dc-l">Passwort (mind. 4 Zeichen)</label>'
+    +'<input id="ac_pw1" type="password" class="dc-i">'
+    +'<label class="dc-l">Passwort wiederholen</label>'
+    +'<input id="ac_pw2" type="password" class="dc-i">'
+    +'<div class="dc-err" id="ac_err"></div>'
+    +'<button class="checkout" onclick="acctSetPw(\''+normPhone(raw)+'\')">✅ Speichern & anmelden</button>'
+    +'<button class="dc-cancel" onclick="renderAcctLogin()">← Zurück</button>'
+    +'</div>');
+}
+async function acctSetPw(np){
+  var p1=String((document.getElementById('ac_pw1')||{}).value||'');
+  var p2=String((document.getElementById('ac_pw2')||{}).value||'');
+  var err=document.getElementById('ac_err');
+  if(p1.length<4){ if(err) err.textContent='Mindestens 4 Zeichen.'; return; }
+  if(p1!==p2){ if(err) err.textContent='Passwörter stimmen nicht überein.'; return; }
+  if(err) err.textContent='Speichere…';
+  var list=await fetchCustomers();
+  var found=list.find(function(k){ return normPhone(k.phone)===np || normPhone(k.kundenNr)===np; });
+  if(!found){ if(err) err.textContent='Konto nicht gefunden.'; return; }
+  found.pw=await custHashPw(np, p1);
+  await saveCustomers(list);
+  var c={phone:found.phone||np, name:found.name||'', points:(typeof found.points==='number')?found.points:null, email:found.email||'', street:found.street||'', zip:found.zip||'', city:found.city||''};
+  setCust(c);
+  renderAccount(c);
+}
+function renderAcctCreate(raw){
+  acctOverlay('<div class="dc-box">'
+    +'<h3>✨ Konto erstellen</h3>'
+    +'<p class="dc-sub">Neu bei uns – schön, dass du da bist! Ab sofort sammelst du bei jeder Bestellung ⭐ Punkte.</p>'
+    +'<label class="dc-l">Dein Name</label>'
+    +'<input id="ac_name" class="dc-i" placeholder="Vor- und Nachname">'
+    +'<label class="dc-l">E-Mail (optional)</label>'
+    +'<input id="ac_email" class="dc-i" inputmode="email" placeholder="für Bestell-Infos">'
+    +'<label class="dc-l">Passwort (mind. 4 Zeichen)</label>'
+    +'<input id="ac_pw1" type="password" class="dc-i">'
+    +'<label class="dc-l">Passwort wiederholen</label>'
+    +'<input id="ac_pw2" type="password" class="dc-i">'
+    +'<div class="dc-err" id="ac_err"></div>'
+    +'<button class="checkout" onclick="acctCreate(\''+String(raw).replace(/[^0-9+ ]/g,'')+'\')">✅ Konto erstellen</button>'
+    +'<button class="dc-cancel" onclick="renderAcctLogin()">← Zurück</button>'
+    +'</div>');
+}
+async function acctCreate(raw){
+  var name=String((document.getElementById('ac_name')||{}).value||'').trim();
+  var email=String((document.getElementById('ac_email')||{}).value||'').trim();
+  var p1=String((document.getElementById('ac_pw1')||{}).value||'');
+  var p2=String((document.getElementById('ac_pw2')||{}).value||'');
+  var err=document.getElementById('ac_err');
+  if(!name){ if(err) err.textContent='Bitte Namen eingeben.'; return; }
+  if(p1.length<4){ if(err) err.textContent='Passwort: mind. 4 Zeichen.'; return; }
+  if(p1!==p2){ if(err) err.textContent='Passwörter stimmen nicht überein.'; return; }
+  if(err) err.textContent='Erstelle Konto…';
+  var np=normPhone(raw);
+  var list=await fetchCustomers();
+  if(list.find(function(k){ return normPhone(k.phone)===np || normPhone(k.kundenNr)===np; })){ if(err) err.textContent='Nummer existiert schon – bitte anmelden.'; return; }
+  var neu={name:name,phone:raw,kundenNr:raw,points:0,visits:0,since:new Date().toISOString(),pointsHistory:[],pw:(await custHashPw(np,p1))};
+  if(email) neu.email=email;
+  list.push(neu);
+  await saveCustomers(list);
+  var c={phone:raw,name:name,points:0,email:email||''};
   setCust(c);
   renderAccount(c);
 }
@@ -1795,10 +1991,16 @@ function acctStatusLabel(o){
 }
 async function renderAccount(c){
   var hallo=c.name?('Hallo, '+c.name+'!'):('Hallo!');
-  var pts=(c.points!=null)?('<div style="font-size:13px;margin:4px 0 0">⭐ Deine Punkte: <b>'+c.points+'</b> (100 Punkte = 1€)</div>'):'';
+  var rate=(window.LOY&&window.LOY.redeemRate)||100;
+  var val=pointsValueEur(c.points||0);
+  var pts=(c.points!=null)?('<div style="background:rgba(230,180,60,0.12);border:1px solid rgba(230,180,60,0.5);border-radius:10px;padding:10px;margin:8px 0 0;font-size:13px">⭐ Deine Punkte: <b>'+c.points+'</b> = <b>'+val.toFixed(2).replace('.',',')+' €</b><br><span style="font-size:11px;opacity:0.8">'+(val>=5?'✅ Einlösbar! Beim Bestellen im Warenkorb „Punkte einlösen" wählen.':'Ab 5,00 € Wert einlösbar ('+(rate*5)+' Punkte) – weiter sammeln! 💪')+'</span></div>'):'';
+  var saved='';
+  if(c.email||c.street){
+    saved='<div style="font-size:11px;color:#999;margin-top:6px">💾 Gespeichert: '+[c.email,(c.street?(c.street+', '+(c.zip||'')+' '+(c.city||'')):'')].filter(Boolean).map(function(x){return String(x).replace(/</g,'&lt;');}).join(' · ')+'</div>';
+  }
   acctOverlay('<div class="dc-box">'
     +'<h3>👤 '+hallo+'</h3>'
-    +'<div style="font-size:12px;color:#888">Kundennummer: '+String(c.phone).replace(/</g,'&lt;')+'</div>'+pts
+    +'<div style="font-size:12px;color:#888">Kundennummer: '+String(c.phone).replace(/</g,'&lt;')+'</div>'+pts+saved
     +'<div id="ac_orders" style="margin-top:12px;font-size:13px;color:#888">Lade Bestellungen…</div>'
     +'<button class="checkout" style="margin-top:12px" onclick="closeAccount()">Weiter bestellen</button>'
     +'<button class="dc-cancel" onclick="acctLogout()">Abmelden</button>'
@@ -1816,9 +2018,10 @@ async function renderAccount(c){
     box.innerHTML='<div style="font-weight:800;color:#333;margin-bottom:6px">🧾 Deine letzten Bestellungen</div>'+mine.map(function(o){
       var d=new Date(o.created_at);
       var st=acctStatusLabel(o);
+      var rateBtn=(st.t.indexOf('Abgeschlossen')>=0 && window.GOOGLE_LINK)?('<a href="'+window.GOOGLE_LINK+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:3px;font-size:11px;font-weight:800;color:#b8860b;text-decoration:none">⭐ Jetzt bewerten – 5 Sterne? 😊</a>'):'';
       return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #eee">'
         +'<div><div style="font-weight:700;color:#333">'+d.toLocaleDateString('de-DE')+' · '+d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})+'</div>'
-        +'<div style="font-size:11px;color:#999">Bon '+String(o.bon_nr).replace(/</g,'&lt;')+'</div></div>'
+        +'<div style="font-size:11px;color:#999">Bon '+String(o.bon_nr).replace(/</g,'&lt;')+'</div>'+rateBtn+'</div>'
         +'<div style="text-align:right"><div style="font-weight:800;color:#333">'+eur(o.total||0)+'</div>'
         +'<div style="font-size:11px;font-weight:700;color:'+st.c+'">'+st.t+'</div></div>'
         +'</div>';
@@ -2014,12 +2217,14 @@ async function loadTenantBranding(){
     COMPANY.maps='https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(COMPANY.street+' '+COMPANY.zip+' '+COMPANY.city);
   }catch(e){}
 }
+window.GOOGLE_LINK = (LOCATION_ID==='eatdesi-bw') ? 'https://beacons.ai/eatdesi.bw' : '';
 async function loadConfig(){
   try{ await loadTenantBranding(); }catch(e){}
   try{
     const g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+CONFIG_KEY+'&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
     if(g.ok){const j=await g.json(); if(j&&j[0]&&j[0].value){const c=JSON.parse(j[0].value);
-      if(c.zones)ZONES=c.zones; if(c.offers)OFFERS=c.offers; if(c.events)EVENTS=c.events;
+      if(c.zones)ZONES=c.zones;
+    if(c.googleLink) window.GOOGLE_LINK=c.googleLink; if(c.offers)OFFERS=c.offers; if(c.events)EVENTS=c.events;
       if(c.deliveryCfg)DELIVERY_CFG=Object.assign(DELIVERY_CFG,c.deliveryCfg);
       if(c.restLoc)REST_LOC=Object.assign(REST_LOC,c.restLoc);
       if(c.services)SERVICES=Object.assign(SERVICES,c.services);
@@ -2846,7 +3051,7 @@ function aiContext(){
   const cocktails=(MENU['Cocktails']||[]).filter(webVisible).slice(0,5).map(i=>i.name).join(', ');
   const custInfo = window._aiCustomer ? ('\nAKTUELLER STAMMKUNDE: '+(window._aiCustomer.name||'')+(window._aiCustomer.points!=null?' · '+window._aiCustomer.points+' Punkte':'')+(window._aiCustomer.lastItems?' · Zuletzt: '+window._aiCustomer.lastItems.slice(0,5).join(', '):'')+'. Sprich ihn mit Namen an, empfiehl auf Basis der letzten Bestellung.') : '';
 
-  return `Du bist Priya, die herzliche, SCHLAUE Sprach-Assistentin & Verkäuferin von eatDeSi — indisches Fusion-Restaurant (Kitchen & Grill), Brunnenallee 30, Bad Wildungen, Familie Sidhu, Tel +49 5621 9449087. "Indien trifft Trends".
+  return `Du bist Priya, die herzliche, SCHLAUE Sprach-Assistentin & Verkäuferin von ${COMPANY.name}${(COMPANY.street||COMPANY.city)?(' — '+[COMPANY.street,[COMPANY.zip,COMPANY.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')):''}${COMPANY.phone?(', Tel '+COMPANY.phone):''}.${LOCATION_ID==='eatdesi-bw'?' Indisches Fusion-Restaurant (Kitchen & Grill), Familie Sidhu. "Indien trifft Trends".':''}
 Antworte KURZ (1-3 Sätze), herzlich, auf Deutsch (Englisch/Punjabi nur wenn der Gast so schreibt). Erfinde KEINE Preise/Gerichte außerhalb der Liste.
 
 VERKAUFEN (schlau, Umsatz steigern):
