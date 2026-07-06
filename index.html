@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v156</title>
+<title>eatDeSi POS v159</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v156';",
+    "var CACHE='eatdesi-v159';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -383,7 +383,7 @@ window.RESTAURANT = {
       // Betreiber-Modus: ?belks=1 zeigt die Zentrale-Kachel auf DIESEM Geraet,
       // ?belks=0 versteckt sie wieder (Inhalt bleibt immer Master-Passwort-geschuetzt).
       var b = new URLSearchParams(location.search).get('belks');
-      if(b==='1') localStorage.setItem('eatdesi_belks_operator','1');
+      if(b==='1'){ localStorage.setItem('eatdesi_belks_operator','1'); localStorage.setItem('eatdesi_belks_home','1'); }
       if(b==='0') localStorage.removeItem('eatdesi_belks_operator');
       var p = new URLSearchParams(location.search).get('restaurant');
       if(p && /^[a-z0-9-]{2,40}$/i.test(p.trim())){
@@ -10516,44 +10516,46 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
         parts: [{text: m.text}]
       }));
       const aiModel = (printerSettings && printerSettings.geminiModel) || 'gemini-2.5-flash-lite';
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${geminiKey}`, {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({
-          system_instruction:{parts:[{text: systemPrompt}]},
-          contents: history,
-          generationConfig:{ maxOutputTokens:600, temperature:0.7 }
-        })
-      });
-      const data = await res.json();
-      if (data.error) {
-        // Rate-Limit (429): freundlich abfangen + kurz warten + einmal automatisch wiederholen
-        var em = data.error.message || "";
-        if (data.error.code === 429 || /quota|rate|exceeded/i.test(em)) {
-          var waitS = 8;
-          var mm = em.match(/retry in ([\d.]+)s/i);
-          if (mm) waitS = Math.min(Math.ceil(parseFloat(mm[1])) + 1, 30);
-          setMsgs(p=>[...p, {role:"assistant", text:`⏳ Einen Moment bitte, ich bin gleich für Sie da... (${waitS}s)`}]);
-          await new Promise(r=>setTimeout(r, waitS*1000));
-          const res2 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${geminiKey}`, {
-            method:"POST", headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({ system_instruction:{parts:[{text: systemPrompt}]}, contents: history, generationConfig:{ maxOutputTokens:600, temperature:0.7 } })
+      // v157: robuster KI-Aufruf — 3 Versuche + Modell-Fallback bei Überlastung (429/503/"high demand")
+      const _alt = (aiModel === 'gemini-2.0-flash') ? 'gemini-2.5-flash-lite' : 'gemini-2.0-flash';
+      const _models = [aiModel, _alt];
+      let data = null, _lastErr = "", _waited = false;
+      outer:
+      for (let mi = 0; mi < _models.length; mi++) {
+        for (let att = 0; att < 3; att++) {
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${_models[mi]}:generateContent?key=${geminiKey}`, {
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({
+              system_instruction:{parts:[{text: systemPrompt}]},
+              contents: history,
+              generationConfig:{ maxOutputTokens:600, temperature:0.7 }
+            })
           });
-          const data2 = await res2.json();
-          if (data2.error) throw new Error("Zu viele Anfragen — bitte kurz warten.");
-          var raw2 = data2.candidates?.[0]?.content?.parts?.[0]?.text || "...";
-          var ct2 = processAiBlocks(raw2);
-          setMsgs(p=>{ var arr=[...p]; if(arr.length && arr[arr.length-1].text && arr[arr.length-1].text.indexOf("Einen Moment")>-1) arr.pop(); return [...arr, {role:"assistant", text: ct2}]; });
-          speak(ct2);
-          setLoading(false);
-          setTimeout(()=>msgsEndRef.current?.scrollIntoView({behavior:"smooth"}),100);
-          return;
+          let d = {}; try { d = await res.json(); } catch(e) {}
+          data = d;
+          if (!d.error && res.ok) break outer;
+          const em = (d.error && d.error.message) || ("HTTP " + res.status);
+          const code = (d.error && d.error.code) || res.status;
+          _lastErr = em;
+          const busy = code === 429 || code === 503 || /high demand|overloaded|quota|rate|exceeded|temporar|try again/i.test(em);
+          if (busy) {
+            let waitS = 2 * (att + 1);
+            const mm = em.match(/retry in ([\d.]+)s/i);
+            if (mm) waitS = Math.min(Math.ceil(parseFloat(mm[1])) + 1, 30);
+            if (!_waited) { _waited = true; setMsgs(p=>[...p, {role:"assistant", text:"⏳ Einen Moment bitte, ich bin gleich für Sie da..."}]); }
+            await new Promise(r=>setTimeout(r, waitS*1000));
+            continue;
+          }
+          break; // anderer Fehler -> nächstes Modell versuchen
         }
-        throw new Error(em);
+      }
+      if (data && data.error) {
+        throw new Error("Gerade ist sehr viel los bei meinem KI-Dienst 🙏 Bitte in ein paar Sekunden noch einmal senden.");
       }
       const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "...";
       const cleanText = processAiBlocks(raw);
-      setMsgs(p=>[...p, {role:"assistant", text: cleanText}]);
+      setMsgs(p=>{ var arr=[...p]; if(arr.length && arr[arr.length-1].text && String(arr[arr.length-1].text).indexOf("Einen Moment")>-1) arr.pop(); return [...arr, {role:"assistant", text: cleanText}]; });
       speak(cleanText);
     } catch(e) {
       setMsgs(p=>[...p, {role:"assistant", text:"⚠️ Fehler: "+e.message}]);
@@ -13939,7 +13941,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
   var toast = function(msg){setSavedMsg(msg);setTimeout(function(){setSavedMsg('');},2200);};
 
   var saveMenu = function(){
-    LS.set('eatdesi_menu', menuData);
+    window._menuHydrated = true; LS.set('eatdesi_menu', menuData);
     try{localStorage.setItem('eatdesi_cat_order', JSON.stringify(Object.keys(menuData)));}catch(e){}
     toast('Gespeichert!');
   };
@@ -19150,7 +19152,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v156"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v159"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -19272,7 +19274,17 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
 }
 
 function App() {
-  const [view, setView] = useState("dashboard");
+  const [view, setView] = useState(() => {
+    // MUTTER-EBENE (v158): Nach Belks-Betreiber-Login landet man in der Zentrale,
+    // nicht im Tochter-Dashboard — klare Trennung Mutter (Belks) / Tochter.
+    try{
+      if (localStorage.getItem('eatdesi_belks_home') === '1') {
+        localStorage.removeItem('eatdesi_belks_home');
+        return 'belks';
+      }
+    }catch(e){}
+    return "dashboard";
+  });
   const [_syncTick, _setSyncTick] = React.useState(0);
   // Bei jeder Remote-Synchronisation die ganze App neu rendern,
   // damit auch Views die direkt aus LS lesen (Firma, Gutscheine, Inventar,
@@ -19397,27 +19409,41 @@ function App() {
     time: "2020-01-01T00:00:00.000Z"
   }]));
   const [menuData, setMenuData] = useState(function() {
-    var saved = LS.get("eatdesi_menu", MENU);
-    // Kategorie-Reihenfolge an die feste Reihenfolge aus MENU angleichen
-    // (Getraenke oben, Speisen unten). Artikel bleiben erhalten - nur sortiert.
-    var ordered = {};
-    Object.keys(MENU).forEach(function(cat){
-      if (saved[cat]) ordered[cat] = saved[cat];        // bekannte Kategorie in MENU-Reihenfolge
-    });
-    Object.keys(saved).forEach(function(cat){
-      if (!ordered[cat]) ordered[cat] = saved[cat];     // evtl. neue Kategorien hinten anhaengen
-    });
-    saved = ordered;
-    var drinkCats = {"Bier":1,"Weine":1,"Cocktails":1,"Digestive":1,"Softdrinks":1,
-      "Alkoholfrei":1,"Safte & Lassi":1,"Long & Shot Drinks":1,"Caffe":1};
-    drinkCats["Säfte & Lassi"] = 1;
-    Object.keys(saved).forEach(function(cat) {
-      var tax = drinkCats[cat] ? "drinks" : "food";
-      (saved[cat]||[]).forEach(function(item) {
-        if (item.taxRate !== tax) { item.taxRate = tax; }
+    /* FIX v159 (KRITISCH): Der BW-Default (MENU) darf NIE automatisch gespeichert
+       oder gesynct werden. Vorher: frisches Tochter-Geraet -> Default=BW-Menue ->
+       Boot-Save mit neuem Zeitstempel -> Sync ueberschreibt das importierte
+       Tochter-Menue in der Cloud (genau das hat Felsbergs Menue geloescht!). */
+    var _isBWmenu = (typeof LOCATION_ID !== 'undefined' && LOCATION_ID === 'eatdesi-bw');
+    var saved = LS.get("eatdesi_menu", null);
+    var hadSaved = !!saved;
+    if (!hadSaved) saved = _isBWmenu ? MENU : { "📋 Menü importieren": [] };
+    if (_isBWmenu) {
+      // Kategorie-Reihenfolge + Getraenke-Steuersatz: NUR fuer eatdesi-bw
+      // (Tochter-Menues haben eigene Kategorien - Import setzt taxRate korrekt)
+      var ordered = {};
+      Object.keys(MENU).forEach(function(cat){
+        if (saved[cat]) ordered[cat] = saved[cat];
       });
-    });
-    LS.set("eatdesi_menu", saved);
+      Object.keys(saved).forEach(function(cat){
+        if (!ordered[cat]) ordered[cat] = saved[cat];
+      });
+      saved = ordered;
+      var drinkCats = {"Bier":1,"Weine":1,"Cocktails":1,"Digestive":1,"Softdrinks":1,
+        "Alkoholfrei":1,"Safte & Lassi":1,"Long & Shot Drinks":1,"Caffe":1};
+      drinkCats["Säfte & Lassi"] = 1;
+      Object.keys(saved).forEach(function(cat) {
+        var tax = drinkCats[cat] ? "drinks" : "food";
+        (saved[cat]||[]).forEach(function(item) {
+          if (item.taxRate !== tax) { item.taxRate = tax; }
+        });
+      });
+    }
+    if (hadSaved) {
+      window._menuHydrated = true;   // echtes Menue vorhanden -> Persist-Effekte duerfen speichern
+      LS.set("eatdesi_menu", saved);
+    } else {
+      window._menuHydrated = false;  // nur Anzeige-Fallback -> NICHT speichern/syncen!
+    }
     return saved;
   });
   const [optionGroups, setOptionGroups] = useState(() => {
@@ -19606,6 +19632,7 @@ function App() {
   useEffect(() => { LS.set("eatdesi_loyalty_settings", loyaltySettings); }, [loyaltySettings]);
   useEffect(() => { LS.set("eatdesi_happyhours", happyHours); }, [happyHours]);
   useEffect(() => {
+    if (!window._menuHydrated) return; // FIX v159: Anzeige-Fallback nie persistieren
     LS.set("eatdesi_menu", menuData);
   }, [menuData]);
 
@@ -19642,6 +19669,7 @@ function App() {
     const onMenu = (e) => {
       try {
         const v = (e && e.detail) ? e.detail : LS.get("eatdesi_menu", null);
+        if (v) window._menuHydrated = true;
         if (v) setMenuData(prev => JSON.stringify(prev) === JSON.stringify(v) ? prev : v);
       } catch(err) {}
     };
@@ -19731,7 +19759,7 @@ function App() {
         setTakeaway(restored); LS.set("eatdesi_takeaway", restored);
       }
       if (co) { setCompletedOrders(co); LS.set("eatdesi_orders", co); }
-      if (md) { setMenuData(md); LS.set("eatdesi_menu", md); }
+      if (md) { window._menuHydrated = true; setMenuData(md); LS.set("eatdesi_menu", md); }
       if (og) { setOptionGroups(og); LS.set("eatdesi_optiongroups", og); }
     })();
   }, []);
@@ -19739,6 +19767,7 @@ function App() {
     LS.set("eatdesi_users", users);
   }, [users]);
   useEffect(() => {
+    if (!window._menuHydrated) return; // FIX v159: Anzeige-Fallback nie persistieren
     LS.set("eatdesi_menu", menuData);
   }, [menuData]);
   useEffect(() => {
@@ -20622,7 +20651,7 @@ function App() {
             try { setCustomers(LS.get("eatdesi_customers", [])); } catch(e){}
             try { setExpenses(LS.get("eatdesi_expenses", [])); } catch(e){}
             try { setReservations(LS.get("eatdesi_reservations", [])); } catch(e){}
-            try { setMenuData(LS.get("eatdesi_menu", MENU)); } catch(e){}
+            try { var _m=LS.get("eatdesi_menu", null); if(_m){ window._menuHydrated=true; setMenuData(_m); } } catch(e){}
             try { setUsers(LS.get("eatdesi_users", [])); } catch(e){}
             setNow(new Date());
           };
@@ -20832,7 +20861,7 @@ function App() {
     onDelete: idx => setExpenses(p => p.filter((_, i) => i !== idx))
   }), view === "menu_mgmt" && /*#__PURE__*/React.createElement(MenuManagementView, {
     menuData: menuData,
-    onUpdate: updated => { setMenuData(updated); LS.set("eatdesi_menu", updated); },
+    onUpdate: updated => { window._menuHydrated = true; setMenuData(updated); LS.set("eatdesi_menu", updated); },
     optionGroups: optionGroups,
     onUpdateOptionGroups: setOptionGroups
   }), view === "printer" && /*#__PURE__*/React.createElement(PrinterSettingsView, {
@@ -21721,8 +21750,8 @@ window.belksAccountOverlay=function(){
         if(err){ err.style.color='#555'; err.textContent='Pr\u00fcfe\u2026'; }
         belksGetTenant('belks-master').then(function(t){
           if(t && t.secret && String(pw)===String(t.secret)){
-            try{ localStorage.setItem('eatdesi_belks_operator','1'); }catch(e){}
-            window.alert('\u2705 Betreiber-Modus aktiviert \u2013 \uD83C\uDFE2 Zentrale & \uD83D\uDD00 Wechsel-Kacheln sind jetzt sichtbar. App l\u00e4dt neu.');
+            try{ localStorage.setItem('eatdesi_belks_operator','1'); localStorage.setItem('eatdesi_belks_home','1'); }catch(e){}
+            window.alert('\u2705 Betreiber-Modus aktiviert \u2013 du landest jetzt auf der MUTTER-EBENE (\uD83C\uDFE2 Belks-Zentrale).');
             location.reload();
           } else {
             if(err){ err.style.color='#c62828'; err.textContent='Falsches Master-Passwort.'; }
@@ -21843,6 +21872,7 @@ function BelksZentraleView(){
     if(!name.trim()){setErr('Bitte Restaurant-Name eingeben.');return;}
     if(!effCode||effCode.length<2){setErr('Restaurant-Code ung\u00fcltig.');return;}
     if(effCode==='belks-master'){setErr('Dieser Code ist reserviert.');return;}
+    if(!String(email||'').trim() || String(email).indexOf('@')<1){setErr('\uD83D\uDCE7 Login-E-Mail ist PFLICHT \u2013 jede Tochter braucht ein eigenes Konto (Best\u00e4tigungs-Mail + Start-Passwort).');return;}
     var pw=belksRandPw();
     var loginPw=belksRandPw();
     var mail=String(email||'').trim().toLowerCase();
@@ -21920,7 +21950,8 @@ function BelksZentraleView(){
   var list=(tenants||[]).filter(function(t){return t.location_id!=='belks-master';});
   return R.createElement('div',{style:{padding:16,overflowY:'auto',height:'calc(100vh - 90px)'}},
     R.createElement('div',{style:{fontWeight:800,fontSize:17,color:'#C84B31',marginBottom:2}},'\uD83C\uDFE2 Belks AI POS \u2014 Zentrale'),
-    R.createElement('div',{style:{fontSize:12,color:'#777',marginBottom:4}},'Mutter-Firma verwaltet hier alle Tochter-Restaurants \u2013 anlegen, Links + Passw\u00f6rter, wechseln. Eine App-Datei f\u00fcr alle: jedes Update gilt sofort f\u00fcr jede Tochter.'),
+    R.createElement('div',{style:{display:'inline-block',background:'#7b1fa2',color:'#fff',fontWeight:800,fontSize:10,padding:'3px 10px',borderRadius:999,marginBottom:6,letterSpacing:0.5}},'MUTTER-EBENE \u00b7 BELKS'),
+    R.createElement('div',{style:{fontSize:12,color:'#777',marginBottom:4}},'Hier verwaltet die Mutter-Firma ALLE Tochter-Apps: anlegen, Links + Passw\u00f6rter, wechseln. \u2601\uFE0F Updates: EINE App-Datei auf GitHub \u2013 jedes Update gilt automatisch sofort f\u00fcr alle T\u00f6chter (nichts pro Tochter n\u00f6tig).'),
     R.createElement('div',{style:{display:'inline-block',background:'#1a1a1e',color:'#e8c95a',fontWeight:800,fontSize:12,padding:'5px 12px',borderRadius:999,marginBottom:14}},'Dieses Ger\u00e4t: '+LOCATION_ID),
     err==='TABLE_MISSING'?R.createElement('div',{style:Object.assign({},card,{border:'2px solid #e65100',background:'#fff8f0'})},
       R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:6,color:'#e65100'}},'\u26A0\uFE0F Einmalige Einrichtung: Supabase-Tabelle fehlt'),
@@ -21939,7 +21970,7 @@ function BelksZentraleView(){
         R.createElement('div',{style:{flex:1}},lbl('PLZ Ort'),R.createElement('input',{value:city,onChange:function(e){setCity(e.target.value);},style:iS}))),
       lbl('Telefon'),
       R.createElement('input',{value:phone,onChange:function(e){setPhone(e.target.value);},style:iS}),
-      lbl('\uD83D\uDCE7 Login-E-Mail des Restaurants (empfohlen \u2013 f\u00fcr Anmeldung & \u201ePasswort vergessen\u201c)'),
+      lbl('\uD83D\uDCE7 Login-E-Mail des Restaurants * (PFLICHT \u2013 Konto + Best\u00e4tigungs-Mail + Start-Passwort)'),
       R.createElement('input',{type:'email',value:email,onChange:function(e){setEmail(e.target.value);},style:iS,placeholder:'chef@restaurant.de'}),
       R.createElement('div',{style:{fontSize:11,color:'#7b1fa2',fontWeight:700,margin:'2px 0 8px'}},'\uD83D\uDD10 Beim Anlegen werden automatisch ein E-Mail-Login (mit Start-Passwort) und ein Restaurant-Passwort erzeugt. Ger\u00e4te melden sich wie bei GloriaFood mit E-Mail + Passwort an; \u201ePasswort vergessen\u201c schickt automatisch eine Reset-E-Mail.'),
       err&&err!=='TABLE_MISSING'?R.createElement('div',{style:{color:'#c62828',fontSize:12,fontWeight:700,marginBottom:8}},'\u26A0\uFE0F '+err):null,
