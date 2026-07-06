@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v153</title>
+<title>eatDeSi POS v156</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v153';",
+    "var CACHE='eatdesi-v156';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -7807,16 +7807,23 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     ${(deliveryInfo.plz || deliveryInfo.city) ? `<div>${[deliveryInfo.plz, deliveryInfo.city].filter(Boolean).join(" ")}</div>` : ""}
     ${deliveryInfo.phone ? `<div>📞 ${deliveryInfo.phone}</div>` : ""}
   ` : "";
-  const qrOn = (_bc.qr !== false) && (printerCfg?.qrEnabled !== false);
-  const qrLink = printerCfg?.qrUrl || "https://beacons.ai/eatdesi.bw";
+  // AUDIT-FIX v156: Fallbacks nur fuer eatdesi-bw — fremde Toechter drucken NIE BW-Daten
+  const _isBWbon = (typeof LOCATION_ID!=='undefined' && LOCATION_ID==='eatdesi-bw');
+  const qrLink = printerCfg?.qrUrl || (_isBWbon ? "https://beacons.ai/eatdesi.bw" : "");
+  const qrOn = (_bc.qr !== false) && (printerCfg?.qrEnabled !== false) && !!qrLink;
   const _footerOn = _bc.footer !== false;
   const _footerTxt = (_bc.footerText!=null && _bc.footerText!=='') ? _bc.footerText : (printerCfg?.footer||"Danke & bis bald! 🙏");
+  const _kn = printerCfg?.firmaName||printerCfg?.name||(_isBWbon?"eatDeSi":((typeof tenantDisplayName==='function')?tenantDisplayName():""));
+  const _kz = printerCfg?.firmaZusatz||(_isBWbon?"eatDeSi – Fusion Kitchen & Grill":"");
+  const _ks = printerCfg?.firmaStrasse||printerCfg?.street||(_isBWbon?"Brunnenallee 30":"");
+  const _kp = printerCfg?.firmaPlzOrt||printerCfg?.cityLine||(_isBWbon?"34537 Bad Wildungen":"");
+  const _kt = printerCfg?.firmaPhone||printerCfg?.phone||(_isBWbon?"05621 9449087":"");
   const _kopf = (_bc.logo !== false) ? `
-    <div class="center bold" style="font-size:16px">${printerCfg?.firmaName||printerCfg?.name||"eatDeSi"}</div>
-    <div class="center bold">${printerCfg?.firmaZusatz||"eatDeSi – Fusion Kitchen & Grill"}</div>
-    <div class="center bold">${printerCfg?.firmaStrasse||printerCfg?.street||"Brunnenallee 30"}</div>
-    <div class="center bold">${printerCfg?.firmaPlzOrt||printerCfg?.cityLine||"34537 Bad Wildungen"}</div>
-    ${(_bc.phone !== false) ? `<div class="center bold">${printerCfg?.firmaPhone||printerCfg?.phone||"05621 9449087"}</div>` : ""}
+    ${_kn?`<div class="center bold" style="font-size:16px">${_kn}</div>`:""}
+    ${_kz?`<div class="center bold">${_kz}</div>`:""}
+    ${_ks?`<div class="center bold">${_ks}</div>`:""}
+    ${_kp?`<div class="center bold">${_kp}</div>`:""}
+    ${(_bc.phone !== false && _kt) ? `<div class="center bold">${_kt}</div>` : ""}
     <div class="line"></div>` : "";
   const html = `<html><head><meta name="viewport" content="width=device-width"><style>body{font-family:monospace;font-size:15px;font-weight:600;width:${_bonW}px;margin:0 auto;padding:8px;line-height:1.35}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:800}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}</style></head><body${qrOn?` data-qr="${qrLink}"`:""}>
     ${_kopf}
@@ -7938,7 +7945,7 @@ function buildConfirmText(order, prepMin) {
     '⏱️ In ca. '+prepMin+' Minuten '+wayWord+' ('+typeLabel+')',
     '',
     'Bis gleich!',
-    'eatDeSi · Fusion Kitchen & Grill · Bad Wildungen'
+    ((typeof tenantDisplayName==='function')?tenantDisplayName():'eatDeSi') + (((typeof tenantAddressLine==='function')&&tenantAddressLine())?(' · '+tenantAddressLine()):'')
   ];
   return lines.join('\n');
 }
@@ -10244,7 +10251,7 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
   const _vorspeisen = (activeMenu["Vorspeisen"]||activeMenu["Potato Bombs"]||[]).slice(0,6).map(function(i){return i.name;}).join(", ");
   const _custInfo = aiCustomer ? `\n\nAKTUELLER STAMMKUNDE (bereits erkannt): ${customerHistoryText(aiCustomer)}. Sprich ihn mit Namen an, empfiehl auf Basis der letzten Bestellung etwas Passendes/Neues.` : "";
 
-  const systemPrompt = `Du bist Priya, die herzliche, SCHLAUE und schnelle Kellnerin im Restaurant eatDeSi (${_adr||"Bad Wildungen"}) — Fusion Kitchen & Grill, "Indien trifft Trends". Du bist auch eine gute Verkäuferin.
+  const systemPrompt = `Du bist Priya, die herzliche, SCHLAUE und schnelle Kellnerin im Restaurant ${(typeof tenantDisplayName==='function')?tenantDisplayName():'eatDeSi'}${_adr?` (${_adr})`:''}${(typeof LOCATION_ID!=='undefined'&&LOCATION_ID==='eatdesi-bw')?' — Fusion Kitchen & Grill, "Indien trifft Trends"':''}. Du bist auch eine gute Verkäuferin.
 
 DEINE PERSÖNLICHKEIT:
 - Warmherzig, natürlich, schnell. Antworte SEHR KURZ (1-3 Sätze), da alles vorgelesen wird. Kein Roman.
@@ -10508,7 +10515,7 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
         role: m.role === "assistant" ? "model" : "user",
         parts: [{text: m.text}]
       }));
-      const aiModel = cfg?.geminiModel || 'gemini-2.5-flash-lite';
+      const aiModel = (printerSettings && printerSettings.geminiModel) || 'gemini-2.5-flash-lite';
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${geminiKey}`, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -15384,7 +15391,7 @@ function MarketingView({ printerSettings, setPrinterSettings }) {
     // Vorschau Aushang
     reviewPageUrl && React.createElement("div", { style:{ background:"linear-gradient(135deg,#1b5e20,#2e7d32)", borderRadius:16, padding:20, textAlign:"center", color:"#fff" } },
       React.createElement("div", { style:{ fontSize:20, fontWeight:900, marginBottom:2 } }, printerSettings?.name || printerSettings?.firmaZusatz || "eatDeSi"),
-      React.createElement("div", { style:{ fontSize:13, fontWeight:700, opacity:.85, marginBottom:10, fontStyle:"italic" } }, "Indien trifft Trends"),
+      React.createElement("div", { style:{ fontSize:13, fontWeight:700, opacity:.85, marginBottom:10, fontStyle:"italic" } }, (LOCATION_ID==="eatdesi-bw")?"Indien trifft Trends":(tenantAddressLine()||"")),
       React.createElement("div", { style:{ fontSize:14, opacity:.8, marginBottom:16 } }, "Wie war Ihr Besuch? ⭐"),
       React.createElement("canvas", { ref:null, style:{ display:"none" } }),
       React.createElement("div", { style:{ display:"flex", flexDirection:"column", gap:8, alignItems:"center" } },
@@ -15466,9 +15473,10 @@ function KundenkontakteView({ completedOrders, customers, printerSettings }) {
   const selectNone = () => setSelected(new Set());
 
   const _restName = printerSettings?.name || printerSettings?.firmaZusatz || "eatDeSi";
-  const defaultMsg = `Hallo! 👋\nVielen Dank für Ihren Besuch bei ${_restName}! 🍽️\n\nWir würden uns sehr über Ihre Bewertung freuen:\n⭐⭐⭐⭐⭐ Google: ${printerSettings?.googleLink||"[Google Link]"}\n\n📸 Instagram: ${printerSettings?.instagramLink||""}\n💬 WhatsApp: wa.me/${(printerSettings?.firmaPhone||"").replace(/[^0-9]/g,"")}\n\nMit freundlichen Grüßen\n${_restName} \"Indien trifft Trends\"\n${printerSettings?.firmaStrasse||"Brunnenallee 30"},\n${printerSettings?.firmaPlzOrt||"34537 Bad Wildungen"}`;
+  const _slogan = (LOCATION_ID==="eatdesi-bw") ? ' "Indien trifft Trends"' : "";
+  const defaultMsg = `Hallo! 👋\nVielen Dank für Ihren Besuch bei ${_restName}! 🍽️\n\nWir würden uns sehr über Ihre Bewertung freuen:\n⭐⭐⭐⭐⭐ Google: ${printerSettings?.googleLink||"[Google Link]"}\n\n📸 Instagram: ${printerSettings?.instagramLink||""}\n💬 WhatsApp: wa.me/${(printerSettings?.firmaPhone||"").replace(/[^0-9]/g,"")}\n\nMit freundlichen Grüßen\n${_restName}${_slogan}\n${printerSettings?.firmaStrasse||""},\n${printerSettings?.firmaPlzOrt||""}`;
 
-  const defaultEmailMsg = `Hallo,\n\nvielen Dank für Ihren Besuch bei ${_restName}!\n\nWir würden uns sehr über Ihre Bewertung freuen:\n⭐⭐⭐⭐⭐ ${printerSettings?.googleLink||"[Google Link]"}\n\n📸 Instagram: ${printerSettings?.instagramLink||""}\n💬 WhatsApp: wa.me/${(printerSettings?.firmaPhone||"").replace(/[^0-9]/g,"")}\n\nMit freundlichen Grüßen\n${_restName} "Indien trifft Trends"\n${printerSettings?.firmaStrasse||"Brunnenallee 30"},\n${printerSettings?.firmaPlzOrt||"34537 Bad Wildungen"}`;
+  const defaultEmailMsg = `Hallo,\n\nvielen Dank für Ihren Besuch bei ${_restName}!\n\nWir würden uns sehr über Ihre Bewertung freuen:\n⭐⭐⭐⭐⭐ ${printerSettings?.googleLink||"[Google Link]"}\n\n📸 Instagram: ${printerSettings?.instagramLink||""}\n💬 WhatsApp: wa.me/${(printerSettings?.firmaPhone||"").replace(/[^0-9]/g,"")}\n\nMit freundlichen Grüßen\n${_restName}${_slogan}\n${printerSettings?.firmaStrasse||""},\n${printerSettings?.firmaPlzOrt||""}`;
 
   const sendWhatsApp = (phone, msg) => {
     const clean = phone.replace(/[^0-9+]/g,"");
@@ -17702,11 +17710,12 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
 // --- Bewirtungsbeleg printer ---------------------------------------------------
 function _bewHtml(items, total, label, fmt80, F) {
   F = F || {};
-  var fn    = F.name    || 'eatDeSi';
-  var fz    = F.zusatz  || 'Fusion Kitchen & Grill';
-  var fstr  = F.strasse || 'Brunnenallee 30';
-  var fpo   = F.plzOrt  || '34537 Bad Wildungen';
-  var ftel  = F.phone   || '05621 9449087';
+  var _isBWb = (typeof LOCATION_ID!=='undefined' && LOCATION_ID==='eatdesi-bw');
+  var fn    = F.name    || (_isBWb?'eatDeSi':((typeof tenantDisplayName==='function')?tenantDisplayName():''));
+  var fz    = F.zusatz  || (_isBWb?'Fusion Kitchen & Grill':'');
+  var fstr  = F.strasse || (_isBWb?'Brunnenallee 30':'');
+  var fpo   = F.plzOrt  || (_isBWb?'34537 Bad Wildungen':'');
+  var ftel  = F.phone   || (_isBWb?'05621 9449087':'');
   var fstNr = F.stNr    || '';
   var fust  = F.ust     || '';
   var fger  = F.gericht || '';
@@ -17790,7 +17799,7 @@ function _bewHtml(items, total, label, fmt80, F) {
     +         '<ellipse cx="30" cy="22" rx="28" ry="20" fill="none" stroke="#1a5276" stroke-width="2.5"/>'
     +         '<ellipse cx="30" cy="22" rx="24" ry="16" fill="none" stroke="#1a5276" stroke-width="1"/>'
     +         '<text x="30" y="18" text-anchor="middle" font-family="Arial" font-size="5.5" font-weight="bold" fill="#1a5276">eatDeSi</text>'
-    +         '<text x="30" y="24" text-anchor="middle" font-family="Arial" font-size="4" fill="#1a5276">Fusion Kitchen &amp; Grill</text>'
+    +         '<text x="30" y="24" text-anchor="middle" font-family="Arial" font-size="4" fill="#1a5276">'+String(fz||'').replace(/&/g,'&amp;')+'</text>'
     +         '<text x="30" y="30" text-anchor="middle" font-family="Arial" font-size="3.5" fill="#1a5276">Bad Wildungen</text>'
     +         '<path d="M18 36 Q22 28 26 32 Q30 36 34 26 Q38 18 42 30" fill="none" stroke="#1a5276" stroke-width="1.5" stroke-linecap="round"/>'
     +       '</svg>'
@@ -17855,7 +17864,7 @@ function _bewHtml(items, total, label, fmt80, F) {
       + '<p style="text-align:center;font-size:11px;color:#666;margin:0 0 12px">gem\u00e4\u00df \u00a7 4 Abs. 5 Nr. 2 EStG &nbsp;&middot;&nbsp; Nur mit Originalrechnung g\u00fcltig</p>'
       + '<div style="border-top:2px solid #333;margin:12px 0"></div>'
       + '<div style="display:flex;justify-content:space-between;margin-bottom:12px">'
-      +   '<div><b style="font-size:14px">eatDeSi \u2014 Fusion Kitchen &amp; Grill</b><br>Brunnenallee 30 \u00b7 34537 Bad Wildungen<br>Tel: 05621 9449087 \u00b7 www.eatdesi-bw.de</div>'
+      +   '<div><b style="font-size:14px">'+fn+(fz?(' \u2014 '+fz.replace(/&/g,'&amp;')):'')+'</b><br>'+[fstr,fpo].filter(Boolean).join(' \u00b7 ')+(ftel?('<br>Tel: '+ftel):'')+(fweb?(' \u00b7 '+fweb):'')+'</div>'
       +   '<div style="text-align:right"><b>' + d + ' ' + t + '</b><br>' + label + '</div>'
       + '</div>'
       + '<table><tr><th>Bezeichnung</th><th style="text-align:right">Betrag</th></tr>'
@@ -19141,7 +19150,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v153"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v156"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -19150,6 +19159,25 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
         )
       )
     ),
+    // 🏪 EINRICHTUNGS-CHECKLISTE (v154): erscheint nur bei frischen Töchtern (keine Firmendaten gespeichert)
+    (LOCATION_ID !== "eatdesi-bw" && (function(){
+      try{
+        if(localStorage.getItem("eatdesi_setup_hide_"+LOCATION_ID)==="1") return false;
+        var p=JSON.parse(localStorage.getItem("eatdesi_printer")||"null")||{};
+        return !p.firmaStNr && !p.firmaName;
+      }catch(e){ return false; }
+    })()) ? React.createElement("div", { style:{ background:"#fff8e1", border:"2px solid #f5c542", borderRadius:16, padding:"14px 16px", marginBottom:16 } },
+      React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 } },
+        React.createElement("div", { style:{ fontWeight:800, fontSize:14, color:"#7a5c00" } }, "🏪 Neues Restaurant einrichten"),
+        React.createElement("button", { onClick:()=>{ try{ localStorage.setItem("eatdesi_setup_hide_"+LOCATION_ID,"1"); }catch(e){} location.reload(); },
+          style:{ border:"none", background:"none", color:"#7a5c00", fontWeight:800, cursor:"pointer", fontSize:16, fontFamily:"inherit" } }, "✕")),
+      React.createElement("div", { style:{ fontSize:12, color:"#6b5300", lineHeight:1.9 } },
+        "Diese Tochter ist frisch \u2013 bitte einmalig die eigenen Daten einstellen (nichts wird von anderen Restaurants \u00fcbernommen):", React.createElement("br", null),
+        "1\uFE0F\u20E3 \u2630 Men\u00fc \u2192 Einstellungen \u2192 \uD83C\uDFE2 Firmendaten DIESES Restaurants eintragen + Speichern", React.createElement("br", null),
+        "2\uFE0F\u20E3 \uD83C\uDFE2 Firmendaten-Kachel \u2192 \uD83C\uDFF7\uFE0F Anzeigename + \uD83E\uDE91 Tische", React.createElement("br", null),
+        "3\uFE0F\u20E3 \u2630 Men\u00fc \u2192 Men\u00fc Import/Export \u2192 eigenes Men\u00fc importieren", React.createElement("br", null),
+        "4\uFE0F\u20E3 \uD83C\uDF10 Webshop-Einstellungen: \u00d6ffnungszeiten & Liefergebiet")
+    ) : null,
 
     // Stats Grid
     React.createElement("div", { style:{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" } },
@@ -21582,8 +21610,17 @@ function belksQuickSwitch(code, name, opts){
         try{
           var keep=['eatdesi_location_id','eatdesi_sb_url','eatdesi_sb_key','eatdesi_printer','eatdesi_guard_v','eatdesi_belks_operator'];
           var kill=[];
-          for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k&&k.indexOf('eatdesi_')===0&&keep.indexOf(k)<0&&k.indexOf('eatdesi_tenant_ok_')!==0) kill.push(k); }
+          for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k&&k.indexOf('eatdesi_')===0&&keep.indexOf(k)<0&&k.indexOf('eatdesi_tenant_ok_')!==0&&k.indexOf('eatdesi_setup_hide_')!==0) kill.push(k); }
           kill.forEach(function(k){ localStorage.removeItem(k); });
+          // FIX v154: Drucker-HARDWARE behalten (Methode/IP/Breite/Kopien/AI-Key),
+          // aber FIRMENDATEN der alten Tochter entfernen — jede Tochter hat eigene!
+          try{
+            var pr=JSON.parse(localStorage.getItem('eatdesi_printer')||'null');
+            if(pr){
+              ['name','address','phone','firmaName','firmaZusatz','firmaStrasse','firmaPlzOrt','firmaStNr','firmaUst','firmaGericht','firmaEmail','firmaWeb','googleLink'].forEach(function(k){ delete pr[k]; });
+              localStorage.setItem('eatdesi_printer', JSON.stringify(pr));
+            }
+          }catch(e){}
           localStorage.setItem('eatdesi_location_id',code);
           localStorage.setItem('eatdesi_tenant_ok_'+code,'1');
         }catch(e){}
@@ -22381,7 +22418,7 @@ function closeQRCardOverlay(){
 
 function QRKartenView(){
   var R=React;
-  var [cfg,setCfg]=R.useState(function(){return LS.get('eatdesi_qrcfg',{count:(window.getTableCount?window.getTableCount():30),url:'https://eatdesi.github.io/eatdesi-pos/eatdesi-website.html',subtitle:'Fusion Kitchen & Grill'});});
+  var [cfg,setCfg]=R.useState(function(){return LS.get('eatdesi_qrcfg',{count:(window.getTableCount?window.getTableCount():30),url:'https://eatdesi.github.io/eatdesi-pos/eatdesi-website.html'+(LOCATION_ID!=='eatdesi-bw'?('?r='+LOCATION_ID):''),subtitle:(LOCATION_ID==='eatdesi-bw')?'Fusion Kitchen & Grill':((window.TENANT_INFO&&window.TENANT_INFO.city)||'')});});
   var [busy,setBusy]=R.useState(false);
   var [err,setErr]=R.useState('');
   var iS={width:'100%',padding:'8px 10px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8};
@@ -22621,7 +22658,7 @@ function AiMarketingView({ completedOrders, menuData }) {
   const [posts, setPosts] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [platform, setPlatform] = React.useState('instagram');
-  const firma = LS.get('eatdesi_firma', {name:'eatDeSi Restaurant', slogan:'Indien trifft Trends'});
+  const firma = LS.get('eatdesi_firma', {name:((typeof tenantDisplayName==='function')?tenantDisplayName():'eatDeSi'), slogan:(LOCATION_ID==='eatdesi-bw')?'Indien trifft Trends':''});
   const itemCounts = {};
   (completedOrders||[]).slice(-100).forEach(o => (o.items||[]).forEach(it => { itemCounts[it.name]=(itemCounts[it.name]||0)+(it.qty||1); }));
   const top3 = Object.entries(itemCounts).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([n])=>n);
