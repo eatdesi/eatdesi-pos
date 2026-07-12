@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v161</title>
+<title>eatDeSi POS v162</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v161';",
+    "var CACHE='eatdesi-v162';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -19154,7 +19154,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v161"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v162"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21620,10 +21620,19 @@ async function belksAuthSignup(email, pw){
   var j=await r.json().catch(function(){return {};});
   if(!r.ok){
     var m=belksAuthErr(j,r);
-    if(/already|registered|exists/i.test(m)) return {ok:true, existing:true};
+    if(/already|registered|exists/i.test(m)) return {ok:true, existing:true, pwUnchanged:true};
     throw new Error(m);
   }
-  return {ok:true, user:(j&&j.user)||j};
+  /* WICHTIG (v162): Existiert das Konto schon, liefert Supabase einen
+     "Schein-Erfolg" (Anti-Enumeration) — das PASSWORT WIRD DABEI NICHT GESETZT!
+     Erkennung: identities leer ODER Konto deutlich aelter als jetzt. */
+  var u=(j&&j.user)||j||{};
+  var pwUnchanged=false;
+  try{
+    if (Array.isArray(u.identities) && u.identities.length===0) pwUnchanged=true;
+    else if (u.created_at && (Date.now()-Date.parse(u.created_at)) > 2*60*1000) pwUnchanged=true;
+  }catch(e){}
+  return {ok:true, user:u, existing:pwUnchanged, pwUnchanged:pwUnchanged};
 }
 async function belksAuthLogin(email, pw){
   var r=await fetch(SUPA_URL+'/auth/v1/token?grant_type=password',{method:'POST',
@@ -21633,7 +21642,7 @@ async function belksAuthLogin(email, pw){
   if(!r.ok){
     var em=belksAuthErr(j,r);
     if(/not confirmed/i.test(em)) throw new Error('E-Mail noch nicht best\u00e4tigt \u2013 bitte zuerst den Link in der Best\u00e4tigungs-E-Mail anklicken (auch Spam pr\u00fcfen).');
-    throw new Error(/invalid/i.test(em)?'E-Mail oder Passwort falsch.':em);
+    throw new Error(/invalid/i.test(em)?'E-Mail oder Passwort falsch. Tipp: \u201EPasswort vergessen?\u201C setzt in 1 Minute ein neues.':em);
   }
   return j; // {access_token, user:{email}}
 }
@@ -21929,14 +21938,20 @@ function BelksZentraleView(){
     setBusy(true);setErr('');setOk('');
     (async function(){
       try{
-        if(mail){ await belksAuthSignup(mail, loginPw); }
+        var _su=null; if(mail){ _su=await belksAuthSignup(mail, loginPw); }
         var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants',{method:'POST',
           headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},
           body:JSON.stringify({location_id:effCode,name:name.trim(),street:street.trim(),city:city.trim(),phone:phone.trim(),plan:'free',active:true,secret:pw,email:mail||null})});
         if(r.status===409) throw new Error('Code "'+effCode+'" existiert schon \u2013 bitte anderen Code w\u00e4hlen.');
         if(!r.ok&&r.status!==201) throw new Error('HTTP '+r.status);
         var msg='\u2705 "'+name.trim()+'" angelegt! Code: '+effCode;
-        if(mail) msg+=' \u00b7 \uD83D\uDCE7 Login: '+mail+' \u00b7 Start-Passwort: '+loginPw+' \u2013 dem Restaurant geben! \uD83D\uDCEC WICHTIG: Zuerst den Best\u00e4tigungs-Link in der E-Mail anklicken (auch Spam pr\u00fcfen), DANN funktioniert der Login.';
+        if(mail){
+          if(_su&&_su.pwUnchanged){
+            msg+=' \u00b7 \u26A0\uFE0F E-Mail '+mail+' hatte SCHON ein Konto \u2013 Start-Passwort gilt NICHT. In \uD83D\uDD17 Links \u2192 \uD83D\uDD11 Reset-Mail senden!';
+          } else {
+            msg+=' \u00b7 \uD83D\uDCE7 Login: '+mail+' \u00b7 Start-Passwort: '+loginPw+' \u2013 dem Restaurant geben! \uD83D\uDCEC WICHTIG: Zuerst den Best\u00e4tigungs-Link in der E-Mail anklicken (auch Spam pr\u00fcfen), DANN funktioniert der Login.';
+          }
+        }
         else msg+=' \u00b7 Restaurant-Passwort: '+pw+' (kein E-Mail-Login verbunden)';
         setOk(msg);
         setName('');setCode('');setCodeTouched(false);setStreet('');setCity('');setPhone('');setEmail('');
@@ -22044,7 +22059,14 @@ function BelksZentraleView(){
               isCur?null:R.createElement('button',{onClick:function(){switchTo(c);},style:{padding:'6px 10px',borderRadius:8,border:'none',background:'#7b1fa2',color:'#fff',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD04 Wechseln'))),
           showLinks===c?R.createElement('div',{style:{marginTop:6,fontSize:11}},
             lbl('\uD83D\uDCE7 Login-E-Mail (Anmeldung wie GloriaFood):'),
-            t.email?R.createElement('input',{readOnly:true,value:t.email,style:Object.assign({},iS,{fontFamily:'monospace',fontSize:11}),onFocus:function(e){e.target.select();}})
+            t.email?R.createElement('div',{style:{marginBottom:8}},
+              R.createElement('input',{readOnly:true,value:t.email,style:Object.assign({},iS,{fontFamily:'monospace',fontSize:11}),onFocus:function(e){e.target.select();}}),
+              R.createElement('button',{onClick:function(){
+                setErr('');setOk('');
+                belksAuthRecover(t.email).then(function(){
+                  setOk('\uD83D\uDCE7 Passwort-Reset-Mail an '+t.email+' gesendet \u2013 Link \u00f6ffnet die App zum Neu-Setzen (auch Spam pr\u00fcfen).');
+                }).catch(function(e){ setErr(String(e.message||e)); });
+              },style:{width:'100%',padding:10,borderRadius:8,border:'none',background:'#e65100',color:'#fff',fontWeight:800,fontSize:12,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD11 Reset-Mail senden (neues Login-Passwort setzen)'))
             :R.createElement('div',{style:{marginBottom:8}},
               R.createElement('input',{type:'email',value:linkEmail,onChange:function(e){setLinkEmail(e.target.value);},style:iS,placeholder:'chef@restaurant.de'}),
               R.createElement('input',{type:'password',value:linkPw,onChange:function(e){setLinkPw(e.target.value);},style:iS,placeholder:'Login-Passwort w\u00e4hlen (mind. 6 Zeichen)'}),
@@ -22057,7 +22079,11 @@ function BelksZentraleView(){
                     headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},
                     body:JSON.stringify({email:m})}).then(function(r2){
                       if(!r2.ok&&r2.status!==204) throw new Error('HTTP '+r2.status);
-                      setOk('\u2705 Login-Konto verbunden: '+m+(res&&res.existing?' (Konto existierte schon \u2013 bestehendes Passwort gilt)':' \u00b7 Passwort wie eingegeben \u00b7 \uD83D\uDCEC WICHTIG: Zuerst Best\u00e4tigungs-Link in der E-Mail anklicken (auch Spam), DANN anmelden!'));
+                      if(res&&res.pwUnchanged){
+                        setOk('\u26A0\uFE0F Verbunden: '+m+' \u2014 KONTO EXISTIERTE SCHON. Das eben eingegebene Passwort gilt NICHT (Supabase \u00e4ndert es beim erneuten Registrieren nicht). Bitte unten \u201E\uD83D\uDD11 Reset-Mail senden\u201C nutzen und \u00fcber den Link ein neues Passwort setzen.');
+                      } else {
+                        setOk('\u2705 Login-Konto verbunden: '+m+' \u00b7 Passwort wie eingegeben \u00b7 \uD83D\uDCEC WICHTIG: Zuerst Best\u00e4tigungs-Link in der E-Mail anklicken (auch Spam), DANN anmelden!');
+                      }
                       setLinkEmail('');setLinkPw(''); load();
                     });
                 }).catch(function(e){ setErr(String(e.message||e)); });
