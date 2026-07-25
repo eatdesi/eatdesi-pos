@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v166</title>
+<title>eatDeSi POS v167</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v166';",
+    "var CACHE='eatdesi-v167';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -19224,7 +19224,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v166"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v167"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -19357,6 +19357,12 @@ function App() {
     }catch(e){}
     return "dashboard";
   });
+  // v167: Benachrichtigungs-Erlaubnis (einmalig) + Display wachhalten in Kueche/Bar/KDS/Kiosk
+  useEffect(() => { try{ nativeInitPermissions(); }catch(e){} }, []);
+  useEffect(() => {
+    var wake = ['kueche','bar','kdspro','kds','kiosk','online_orders'].indexOf(String(view)) >= 0;
+    try{ nativeKeepAwake(wake); }catch(e){}
+  }, [view]);
   const [_syncTick, _setSyncTick] = React.useState(0);
   // Bei jeder Remote-Synchronisation die ganze App neu rendern,
   // damit auch Views die direkt aus LS lesen (Firma, Gutscheine, Inventar,
@@ -19450,6 +19456,7 @@ function App() {
       console.log('🔔 NEU erkannt! ' + fresh.length + ' frische Bestellung(en):', fresh.map(o=>o.bonNr));
       fresh.forEach(o => _seenOnlineRef.current.add(String(o.bonNr)));
       playNotifySound();
+      try{ var _fo=fresh[fresh.length-1]; nativeOrderAlert('\uD83D\uDEF5 Neue Online-Bestellung', 'Bon '+_fo.bonNr+(_fo.total!=null?(' \u00b7 '+Number(_fo.total).toFixed(2)+' \u20ac'):'')); }catch(e){}
       setPendingOnlinePopup(fresh[fresh.length - 1]);
       setView("online_orders");
     }
@@ -19465,6 +19472,7 @@ function App() {
     if (frisch.length > 0) {
       frisch.forEach(r => _seenAnfrageRef.current.add(String(r.id)));
       playNotifySound();
+      try{ nativeOrderAlert('\uD83D\uDCE9 Neue Web-Anfrage', String((frisch[0]&&frisch[0].name)||'')); }catch(e){}
       setPendingAnfragePopup(frisch[0]);
     }
   }, [webRequests]);
@@ -21650,6 +21658,24 @@ function MenuImportExportView({ menuData, onUpdate }) {
     setPasteVal('');
     setMsg('Import erfolgreich! ' + Object.keys(imported).length + ' Kategorien, ' + cnt + ' Artikel geladen.');
   };
+  var importNative = function(){
+    try{
+      var P=(window.Capacitor && window.Capacitor.Plugins) || {};
+      if(!P.FilePicker || !P.FilePicker.pickFiles){
+        setMsg('Nativer Datei-Dialog nicht verfuegbar (Plugin fehlt) - unten JSON-Text einfuegen.');
+        return;
+      }
+      P.FilePicker.pickFiles({ types:['application/json'], readData:true }).then(function(res){
+        try{
+          var f = res && res.files && res.files[0];
+          if(!f) return;
+          var txt = '';
+          if(f.data){ txt = decodeURIComponent(escape(atob(f.data))); }
+          applyImported(JSON.parse(txt));
+        }catch(err){ setMsg('Fehler beim Lesen der Datei.'); }
+      }).catch(function(){});
+    }catch(e){ setMsg('Fehler: '+e); }
+  };
   var importPaste = function(){
     try { applyImported(JSON.parse(String(pasteVal||''))); }
     catch(err){ setMsg('Fehler: Ungueltiger JSON-Text.'); }
@@ -21682,7 +21708,8 @@ function MenuImportExportView({ menuData, onUpdate }) {
         'Menue importieren',
         R.createElement('input',{type:'file',accept:'.json',onChange:importMenu,style:{display:'none'}})
       ),
-      R.createElement('div',{style:{fontSize:12,color:'#999',margin:'12px 0 6px',fontWeight:700}},'\uD83D\uDCCB Oder: JSON-Text einf\u00fcgen (falls die Datei-Auswahl in der App nicht \u00f6ffnet)'),
+      R.createElement('button',{onClick:importNative,style:{width:'100%',padding:11,borderRadius:9,border:'none',background:'#1565c0',color:'#fff',fontWeight:800,fontSize:13,cursor:'pointer',fontFamily:'inherit',marginTop:8}},'\uD83D\uDCC1 Datei w\u00e4hlen (nativer Dialog \u2013 empfohlen in der App)'),
+      R.createElement('div',{style:{fontSize:12,color:'#999',margin:'12px 0 6px',fontWeight:700}},'\uD83D\uDCCB Oder: JSON-Text einf\u00fcgen (falls kein Dialog \u00f6ffnet)'),
       R.createElement('textarea',{value:pasteVal,onChange:function(e){setPasteVal(e.target.value);},placeholder:'Kompletten JSON-Inhalt hier einf\u00fcgen\u2026',style:{width:'100%',minHeight:90,padding:10,borderRadius:9,border:'1.5px solid #ddd',fontFamily:'monospace',fontSize:11,boxSizing:'border-box'}}),
       R.createElement('button',{onClick:importPaste,style:{width:'100%',padding:11,borderRadius:9,border:'none',background:'#6a1b9a',color:'#fff',fontWeight:800,fontSize:13,cursor:'pointer',fontFamily:'inherit',marginTop:8}},'\uD83D\uDCCB Eingef\u00fcgtes JSON importieren')
     )
@@ -21963,6 +21990,38 @@ window.belksAccountOverlay=function(opts){
     renderLogin('');
   }catch(e){}
 };
+/* v167: Native-Plugin-Hooks — ALLE optional. Ohne Plugin/Browser laeuft alles wie bisher. */
+function capPlugins(){ try{ return (window.Capacitor && window.Capacitor.Plugins) || null; }catch(e){ return null; } }
+function nativeOrderAlert(title, body){
+  try{
+    var P=capPlugins(); if(!P) return;
+    try{ if(P.Haptics && P.Haptics.vibrate) P.Haptics.vibrate({duration:400}); }catch(e){}
+    try{
+      if(P.LocalNotifications && P.LocalNotifications.schedule){
+        P.LocalNotifications.schedule({notifications:[{
+          id: Math.floor(Date.now() % 2147483647),
+          title: title || '\uD83D\uDD14 Neue Bestellung',
+          body: body || '',
+          schedule: { at: new Date(Date.now()+100) }
+        }]});
+      }
+    }catch(e){}
+  }catch(e){}
+}
+function nativeInitPermissions(){
+  try{
+    var P=capPlugins(); if(!P) return;
+    try{ if(P.LocalNotifications && P.LocalNotifications.requestPermissions) P.LocalNotifications.requestPermissions(); }catch(e){}
+  }catch(e){}
+}
+function nativeKeepAwake(on){
+  try{
+    var P=capPlugins(); if(!P || !P.KeepAwake) return;
+    if(on){ if(P.KeepAwake.keepAwake) P.KeepAwake.keepAwake(); }
+    else   { if(P.KeepAwake.allowSleep) P.KeepAwake.allowSleep(); }
+  }catch(e){}
+}
+window.nativeOrderAlert=nativeOrderAlert;
 // v166: Kassenschublade ueber WLAN-Drucker (Epson ePOS pulse)
 function eposDrawerPulse(ip){
   try{
