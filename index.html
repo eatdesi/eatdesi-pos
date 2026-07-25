@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v167</title>
+<title>eatDeSi POS v168</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v167';",
+    "var CACHE='eatdesi-v168';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -19224,7 +19224,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v167"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v168"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -19489,7 +19489,8 @@ function App() {
   const [inventory, setInventory] = React.useState(() => LS.get("eatdesi_inventory", []));
   const [drivers, setDrivers] = React.useState(() => LS.get("eatdesi_drivers", []));
   const [floors, setFloors] = React.useState(() => LS.get("eatdesi_floors", []));
-  const [users, setUsers] = useState(() => LS.get("eatdesi_users", [{
+  const [users, setUsers] = useState(() => LS.get("eatdesi_users",
+    (typeof LOCATION_ID!=='undefined' && LOCATION_ID!=='eatdesi-bw') ? [] : [{
     id: "u_default_abdullah",
     name: "Abdullah",
     role: "Admin",
@@ -20436,6 +20437,35 @@ function App() {
       )
     );
   }
+  // v168: Frische Tochter ohne Benutzer -> ersten Chef/Admin anlegen (kein BW-Erbe!)
+  const _activeUsers = (users||[]).filter(u => u && !u.deleted);
+  const _firstUserSetup = (!loggedInUser && _activeUsers.length===0) ? /*#__PURE__*/React.createElement("div",{style:{position:"fixed",inset:0,background:"linear-gradient(135deg,#C84B31 0%,#6B1200 100%)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}},
+    /*#__PURE__*/React.createElement("div",{style:{background:"#fff",borderRadius:18,padding:"26px 22px",maxWidth:360,width:"100%",textAlign:"center"}},
+      /*#__PURE__*/React.createElement("div",{style:{fontSize:30}},"\uD83D\uDC64"),
+      /*#__PURE__*/React.createElement("div",{style:{fontWeight:800,fontSize:18,color:"#C84B31",marginBottom:4}}, (typeof tenantDisplayName==='function'?tenantDisplayName():'')+" POS"),
+      /*#__PURE__*/React.createElement("div",{style:{fontSize:13,color:"#666",marginBottom:14}},"Willkommen! Lege den ersten Benutzer (Chef/Admin) f\u00fcr DIESES Restaurant an."),
+      /*#__PURE__*/React.createElement("input",{id:"fuName",placeholder:"Name (z.B. Chef)",style:{width:"100%",padding:12,borderRadius:10,border:"1.5px solid #ddd",marginBottom:8,boxSizing:"border-box",fontFamily:"inherit"}}),
+      /*#__PURE__*/React.createElement("input",{id:"fuPin",type:"password",inputMode:"numeric",placeholder:"PIN (4 Ziffern)",style:{width:"100%",padding:12,borderRadius:10,border:"1.5px solid #ddd",marginBottom:8,boxSizing:"border-box",fontFamily:"inherit"}}),
+      /*#__PURE__*/React.createElement("input",{id:"fuPin2",type:"password",inputMode:"numeric",placeholder:"PIN wiederholen",style:{width:"100%",padding:12,borderRadius:10,border:"1.5px solid #ddd",marginBottom:10,boxSizing:"border-box",fontFamily:"inherit"}}),
+      /*#__PURE__*/React.createElement("div",{id:"fuErr",style:{color:"#c62828",fontSize:12,minHeight:16,marginBottom:6}}),
+      /*#__PURE__*/React.createElement("button",{onClick:()=>{
+        try{
+          var n=(document.getElementById('fuName')||{}).value||''; n=String(n).trim();
+          var p1=(document.getElementById('fuPin')||{}).value||'';
+          var p2=(document.getElementById('fuPin2')||{}).value||'';
+          var er=document.getElementById('fuErr');
+          if(!n){ if(er)er.textContent='Bitte Namen eingeben.'; return; }
+          if(!/^[0-9]{4}$/.test(p1)){ if(er)er.textContent='PIN: genau 4 Ziffern.'; return; }
+          if(p1!==p2){ if(er)er.textContent='PINs stimmen nicht \u00fcberein.'; return; }
+          var nu={ id:'u_'+Date.now(), name:n, role:'Admin', pin:p1, time:new Date().toISOString() };
+          var list=[nu];
+          setUsers(list); LS.set('eatdesi_users', list);
+          setLoggedInUser(nu); LS.set('eatdesi_session', nu);
+        }catch(e){}
+      },style:{width:"100%",padding:13,borderRadius:10,border:"none",background:"#2e7d32",color:"#fff",fontWeight:800,fontSize:15,cursor:"pointer",fontFamily:"inherit"}},"\u2705 Anlegen & anmelden")
+    )
+  ) : null;
+  if(_firstUserSetup) return _firstUserSetup;
   const loginScreen = !loggedInUser ? /*#__PURE__*/React.createElement("div", { style:{ position:"fixed", inset:0, background:"linear-gradient(135deg, #C84B31 0%, #6B1200 100%)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:16, overflowY:"auto" } },
     /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:20, padding:28, width:320, maxWidth:"100%", boxShadow:"0 8px 40px #0006", textAlign:"center" } },
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:32 } }, "🔒"),
