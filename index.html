@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v162</title>
+<title>eatDeSi POS v166</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v162';",
+    "var CACHE='eatdesi-v166';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -6889,6 +6889,25 @@ const BTPrint = {
     }
     return self.connect(address).then(doPrint);
   },
+  // v166: Kassenschublade — ESC p 0 25 250 (Kick-Impuls) an den Drucker senden
+  openDrawer: function(address){
+    var P=this._plugin(); var self=this;
+    if(!P) return Promise.reject(new Error('Drucker-Plugin nicht verf\u00fcgbar'));
+    var PULSE='\x1B\x70\x00\x19\xFA';
+    var doKick=function(){
+      var b=P.begin?P.begin():null;
+      var isChain=b&&typeof b.text==='function'&&typeof b.write==='function';
+      if(isChain){ return b.text(PULSE).write(); }
+      return Promise.resolve()
+        .then(function(){return P.begin?P.begin():null;})
+        .then(function(){return P.text?P.text({text:PULSE}):null;})
+        .then(function(){return P.write?P.write():null;});
+    };
+    if(self._connectedAddr===address){
+      return doKick().catch(function(e){ self._connectedAddr=null; return self.connect(address).then(doKick); });
+    }
+    return self.connect(address).then(doKick);
+  },
   // === NEU v103: Strukturierter Druck mit pro-Zeile Schriftgröße ===
   // blocks = Array von { type, ... }:
   //   {type:'center', text, size}         -> zentriert (size: 'n'=normal12, 'h'=hoch14, 'xl'=hoch+breit)
@@ -7840,7 +7859,14 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     <div>&nbsp;</div><div>&nbsp;</div><div>&nbsp;</div>
   </body></html>`;
   if (printerCfg?.method === "bluetooth") {
-    const devId = printerCfg?.btAddress;
+    let devId = printerCfg?.btAddress;
+    // v166: Drucker pro Bereich — Kueche/Bar koennen eigenen BT-Drucker haben
+    try{
+      const _ap=(printerCfg&&printerCfg.areaPrinters)||{};
+      const _ak=(bonType==='kueche'||bonType==='webshop')?'kuche':(bonType==='bar'?'bar':'gast');
+      const _a=_ap[_ak];
+      if(_a && _a.mode==='bt' && _a.btAddress) devId=_a.btAddress;
+    }catch(e){}
     if (devId && BTPrint.isNative()) {
       // Schriftgröße je Bon-Typ (ganze Bon, EINE Größe — TM-m30 kann nicht
       // zwei Größen in einer Zeile):
@@ -8091,7 +8117,12 @@ function BonModal({
     const fc = (typeof fontOverride === 'number') ? fontOverride : 0x01;
     if (method === "bluetooth") {
       // Native Bluetooth (Capacitor BLE) — direkt an Thermodrucker
-      const devId = printerSettings?.btAddress;
+      let devId = printerSettings?.btAddress;
+      try{
+        const _ap=(printerSettings&&printerSettings.areaPrinters)||{};
+        const _a=(fc===0x00)?_ap.gast:_ap.kuche;
+        if(_a && _a.mode==='bt' && _a.btAddress) devId=_a.btAddress;
+      }catch(e){}
       if (devId && BTPrint.isNative()) {
         // fc kommt vom Aufrufer: Küche/Bar = 0x01 (14pt), Gästebon = 0x00 (12pt)
         BTPrint.printHtml(devId, html, fc).catch(e => { printHtml(html); });
@@ -15122,7 +15153,46 @@ function PrinterSettingsView({
       fontWeight: 700,
       fontSize: 13
     }
-  }, n)))))), /*#__PURE__*/React.createElement("div", {
+  }, n)))))),
+  /* v166: Drucker pro Bereich */
+  /*#__PURE__*/React.createElement("div",{style:{background:"#ede7f6",borderRadius:12,padding:14,marginBottom:16}},
+    /*#__PURE__*/React.createElement("div",{style:{fontWeight:700,color:"#5e35b1",fontSize:14,marginBottom:4}},"\uD83D\uDDA8\uFE0F Drucker pro Bereich (optional)"),
+    /*#__PURE__*/React.createElement("div",{style:{fontSize:11,color:"#777",marginBottom:10}},"Standard: ALLES druckt \u00fcber den Haupt-Drucker. Hier kann K\u00fcche/Bar ein EIGENER Bluetooth-Drucker zugewiesen werden \u2013 G\u00e4stebon/Kasse (Payments) bleibt am Haupt-Drucker."),
+    [["kuche","\uD83C\uDF73 K\u00fcche"],["bar","\uD83C\uDF7A Bar"]].map(([k,l])=>{
+      const ap=(form.areaPrinters||{}); const a=ap[k]||{mode:"std"};
+      const setA=(patch)=>setForm({...form,areaPrinters:{...ap,[k]:{...a,...patch}}});
+      return /*#__PURE__*/React.createElement("div",{key:k,style:{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}},
+        /*#__PURE__*/React.createElement("div",{style:{minWidth:80,fontSize:13,fontWeight:700}},l),
+        /*#__PURE__*/React.createElement("select",{value:a.mode||"std",onChange:e=>setA({mode:e.target.value}),style:{padding:8,borderRadius:8,border:"1.5px solid #ddd",fontFamily:"inherit",fontSize:12}},
+          /*#__PURE__*/React.createElement("option",{value:"std"},"Haupt-Drucker"),
+          /*#__PURE__*/React.createElement("option",{value:"bt"},"Eigener Bluetooth-Drucker")),
+        (a.mode==="bt")&&/*#__PURE__*/React.createElement("button",{onClick:()=>{
+            const addr=(window.BTPrint&&BTPrint._connectedAddr)||form.btAddress||"";
+            const nm=form.btName||addr;
+            if(!addr){window.alert("Erst oben per Bluetooth mit dem gew\u00fcnschten Drucker verbinden, dann hier zuweisen.");return;}
+            setA({btAddress:addr,btName:nm});
+          },style:{padding:"8px 10px",borderRadius:8,border:"none",background:"#5e35b1",color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit"}},"\uD83D\uDD17 Aktuell verbundenen zuweisen"),
+        (a.mode==="bt")&&/*#__PURE__*/React.createElement("span",{style:{fontSize:11,color:a.btAddress?"#2e7d32":"#c62828",fontWeight:700}},a.btAddress?("\u2713 "+(a.btName||a.btAddress)):"kein Drucker zugewiesen")
+      );
+    })
+  ),
+  /* v166: Kassenschublade */
+  /*#__PURE__*/React.createElement("div",{style:{background:"#fff3e0",borderRadius:12,padding:14,marginBottom:16}},
+    /*#__PURE__*/React.createElement("div",{style:{fontWeight:700,color:"#e65100",fontSize:14,marginBottom:4}},"\uD83D\uDCB0 Kassenschublade"),
+    /*#__PURE__*/React.createElement("div",{style:{fontSize:11,color:"#777",marginBottom:10}},"\u00d6ffnet die am Drucker angeschlossene Geldschublade bei Zahlung (Bluetooth- oder WLAN-Drucker; im Browser nicht m\u00f6glich)."),
+    /*#__PURE__*/React.createElement("div",{style:{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}},
+      /*#__PURE__*/React.createElement("select",{value:form.drawerMode||"aus",onChange:e=>setForm({...form,drawerMode:e.target.value}),style:{padding:9,borderRadius:8,border:"1.5px solid #ddd",fontFamily:"inherit",fontSize:13}},
+        /*#__PURE__*/React.createElement("option",{value:"aus"},"Aus"),
+        /*#__PURE__*/React.createElement("option",{value:"auto"},"Automatisch bei Zahlung"),
+        /*#__PURE__*/React.createElement("option",{value:"fragen"},"Vorher fragen (Ja/Nein)")),
+      /*#__PURE__*/React.createElement("label",{style:{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}},
+        /*#__PURE__*/React.createElement("input",{type:"checkbox",checked:form.drawerCashOnly!==false,onChange:e=>setForm({...form,drawerCashOnly:e.target.checked}),style:{width:17,height:17}}),
+        "nur bei Barzahlung"),
+      /*#__PURE__*/React.createElement("button",{onClick:()=>{try{window.maybeOpenDrawer(null,{force:true});}catch(e){}},style:{padding:"9px 12px",borderRadius:8,border:"none",background:"#e65100",color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"inherit"}},"\uD83D\uDCB0 Jetzt \u00f6ffnen (Test)")
+    ),
+    /*#__PURE__*/React.createElement("div",{style:{fontSize:10,color:"#999",marginTop:6}},"Hinweis: Test nutzt die zuletzt GESPEICHERTEN Einstellungen \u2013 nach \u00c4nderungen erst Speichern dr\u00fccken.")
+  ),
+  /*#__PURE__*/React.createElement("div", {
     style: { background: "#e8f5e9", borderRadius: 12, padding: 14, marginBottom: 16 }
   },
     /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, color: C.green, fontSize: 14, marginBottom: 12 } }, "\uD83C\uDFE2 Firmendaten"),
@@ -19154,7 +19224,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v162"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v166"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -19951,6 +20021,7 @@ function App() {
         const _bonNr = ta.bonNr || genNr();
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: ta.items, tableId: null }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
+        try { window.maybeOpenDrawer && window.maybeOpenDrawer(payMethod); } catch (e) {}
         setCompletedOrders(p => [...p, { ...ta, time: new Date(), tableId: null, label: "Takeaway #"+taId, isTakeaway: true, orderType: (ta.customerStreet ? "Lieferung" : "Abholung"), payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse }]);
         // Zahlungs-Beleg automatisch drucken (mit Firma + MwSt + TSE).
         // Bei getrennter Zahlung NICHT (jeder Gast hat seinen eigenen Bon).
@@ -19983,6 +20054,7 @@ function App() {
         const _bonNr = o.bonNr || genNr();
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: o.items, tableId: tid }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
+        try { window.maybeOpenDrawer && window.maybeOpenDrawer(payMethod); } catch (e) {}
         setCompletedOrders(p => [...p, { ...o, time: new Date(), tableId: tid, payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse }]);
         // Zahlungs-Beleg automatisch drucken (mit Firma + MwSt + TSE).
         // ABER bei getrennter Zahlung NICHT: dort hat jeder Gast schon beim
@@ -20338,6 +20410,24 @@ function App() {
       setView("dashboard");
     }
   }, [view, loggedInUser]);
+  // v163: Voll-Abmeldung -> neutraler Belks-Anmeldebildschirm (E-Mail/Benutzername entscheidet, welche App oeffnet)
+  const _fullOut = (() => { try { return localStorage.getItem('eatdesi_full_logout') === '1'; } catch(e) { return false; } })();
+  useEffect(() => {
+    if (_fullOut && !loggedInUser) {
+      try { window.belksAccountOverlay && window.belksAccountOverlay({ lock: true }); } catch(e) {}
+    }
+  }, []);
+  if (_fullOut && !loggedInUser) {
+    return /*#__PURE__*/React.createElement("div", { style:{ position:"fixed", inset:0, background:"linear-gradient(135deg, #1a1a1e 0%, #2d1f1a 100%)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:16 } },
+      /*#__PURE__*/React.createElement("div", { style:{ textAlign:"center", color:"#fff" } },
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:34, marginBottom:8 } }, "\uD83C\uDFE2"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontWeight:900, fontSize:22 } }, "Belks AI POS"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, opacity:0.7, marginTop:4, marginBottom:16 } }, "Abgemeldet \u00b7 Bitte anmelden \u2013 dein Konto entscheidet, welches Restaurant \u00f6ffnet."),
+        /*#__PURE__*/React.createElement("button", { onClick:()=>{ try{ window.belksAccountOverlay && window.belksAccountOverlay({lock:true}); }catch(e){} },
+          style:{ padding:"12px 26px", borderRadius:12, border:"none", background:"#2e7d32", color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer", fontFamily:"inherit" } }, "\uD83D\uDD13 Anmelden")
+      )
+    );
+  }
   const loginScreen = !loggedInUser ? /*#__PURE__*/React.createElement("div", { style:{ position:"fixed", inset:0, background:"linear-gradient(135deg, #C84B31 0%, #6B1200 100%)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:16, overflowY:"auto" } },
     /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:20, padding:28, width:320, maxWidth:"100%", boxShadow:"0 8px 40px #0006", textAlign:"center" } },
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:32 } }, "🔒"),
@@ -20603,9 +20693,13 @@ function App() {
     }
   }, tenantDisplayName()+" POS", /*#__PURE__*/React.createElement("br", null), tenantAddressLine()),
   loggedInUser && /*#__PURE__*/React.createElement("button", {
-    onClick:()=>{setLoggedInUser(null);LS.set("eatdesi_session",null);setMenuOpen(false);},
+    onClick:()=>{
+      try{ localStorage.setItem('eatdesi_full_logout','1'); }catch(e){}
+      setLoggedInUser(null);LS.set("eatdesi_session",null);setMenuOpen(false);
+      location.reload();
+    },
     style:{marginTop:10,width:"100%",padding:"8px 0",borderRadius:8,border:"2px solid #ef5350",background:"#ffebee",color:"#ef5350",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12}
-  }, "\uD83D\uDD12 ", loggedInUser ? loggedInUser.name : "", " abmelden")))), /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDEAA Restaurant abmelden (", loggedInUser ? loggedInUser.name : "", ")")))), /*#__PURE__*/React.createElement("div", {
     style: {
       background: "linear-gradient(135deg, #C84B31, #8B2500)",
       padding: "0 14px",
@@ -20708,8 +20802,8 @@ function App() {
     ),
     /*#__PURE__*/React.createElement("span", { style:{ color:"#fff", fontSize:12, opacity:.85, fontWeight:600 } }, now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }))
   ), loggedInUser && /*#__PURE__*/React.createElement("span", {
-    onClick: () => { if(window.confirm("Abmelden / Benutzer wechseln?")){ setLoggedInUser(null); LS.set("eatdesi_session", null); setLoginUser(null); setLoginPin(""); } },
-    title: "Abmelden / wechseln",
+    onClick: () => { if(window.confirm("Benutzer wechseln? (PIN-Auswahl)")){ setLoggedInUser(null); LS.set("eatdesi_session", null); setLoginUser(null); setLoginPin(""); } },
+    title: "Benutzer wechseln",
     style: {
       background: loggedInUser.role==="Admin" ? "rgba(255,255,255,.3)" : "rgba(255,255,255,.18)",
       color: "#fff",
@@ -21696,7 +21790,7 @@ function belksQuickSwitch(code, name, opts){
       try{ if(window.runSync) window.runSync(); }catch(e){}
       setTimeout(function(){
         try{
-          var keep=['eatdesi_location_id','eatdesi_sb_url','eatdesi_sb_key','eatdesi_printer','eatdesi_guard_v','eatdesi_belks_operator'];
+          var keep=['eatdesi_location_id','eatdesi_sb_url','eatdesi_sb_key','eatdesi_printer','eatdesi_guard_v'];
           var kill=[];
           for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k&&k.indexOf('eatdesi_')===0&&keep.indexOf(k)<0&&k.indexOf('eatdesi_tenant_ok_')!==0&&k.indexOf('eatdesi_setup_hide_')!==0) kill.push(k); }
           kill.forEach(function(k){ localStorage.removeItem(k); });
@@ -21711,6 +21805,9 @@ function belksQuickSwitch(code, name, opts){
           }catch(e){}
           localStorage.setItem('eatdesi_location_id',code);
           localStorage.setItem('eatdesi_tenant_ok_'+code,'1');
+          localStorage.removeItem('eatdesi_full_logout');
+          // v164: Tochter-Anmeldung = KEIN Mutter-Modus (MUTTER-EBENE nur nach "Belks Pos"-Login)
+          localStorage.removeItem('eatdesi_belks_operator');
         }catch(e){}
         location.reload();
       },1200);
@@ -21740,8 +21837,9 @@ function tenantAddressLine(){
    E-Mail+Passwort -> Restaurant-Auswahl -> Wechsel OHNE Restaurant-Passwort
    (E-Mail-Besitz = Berechtigung). Plus "Belks-Betreiber"-Unlock per
    Master-Passwort (loest das APK-Problem: kein ?belks=1 noetig). */
-window.belksAccountOverlay=function(){
+window.belksAccountOverlay=function(opts){
   try{
+    var _lock = !!(opts && opts.lock);
     var old=document.getElementById('belksAcct'); if(old) old.remove();
     var ov=document.createElement('div');
     ov.id='belksAcct';
@@ -21757,18 +21855,58 @@ window.belksAccountOverlay=function(){
     }
     function renderLogin(msg){
       ov.innerHTML=box(
-        '<input id="baEmail" type="email" autocomplete="username" style="'+inp+'" placeholder="E-Mail">'
+        '<input id="baEmail" type="text" autocomplete="username" style="'+inp+'" placeholder="E-Mail \u2013 oder Benutzername: Belks Pos">'
         +'<input id="baPw" type="password" autocomplete="current-password" style="'+inp+'" placeholder="Passwort">'
         +'<div id="baErr" style="color:#c62828;font-size:12px;font-weight:700;min-height:16px;margin-bottom:6px">'+(msg||'')+'</div>'
         +'<button id="baLogin" style="'+btnG+'">\uD83D\uDD13 Anmelden</button>'
         +'<button id="baForgot" style="'+btnS+'">Passwort vergessen?</button>'
-        +'<button id="baMaster" style="'+btnS+'">\uD83C\uDFE2 Belks-Betreiber (Master-Passwort)</button>'
-        +'<button id="baClose" style="'+btnX+'">Schlie\u00dfen</button>');
+        +'<button id="baOffline" style="'+btnX+';display:none">\uD83D\uDCF4 Offline weiter \u2013 zuletzt aktives Restaurant \u00f6ffnen</button>'
+        +(_lock?'':'<button id="baClose" style="'+btnX+'">Schlie\u00dfen</button>'));
       var doLogin=async function(){
         var em=(document.getElementById('baEmail')||{}).value||'';
         var pw=(document.getElementById('baPw')||{}).value||'';
         var err=document.getElementById('baErr');
-        if(!em||!pw){ err.textContent='Bitte E-Mail und Passwort eingeben.'; return; }
+        if(!em||!pw){ err.textContent='Bitte E-Mail/Benutzername und Passwort eingeben.'; return; }
+        // v163: Benutzername statt E-Mail => Belks-Betreiber-Login (Mutter-Ebene)
+        if(em.indexOf('@')<0){
+          var un=em.trim().toLowerCase().replace(/[\s_-]+/g,'');
+          if(un==='belkspos'||un==='belks'){
+            err.style.color='#555'; err.textContent='Pr\u00fcfe Master-Passwort\u2026';
+            var _masterOk=function(){
+              try{
+                localStorage.setItem('eatdesi_belks_operator','1');
+                localStorage.setItem('eatdesi_belks_home','1');
+                localStorage.removeItem('eatdesi_full_logout');
+                sessionStorage.setItem('eatdesi_master_auto','1');
+              }catch(e){}
+              try{ belksSha(pw).then(function(h){ if(h) localStorage.setItem('eatdesi_master_h', h); }); }catch(e){}
+              err.style.color='#2e7d32'; err.textContent='\u2705 Willkommen, Belks \u2013 MUTTER-EBENE \u00f6ffnet\u2026';
+              setTimeout(function(){ location.reload(); }, 600);
+            };
+            try{
+              var mt=await belksGetTenant('belks-master');
+              if(mt && mt.secret && String(pw)===String(mt.secret)){ _masterOk(); return; }
+              err.style.color='#c62828'; err.textContent='Falsches Master-Passwort f\u00fcr "Belks Pos".';
+            }catch(e2){
+              // v165: Offline-Fallback — Master-Passwort gegen lokal gespeicherten Hash pruefen
+              try{
+                var _h0=localStorage.getItem('eatdesi_master_h');
+                if(_h0){
+                  var _hh=await belksSha(pw);
+                  if(_hh && _hh===_h0){ _masterOk(); return; }
+                  err.style.color='#c62828'; err.textContent='Falsches Master-Passwort (offline gepr\u00fcft).';
+                  return;
+                }
+              }catch(e3){}
+              err.style.color='#c62828'; err.textContent='\uD83D\uDCF4 Kein Internet \u2013 Anmeldung nicht m\u00f6glich.';
+              try{ window._baShowOffline && window._baShowOffline(); }catch(e4){}
+            }
+            return;
+          }
+          err.style.color='#c62828';
+          err.textContent='Unbekannter Benutzername. Restaurants: mit E-MAIL anmelden \u00b7 Belks-Betreiber: "Belks Pos".';
+          return;
+        }
         err.style.color='#555'; err.textContent='Anmelden\u2026';
         try{
           var sess=await belksAuthLogin(em,pw);
@@ -21780,17 +21918,27 @@ window.belksAccountOverlay=function(){
               var cur=(t.location_id===LOCATION_ID)?' \u00b7 aktuell':'';
               return '<button class="baPick" data-c="'+t.location_id+'" data-n="'+String(t.name||t.location_id).replace(/"/g,'&quot;')+'" style="width:100%;padding:13px;border:1px solid #ddd;border-radius:10px;background:#fff;font-weight:800;font-size:13px;cursor:pointer;margin-bottom:8px;font-family:inherit;text-align:left">\uD83C\uDFEA '+(t.name||t.location_id)+'<br><span style="font-size:11px;color:#888;font-weight:400">'+t.location_id+cur+'</span></button>';
             }).join('')
-            +'<button id="baClose2" style="'+btnX+'">Schlie\u00dfen</button>');
+            +(_lock?'':'<button id="baClose2" style="'+btnX+'">Schlie\u00dfen</button>'));
           Array.prototype.forEach.call(ov.querySelectorAll('.baPick'),function(b){
             b.onclick=function(){
               var c=b.getAttribute('data-c'), n=b.getAttribute('data-n');
               ov.remove();
-              if(c===LOCATION_ID){ return; }
+              try{ localStorage.removeItem('eatdesi_full_logout'); }catch(e){}
+              if(c===LOCATION_ID){ location.reload(); return; }
               belksQuickSwitch(c, n, {skipSecret:true});
             };
           });
           var c2=document.getElementById('baClose2'); if(c2) c2.onclick=function(){ ov.remove(); };
-        }catch(e){ err.style.color='#c62828'; err.textContent=(e&&e.message)||String(e); }
+        }catch(e){
+          var _m=(e&&e.message)||String(e);
+          err.style.color='#c62828';
+          if(/failed to fetch|network|load failed/i.test(_m)){
+            err.textContent='\uD83D\uDCF4 Kein Internet \u2013 Anmeldung nicht m\u00f6glich.';
+            try{ window._baShowOffline && window._baShowOffline(); }catch(e4){}
+          } else {
+            err.textContent=_m;
+          }
+        }
       };
       document.getElementById('baLogin').onclick=doLogin;
       document.getElementById('baPw').addEventListener('keydown',function(e){ if(e.key==='Enter') doLogin(); });
@@ -21802,28 +21950,60 @@ window.belksAccountOverlay=function(){
         try{ await belksAuthRecover(em); err.style.color='#2e7d32'; err.textContent='\uD83D\uDCE7 E-Mail gesendet \u2013 Posteingang (auch Spam) pr\u00fcfen.'; }
         catch(e){ err.style.color='#c62828'; err.textContent='Fehler: '+((e&&e.message)||e); }
       };
-      document.getElementById('baMaster').onclick=function(){
-        var pw=window.prompt('Belks Master-Passwort eingeben:');
-        if(pw===null) return;
-        var err=document.getElementById('baErr');
-        if(err){ err.style.color='#555'; err.textContent='Pr\u00fcfe\u2026'; }
-        belksGetTenant('belks-master').then(function(t){
-          if(t && t.secret && String(pw)===String(t.secret)){
-            try{ localStorage.setItem('eatdesi_belks_operator','1'); localStorage.setItem('eatdesi_belks_home','1'); sessionStorage.setItem('eatdesi_master_auto','1'); }catch(e){}
-            window.alert('\u2705 Betreiber-Modus aktiviert \u2013 du landest jetzt auf der MUTTER-EBENE (\uD83C\uDFE2 Belks-Zentrale).');
-            location.reload();
-          } else {
-            if(err){ err.style.color='#c62828'; err.textContent='Falsches Master-Passwort.'; }
-            else window.alert('Falsches Master-Passwort.');
-          }
-        }).catch(function(){ if(err){ err.style.color='#c62828'; err.textContent='Netzwerkfehler.'; } });
+      var _bo=document.getElementById('baOffline');
+      if(_bo) _bo.onclick=function(){
+        try{ localStorage.removeItem('eatdesi_full_logout'); }catch(e){}
+        location.reload();
       };
-      document.getElementById('baClose').onclick=function(){ ov.remove(); };
+      function showOffline(){ try{ var b=document.getElementById('baOffline'); if(b) b.style.display='block'; }catch(e){} }
+      window._baShowOffline=showOffline;
+      var _bc=document.getElementById('baClose'); if(_bc) _bc.onclick=function(){ ov.remove(); };
     }
     document.body.appendChild(ov);
     renderLogin('');
   }catch(e){}
 };
+// v166: Kassenschublade ueber WLAN-Drucker (Epson ePOS pulse)
+function eposDrawerPulse(ip){
+  try{
+    var xhr=new XMLHttpRequest();
+    xhr.open('POST','http://'+ip+'/cgi-bin/epos/service.cgi?devid=local_printer&timeout=10000',true);
+    xhr.setRequestHeader('Content-Type','text/xml; charset=utf-8');
+    xhr.setRequestHeader('SOAPAction','""');
+    xhr.send('<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><epos-print xmlns="http://www.epson-pos.com/schemas/2011/03/epos-print"><pulse drawer="drawer_1" time="pulse_100"/></epos-print></s:Body></s:Envelope>');
+  }catch(e){}
+}
+// v166: Schubladen-Logik — Modus aus/auto/fragen, optional nur Barzahlung.
+// Ziel-Drucker = Gastbon-Bereich (Kasse), sonst Haupt-Drucker.
+function maybeOpenDrawer(payMethod, opts){
+  try{
+    var cfg={}; try{ cfg=JSON.parse(localStorage.getItem('eatdesi_printer')||'null')||{}; }catch(e){}
+    var mode=cfg.drawerMode||'aus';
+    var force=opts&&opts.force;
+    if(!force){
+      if(mode==='aus') return;
+      if(cfg.drawerCashOnly!==false && payMethod && !/bar/i.test(String(payMethod))) return;
+      if(mode==='fragen' && !window.confirm('\uD83D\uDCB0 Kassenschublade \u00f6ffnen?')) return;
+    }
+    var a=(cfg.areaPrinters&&cfg.areaPrinters.gast)||null;
+    var method=cfg.method, bt=cfg.btAddress, ip=cfg.ip;
+    if(a&&a.mode==='bt'&&a.btAddress){ method='bluetooth'; bt=a.btAddress; }
+    if(method==='bluetooth'&&bt&&window.BTPrint&&BTPrint.isNative&&BTPrint.isNative()){
+      BTPrint.openDrawer(bt).catch(function(e){ console.warn('Schublade:',e); });
+      return;
+    }
+    if(ip){ eposDrawerPulse(ip); return; }
+    if(force) window.alert('\uD83D\uDCB0 Schublade: kein Bluetooth-/WLAN-Drucker eingerichtet (im Browser nicht m\u00f6glich).');
+  }catch(e){}
+}
+window.maybeOpenDrawer=maybeOpenDrawer;
+async function belksSha(t){
+  try{
+    const b=new TextEncoder().encode(String(t));
+    const d=await crypto.subtle.digest('SHA-256', b);
+    return Array.from(new Uint8Array(d)).map(function(x){return x.toString(16).padStart(2,'0');}).join('');
+  }catch(e){ return null; }
+}
 function belksIsOperator(){
   try{ return localStorage.getItem('eatdesi_belks_operator')==='1'; }catch(e){ return false; }
 }
@@ -21885,6 +22065,8 @@ function BelksZentraleView(){
   var [city,setCity]=R.useState('');
   var [phone,setPhone]=R.useState('');
   var [email,setEmail]=R.useState('');
+  var [email2,setEmail2]=R.useState('');
+  var [loginPwNew,setLoginPwNew]=R.useState('');
   var [showLinks,setShowLinks]=R.useState('');
   var [linkEmail,setLinkEmail]=R.useState('');
   var [linkPw,setLinkPw]=R.useState('');
@@ -21931,9 +22113,11 @@ function BelksZentraleView(){
     if(!name.trim()){setErr('Bitte Restaurant-Name eingeben.');return;}
     if(!effCode||effCode.length<2){setErr('Restaurant-Code ung\u00fcltig.');return;}
     if(effCode==='belks-master'){setErr('Dieser Code ist reserviert.');return;}
-    if(!String(email||'').trim() || String(email).indexOf('@')<1){setErr('\uD83D\uDCE7 Login-E-Mail ist PFLICHT \u2013 jede Tochter braucht ein eigenes Konto (Best\u00e4tigungs-Mail + Start-Passwort).');return;}
+    if(!String(email||'').trim() || String(email).indexOf('@')<1){setErr('\uD83D\uDCE7 Login-E-Mail ist PFLICHT.');return;}
+    if(String(email).trim().toLowerCase()!==String(email2||'').trim().toLowerCase()){setErr('\uD83D\uDCE7 Die beiden E-Mail-Felder stimmen nicht \u00fcberein.');return;}
+    if(String(loginPwNew||'').length<6){setErr('\uD83D\uDD10 Bitte ein Login-Passwort mit mind. 6 Zeichen w\u00e4hlen.');return;}
     var pw=belksRandPw();
-    var loginPw=belksRandPw();
+    var loginPw=String(loginPwNew);
     var mail=String(email||'').trim().toLowerCase();
     setBusy(true);setErr('');setOk('');
     (async function(){
@@ -21949,12 +22133,12 @@ function BelksZentraleView(){
           if(_su&&_su.pwUnchanged){
             msg+=' \u00b7 \u26A0\uFE0F E-Mail '+mail+' hatte SCHON ein Konto \u2013 Start-Passwort gilt NICHT. In \uD83D\uDD17 Links \u2192 \uD83D\uDD11 Reset-Mail senden!';
           } else {
-            msg+=' \u00b7 \uD83D\uDCE7 Login: '+mail+' \u00b7 Start-Passwort: '+loginPw+' \u2013 dem Restaurant geben! \uD83D\uDCEC WICHTIG: Zuerst den Best\u00e4tigungs-Link in der E-Mail anklicken (auch Spam pr\u00fcfen), DANN funktioniert der Login.';
+            msg+=' \u00b7 \uD83D\uDCE7 Login: '+mail+' \u00b7 Passwort: wie von dir gew\u00e4hlt. \uD83D\uDCEC WICHTIG: Zuerst den Best\u00e4tigungs-Link in der E-Mail anklicken (auch Spam), DANN mit E-Mail + gew\u00e4hltem Passwort anmelden.';
           }
         }
         else msg+=' \u00b7 Restaurant-Passwort: '+pw+' (kein E-Mail-Login verbunden)';
         setOk(msg);
-        setName('');setCode('');setCodeTouched(false);setStreet('');setCity('');setPhone('');setEmail('');
+        setName('');setCode('');setCodeTouched(false);setStreet('');setCity('');setPhone('');setEmail('');setEmail2('');setLoginPwNew('');
         setShowLinks(effCode); load(); setBusy(false);
       }catch(e){ setErr(String(e.message||e)); setBusy(false); }
     })();
@@ -22035,9 +22219,13 @@ function BelksZentraleView(){
         R.createElement('div',{style:{flex:1}},lbl('PLZ Ort'),R.createElement('input',{value:city,onChange:function(e){setCity(e.target.value);},style:iS}))),
       lbl('Telefon'),
       R.createElement('input',{value:phone,onChange:function(e){setPhone(e.target.value);},style:iS}),
-      lbl('\uD83D\uDCE7 Login-E-Mail des Restaurants * (PFLICHT \u2013 Konto + Best\u00e4tigungs-Mail + Start-Passwort)'),
+      lbl('\uD83D\uDCE7 Login-E-Mail des Restaurants *'),
       R.createElement('input',{type:'email',value:email,onChange:function(e){setEmail(e.target.value);},style:iS,placeholder:'chef@restaurant.de'}),
-      R.createElement('div',{style:{fontSize:11,color:'#7b1fa2',fontWeight:700,margin:'2px 0 8px'}},'\uD83D\uDD10 Beim Anlegen werden automatisch ein E-Mail-Login (mit Start-Passwort) und ein Restaurant-Passwort erzeugt. Ger\u00e4te melden sich wie bei GloriaFood mit E-Mail + Passwort an; \u201ePasswort vergessen\u201c schickt automatisch eine Reset-E-Mail.'),
+      lbl('\uD83D\uDCE7 E-Mail wiederholen *'),
+      R.createElement('input',{type:'email',value:email2,onChange:function(e){setEmail2(e.target.value);},style:iS,placeholder:'chef@restaurant.de'}),
+      lbl('\uD83D\uDD10 Login-Passwort w\u00e4hlen * (mind. 6 Zeichen \u2013 damit meldet sich das Restaurant an)'),
+      R.createElement('input',{type:'password',value:loginPwNew,onChange:function(e){setLoginPwNew(e.target.value);},style:iS,placeholder:'Passwort f\u00fcr dieses Restaurant'}),
+      R.createElement('div',{style:{fontSize:11,color:'#7b1fa2',fontWeight:700,margin:'2px 0 8px'}},'\uD83D\uDD10 Die Tochter meldet sich mit dieser E-Mail + deinem gew\u00e4hlten Passwort an (wie GloriaFood). Nach dem Anlegen: Best\u00e4tigungs-Link anklicken. \u201EPasswort vergessen\u201C schickt automatisch eine Reset-E-Mail.'),
       err&&err!=='TABLE_MISSING'?R.createElement('div',{style:{color:'#c62828',fontSize:12,fontWeight:700,marginBottom:8}},'\u26A0\uFE0F '+err):null,
       okMsg?R.createElement('div',{style:{color:'#2e7d32',fontSize:12,fontWeight:700,marginBottom:8,userSelect:'all'}},okMsg):null,
       R.createElement('button',{onClick:create,disabled:busy,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:busy?'#999':'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},busy?'Lege an\u2026':'\uD83C\uDFEA Tochter anlegen')),
@@ -24314,6 +24502,8 @@ function belksTenantGuard(){
       try{
         localStorage.setItem('eatdesi_location_id',c);
         localStorage.setItem('eatdesi_tenant_ok_'+c,'1');
+        localStorage.removeItem('eatdesi_full_logout');
+        localStorage.removeItem('eatdesi_belks_operator');
       }catch(e){}
       location.reload();
     }
