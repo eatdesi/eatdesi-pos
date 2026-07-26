@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v171</title>
+<title>eatDeSi POS v172</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v171';",
+    "var CACHE='eatdesi-v172';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -19298,7 +19298,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v171"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v172"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -20494,7 +20494,13 @@ function App() {
     }
   }, [view, loggedInUser]);
   // v163: Voll-Abmeldung -> neutraler Belks-Anmeldebildschirm (E-Mail/Benutzername entscheidet, welche App oeffnet)
-  const _fullOut = (() => { try { return localStorage.getItem('eatdesi_full_logout') === '1'; } catch(e) { return false; } })();
+  const _fullOut = (() => { try {
+    if (localStorage.getItem('eatdesi_full_logout') === '1') return true;
+    // v172: ERSTE Anmeldung auf einem Geraet IMMER per E-Mail/Benutzername+Passwort —
+    // PIN-Benutzer erscheinen erst, wenn das Restaurant auf diesem Geraet angemeldet ist.
+    if (localStorage.getItem('eatdesi_tenant_ok_' + LOCATION_ID) !== '1') return true;
+    return false;
+  } catch(e) { return false; } })();
   useEffect(() => {
     if (_fullOut && !loggedInUser) {
       try { window.belksAccountOverlay && window.belksAccountOverlay({ lock: true }); } catch(e) {}
