@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v170</title>
+<title>eatDeSi POS v171</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v170';",
+    "var CACHE='eatdesi-v171';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -16258,11 +16258,35 @@ function CustomersView({
           +'<div style="font-size:11px;color:#777;margin-bottom:8px">JSON-Liste ODER CSV: <b>Name;Telefon;E-Mail;Stra\u00dfe;PLZ Ort</b> (eine Zeile pro Kunde, 1. Zeile darf \u00dcberschrift sein). Doppelte Nummern werden \u00fcbersprungen.</div>'
           +'<textarea id="kiTxt" style="width:100%;min-height:140px;padding:10px;border:1.5px solid #ddd;border-radius:9px;font-family:monospace;font-size:11px;box-sizing:border-box" placeholder="Max Muster;0151 234567;max@mail.de;Weg 1;34587 Felsberg"></textarea>'
           +'<div id="kiErr" style="color:#c62828;font-size:12px;min-height:16px;margin:6px 0"></div>'
+          +'<button id="kiFile" style="width:100%;padding:11px;border:none;border-radius:9px;background:#1565c0;color:#fff;font-weight:800;cursor:pointer;font-family:inherit;margin-bottom:6px">\uD83D\uDCC1 Datei w\u00e4hlen (CSV/JSON)</button>'
+          +'<input id="kiFileInp" type="file" accept=".csv,.json,.txt" style="display:none">'
           +'<button id="kiGo" style="width:100%;padding:11px;border:none;border-radius:9px;background:#2e7d32;color:#fff;font-weight:800;cursor:pointer;font-family:inherit">\u2705 Importieren</button>'
           +'<button id="kiX" style="width:100%;padding:10px;border:none;border-radius:9px;background:#eee;color:#333;font-weight:700;cursor:pointer;font-family:inherit;margin-top:6px">Abbrechen</button></div>';
         document.body.appendChild(ov);
         var np=function(p){return String(p||'').replace(/[^0-9]/g,'').replace(/^49/,'0');};
         document.getElementById('kiX').onclick=function(){ov.remove();};
+        var _kiSet=function(txt){ try{ document.getElementById('kiTxt').value=String(txt||''); }catch(e){} };
+        document.getElementById('kiFile').onclick=function(){
+          try{
+            var P=(window.Capacitor&&window.Capacitor.Plugins)||{};
+            if(P.FilePicker&&P.FilePicker.pickFiles){
+              P.FilePicker.pickFiles({types:['text/csv','application/json','text/plain'],readData:true}).then(function(res){
+                var f=res&&res.files&&res.files[0];
+                if(f&&f.data){ _kiSet(decodeURIComponent(escape(atob(f.data)))); }
+              }).catch(function(){});
+            } else {
+              document.getElementById('kiFileInp').click();
+            }
+          }catch(e){}
+        };
+        document.getElementById('kiFileInp').onchange=function(e){
+          try{
+            var f=e.target.files&&e.target.files[0]; if(!f)return;
+            var r=new FileReader();
+            r.onload=function(ev){ _kiSet(ev.target.result); };
+            r.readAsText(f,'UTF-8');
+          }catch(err){}
+        };
         document.getElementById('kiGo').onclick=function(){
           try{
             var t=String(document.getElementById('kiTxt').value||'').trim();
@@ -19274,7 +19298,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v170"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v171"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
