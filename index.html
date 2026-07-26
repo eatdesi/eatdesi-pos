@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v172</title>
+<title>eatDeSi POS v174</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v172';",
+    "var CACHE='eatdesi-v174';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -19298,7 +19298,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v172"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v174"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21994,17 +21994,17 @@ window.belksAccountOverlay=function(opts){
     }
     function renderLogin(msg){
       ov.innerHTML=box(
-        '<input id="baEmail" type="text" autocomplete="username" style="'+inp+'" placeholder="E-Mail \u2013 oder Benutzername: Belks Pos">'
-        +'<input id="baPw" type="password" autocomplete="current-password" style="'+inp+'" placeholder="Passwort">'
+        '<input id="baEmail" type="text" autocomplete="username" style="'+inp+'" autocomplete="off" autocapitalize="none" placeholder="E-Mail \u2013 oder Benutzername: Belks Pos">'
+        +'<input id="baPw" type="password" autocomplete="off" style="'+inp+'" placeholder="Passwort">'
         +'<div id="baErr" style="color:#c62828;font-size:12px;font-weight:700;min-height:16px;margin-bottom:6px">'+(msg||'')+'</div>'
         +'<button id="baLogin" style="'+btnG+'">\uD83D\uDD13 Anmelden</button>'
         +'<button id="baForgot" style="'+btnS+'">Passwort vergessen?</button>'
         +'<button id="baOffline" style="'+btnX+';display:none">\uD83D\uDCF4 Offline weiter \u2013 zuletzt aktives Restaurant \u00f6ffnen</button>'
         +(_lock?'':'<button id="baClose" style="'+btnX+'">Schlie\u00dfen</button>'));
       var doLogin=async function(){
-        var em=(document.getElementById('baEmail')||{}).value||'';
-        var pw=(document.getElementById('baPw')||{}).value||'';
-        var err=document.getElementById('baErr');
+        var em=String(((ov.querySelector('#baEmail')||{}).value)||'').trim();
+        var pw=String(((ov.querySelector('#baPw')||{}).value)||'');
+        var err=ov.querySelector('#baErr')||document.getElementById('baErr');
         if(!em||!pw){ err.textContent='Bitte E-Mail/Benutzername und Passwort eingeben.'; return; }
         // v163: Benutzername statt E-Mail => Belks-Betreiber-Login (Mutter-Ebene)
         if(em.indexOf('@')<0){
@@ -22042,9 +22042,6 @@ window.belksAccountOverlay=function(opts){
             }
             return;
           }
-          err.style.color='#c62828';
-          err.textContent='Unbekannter Benutzername. Restaurants: mit E-MAIL anmelden \u00b7 Belks-Betreiber: "Belks Pos".';
-          return;
         }
         err.style.color='#555'; err.textContent='Anmelden\u2026';
         try{
