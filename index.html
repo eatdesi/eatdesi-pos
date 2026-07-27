@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v179</title>
+<title>eatDeSi POS v181</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v179';",
+    "var CACHE='eatdesi-v181';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -15177,6 +15177,16 @@ function PrinterSettingsView({
       );
     })
   ),
+  /* v180: SumUp Kartenzahlung */
+  /*#__PURE__*/React.createElement("div",{style:{background:"#e3f2fd",borderRadius:12,padding:14,marginBottom:16}},
+    /*#__PURE__*/React.createElement("div",{style:{fontWeight:700,color:"#1565c0",fontSize:14,marginBottom:4}},"\uD83D\uDCB3 SumUp Kartenzahlung"),
+    /*#__PURE__*/React.createElement("div",{style:{fontSize:11,color:"#777",marginBottom:8}},"App-zu-App: POS \u00f6ffnet die SumUp-App mit fertigem Betrag. Voraussetzung: SumUp-App auf DIESEM Ger\u00e4t installiert + eingeloggt. Affiliate-Key kostenlos: developer.sumup.com \u2192 Affiliate Keys \u2192 App-ID com.eatdesi.pos. Key gilt f\u00fcr DIESES Restaurant (synct auf alle Ger\u00e4te)."),
+    /*#__PURE__*/React.createElement("input",{id:"sumupKeyInp",defaultValue:(function(){try{return (JSON.parse(localStorage.getItem('eatdesi_firma')||'null')||{}).sumupKey||'';}catch(e){return '';}})(),placeholder:"Affiliate-Key einf\u00fcgen",style:{width:"100%",padding:10,borderRadius:8,border:"1.5px solid #ddd",fontFamily:"monospace",fontSize:12,boxSizing:"border-box",marginBottom:8}}),
+    /*#__PURE__*/React.createElement("div",{style:{display:"flex",gap:8}},
+      /*#__PURE__*/React.createElement("button",{onClick:()=>{try{var v=String((document.getElementById('sumupKeyInp')||{}).value||'').trim();var f={};try{f=JSON.parse(localStorage.getItem('eatdesi_firma')||'null')||{};}catch(e){}f.sumupKey=v;localStorage.setItem('eatdesi_firma',JSON.stringify(f));window.alert('\u2705 SumUp-Key gespeichert (synct in die Cloud).');}catch(e){}},style:{flex:1,padding:10,borderRadius:8,border:"none",background:"#1565c0",color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"inherit"}},"\uD83D\uDCBE Key speichern"),
+      /*#__PURE__*/React.createElement("button",{onClick:()=>{try{window.sumupPay(1.00,"Test Belks POS");}catch(e){}},style:{flex:1,padding:10,borderRadius:8,border:"none",background:"#2e7d32",color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"inherit"}},"\uD83D\uDCB3 Test 1,00 \u20ac")
+    )
+  ),
   /* v166: Kassenschublade */
   /*#__PURE__*/React.createElement("div",{style:{background:"#fff3e0",borderRadius:12,padding:14,marginBottom:16}},
     /*#__PURE__*/React.createElement("div",{style:{fontWeight:700,color:"#e65100",fontSize:14,marginBottom:4}},"\uD83D\uDCB0 Kassenschublade"),
@@ -19302,7 +19312,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v179"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v181"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21936,6 +21946,7 @@ function belksQuickSwitch(code, name, opts){
       var activated = localStorage.getItem('eatdesi_tenant_ok_'+code)==='1';
       if(!activated && !(opts&&opts.skipSecret)){
         var t=await belksGetTenant(code);
+      if(t&&t.deleted){ window.alert('\u26D4 Dieses Restaurant ist deaktiviert \u2013 in der Zentrale wiederherstellbar.'); return; }
         if(t&&t.secret){
           var pw=window.prompt('Erstmalige Aktivierung: Restaurant-Passwort f\u00fcr "'+(name||code)+'":');
           if(pw===null) return;
@@ -22069,7 +22080,7 @@ window.belksAccountOverlay=function(opts){
           ov.innerHTML=box('<div style="font-size:13px;color:#555;margin-bottom:10px">Welches Restaurant m\u00f6chtest du auf diesem Ger\u00e4t \u00f6ffnen?</div>'
             +rows.map(function(t){
               var cur=(t.location_id===LOCATION_ID)?' \u00b7 aktuell':'';
-              return '<button class="baPick" data-c="'+t.location_id+'" data-n="'+String(t.name||t.location_id).replace(/"/g,'&quot;')+'" style="width:100%;padding:13px;border:1px solid #ddd;border-radius:10px;background:#fff;font-weight:800;font-size:13px;cursor:pointer;margin-bottom:8px;font-family:inherit;text-align:left">\uD83C\uDFEA '+(t.name||t.location_id)+'<br><span style="font-size:11px;color:#888;font-weight:400">'+t.location_id+cur+'</span></button>';
+              if(t&&t.deleted) return ''; return '<button class="baPick" data-c="'+t.location_id+'" data-n="'+String(t.name||t.location_id).replace(/"/g,'&quot;')+'" style="width:100%;padding:13px;border:1px solid #ddd;border-radius:10px;background:#fff;font-weight:800;font-size:13px;cursor:pointer;margin-bottom:8px;font-family:inherit;text-align:left">\uD83C\uDFEA '+(t.name||t.location_id)+'<br><span style="font-size:11px;color:#888;font-weight:400">'+t.location_id+cur+'</span></button>';
             }).join('')
             +(_lock?'':'<button id="baClose2" style="'+btnX+'">Schlie\u00dfen</button>'));
           Array.prototype.forEach.call(ov.querySelectorAll('.baPick'),function(b){
@@ -22182,6 +22193,20 @@ function maybeOpenDrawer(payMethod, opts){
   }catch(e){}
 }
 window.maybeOpenDrawer=maybeOpenDrawer;
+// v180: SumUp App-zu-App — oeffnet SumUp mit vorbefuelltem Betrag (Key pro Restaurant in eatdesi_firma)
+window.sumupPay=function(amount, title){
+  try{
+    var f={}; try{ f=JSON.parse(localStorage.getItem('eatdesi_firma')||'null')||{}; }catch(e){}
+    var key=String(f.sumupKey||'').trim();
+    if(!key){ window.alert('\uD83D\uDCB3 SumUp: Erst Affiliate-Key in Einstellungen \u2192 \uD83D\uDCB3 SumUp speichern (developer.sumup.com).'); return; }
+    var amt=(Math.round(Number(amount||0)*100)/100).toFixed(2);
+    var url='sumupmerchant://pay/1.0?affiliate-key='+encodeURIComponent(key)
+      +'&app-id=com.eatdesi.pos&total='+amt+'&currency=EUR'
+      +'&title='+encodeURIComponent(String(title||'Belks POS'))
+      +'&callback='+encodeURIComponent('https://eatdesi.github.io/eatdesi-pos/');
+    location.href=url;
+  }catch(e){ window.alert('SumUp-Start fehlgeschlagen: '+e); }
+};
 async function belksSha(t){
   try{
     const b=new TextEncoder().encode(String(t));
@@ -22293,6 +22318,28 @@ function BelksZentraleView(){
       setGate({state:'open',pw:'',pw2:'',err:''});
     } else setGate(Object.assign({},gate,{err:'Falsches Master-Passwort.'}));
   }
+  // v181: Tochter deaktivieren / wiederherstellen (Daten bleiben erhalten)
+  var _setTenantDeleted=function(code,val,nm){
+    setErr('');setOk('');
+    fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(code),{method:'PATCH',headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({deleted:val})})
+    .then(function(r){
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      setOk(val?('\uD83D\uDDD1\uFE0F '+(nm||code)+' deaktiviert \u2013 Daten bleiben erhalten.'):('\u267B\uFE0F '+(nm||code)+' wiederhergestellt.'));
+      try{ setTenants((tenants||[]).map(function(x){ return x.location_id===code?Object.assign({},x,{deleted:val}):x; })); }catch(e){}
+    })
+    .catch(function(e){ setErr('Fehler: '+e.message+' \u2013 wurde die SQL-Spalte "deleted" angelegt?'); });
+  };
+  var _tDelBtn=function(t){
+    var c=t.location_id;
+    if(t.deleted){
+      return R.createElement('button',{onClick:function(){ _setTenantDeleted(c,false,t.name); },style:{padding:'6px 10px',borderRadius:8,border:'none',background:'#2e7d32',color:'#fff',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit'}},'\u267B\uFE0F Wiederherstellen');
+    }
+    return R.createElement('button',{onClick:function(){
+      if(!window.confirm('\uD83D\uDDD1\uFE0F "'+(t.name||c)+'" wirklich DEAKTIVIEREN?\n\nLogin & Wechsel werden gesperrt \u2013 alle Daten bleiben erhalten.')) return;
+      if(!window.confirm('Wirklich sicher? (Wiederherstellen jederzeit m\u00f6glich)')) return;
+      _setTenantDeleted(c,true,t.name);
+    },style:{padding:'6px 10px',borderRadius:8,border:'none',background:'#c62828',color:'#fff',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDDD1\uFE0F L\u00f6schen');
+  };
   var effCode=slugifyTenant(codeTouched?code:name);
   function create(){
     if(!name.trim()){setErr('Bitte Restaurant-Name eingeben.');return;}
@@ -22429,7 +22476,7 @@ function BelksZentraleView(){
               t.city?R.createElement('span',{style:{fontSize:11,color:'#aaa',marginLeft:6}},'\u00b7 '+t.city):null),
             R.createElement('div',{style:{display:'flex',gap:6}},
               R.createElement('button',{onClick:function(){setShowLinks(showLinks===c?'':c);},style:{padding:'6px 10px',borderRadius:8,border:'1px solid #1565c0',background:'#fff',color:'#1565c0',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD17 Links'),
-              isCur?null:R.createElement('button',{onClick:function(){switchTo(c);},style:{padding:'6px 10px',borderRadius:8,border:'none',background:'#7b1fa2',color:'#fff',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD04 Wechseln'))),
+              (isCur||t.deleted)?null:R.createElement('button',{onClick:function(){switchTo(c);},style:{padding:'6px 10px',borderRadius:8,border:'none',background:'#7b1fa2',color:'#fff',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDD04 Wechseln'), _tDelBtn(t), t.deleted?R.createElement('span',{style:{fontSize:10,fontWeight:800,color:'#c62828'}},'DEAKTIVIERT'):null)),
           showLinks===c?R.createElement('div',{style:{marginTop:6,fontSize:11}},
             lbl('\uD83D\uDCE7 Login-E-Mail (Anmeldung wie GloriaFood):'),
             t.email?R.createElement('div',{style:{marginBottom:8}},
