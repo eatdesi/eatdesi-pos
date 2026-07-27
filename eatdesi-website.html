@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
+<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -557,7 +557,7 @@ footer .fl:hover{color:var(--gold)}
     <div>
       <span class="eyebrow">Bad Wildungen · Indian Fusion Kitchen & Grill</span>
       <h1>Trendiges Essen.<br><em>Frisch. Indisch. Anders.</em></h1>
-      <p class="lede">Currys, Smashed Burger, Tacos, Pizza & mehr – frisch von Familie Sidhu. Jetzt online bestellen:</p>
+      <p class="lede" data-lede-main>Currys, Smashed Burger, Tacos, Pizza & mehr – frisch von Familie Sidhu. Jetzt online bestellen:</p>
       <div class="shopbar" style="margin:6px 0 14px">
         <div class="mode-pills" id="modePills">
           <button data-mode="abholung" class="on">🥡 Abholung</button>
@@ -709,7 +709,7 @@ footer .fl:hover{color:var(--gold)}
     <div class="foot-grid">
       <div>
         <div class="logo" style="font-size:28px;margin-bottom:12px">eat<b>De</b><span>Si</span></div>
-        <p>Indian Fusion Kitchen & Grill in Bad Wildungen. Mit Liebe gekocht von Familie Sidhu.</p>
+        <p data-co-footabout>Indian Fusion Kitchen & Grill in Bad Wildungen. Mit Liebe gekocht von Familie Sidhu.</p>
         <p style="margin-top:10px" data-co-addr>📍 Brunnenallee 30<br>34537 Bad Wildungen</p>
       </div>
       <div>
@@ -728,7 +728,7 @@ footer .fl:hover{color:var(--gold)}
     </div>
     <div class="foot-social" id="footSocial"></div>
     <div class="foot-bot">
-      <span>© <span id="yr"></span> eatDeSi · Familie Sidhu</span>
+      <span>© <span id="yr"></span> <span data-co-name>eatDeSi</span><span data-bw-only> · Familie Sidhu</span></span>
       <span><a class="fl" style="display:inline;cursor:pointer" onclick="openLegal('impressum')">Impressum</a> · <a class="fl" style="display:inline;cursor:pointer" onclick="openLegal('datenschutz')">Datenschutz</a> · <a class="fl" style="display:inline;cursor:pointer" onclick="openLegal('agb')">AGB</a></span>
     </div>
   </div>
@@ -2206,11 +2206,18 @@ let GALLERY = [
 // websiteconfig (falls die Tochter eine gepflegt hat) überschreibt das danach.
 async function loadTenantBranding(){
   if(LOCATION_ID==='eatdesi-bw') return;
+  // v2026-07-27a: Tochter-Websites starten NEUTRAL — kein BW-Erbe (PDF/Bewertung/Social/Ueber-uns)
+  COMPANY.menu_pdf='';
+  COMPANY.google_review='';
+  COMPANY.social=[];
+  COMPANY.tagline='';
+  COMPANY.about='Willkommen! Frisch zubereitet mit Liebe \u2013 jetzt online bestellen, abholen oder liefern lassen.';
+  GALLERY=[];
   try{
     const r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(LOCATION_ID)+'&select=name,street,city,phone',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
     if(!r.ok) return;
     const j=await r.json(); const t=j&&j[0]; if(!t) return;
-    if(t.name){ COMPANY.name=t.name; COMPANY.tagline=''; try{document.title=t.name+' · Online bestellen';}catch(e){} }
+    if(t.name){ COMPANY.name=t.name; COMPANY.tagline=''; COMPANY.about='Willkommen bei '+t.name+'! Frisch zubereitet mit Liebe – jetzt online bestellen, abholen oder liefern lassen.'; try{document.title=t.name+' · Online bestellen';}catch(e){} }
     if(t.street) COMPANY.street=t.street;
     if(t.city){ const m=String(t.city).match(/^(\d{4,5})\s+(.+)$/); if(m){COMPANY.zip=m[1];COMPANY.city=m[2];} else COMPANY.city=t.city; }
     if(t.phone){ COMPANY.phone=t.phone; COMPANY.whatsapp=String(t.phone).replace(/[^0-9]/g,'').replace(/^0/,'49'); }
@@ -2273,6 +2280,14 @@ function socialIcon(icon){
 }
 function applyCompany(){
   document.querySelectorAll('[data-co-name]').forEach(el=>{el.textContent=COMPANY.name;});
+  // v2026-07-27a: Landing-White-Label — jede Tochter zeigt IHRE Marke (BW bleibt pixelgleich)
+  if(LOCATION_ID!=='eatdesi-bw'){
+    var _lg=document.querySelector('.lt-logo'); if(_lg) _lg.textContent=COMPANY.name||'';
+    var _lt=document.querySelector('.lt-tag'); if(_lt) _lt.textContent=[COMPANY.street,[COMPANY.zip,COMPANY.city].filter(Boolean).join(' ')].filter(Boolean).join(' \u00b7 ');
+    var _ld=document.querySelector('[data-lede-main]'); if(_ld) _ld.textContent='Frisch zubereitet mit Liebe \u2013 jetzt online bestellen:';
+    var _fa=document.querySelector('[data-co-footabout]'); if(_fa) _fa.textContent=(COMPANY.name||'')+((COMPANY.zip||COMPANY.city)?(' \u00b7 '+[COMPANY.zip,COMPANY.city].filter(Boolean).join(' ')):'')+'. Online bestellen, Abholung & Lieferung.';
+    document.querySelectorAll('[data-bw-only]').forEach(function(el){ el.style.display='none'; });
+  }
   // Footer-Adresse/Telefon, Hero-Badge etc. aktualisieren
   document.querySelectorAll('[data-co-phone]').forEach(el=>{el.textContent='📞 '+COMPANY.phone;el.href='tel:'+COMPANY.phone.replace(/\s/g,'');});
   document.querySelectorAll('[data-co-addr]').forEach(el=>{el.innerHTML='📍 '+COMPANY.street+'<br>'+COMPANY.zip+' '+COMPANY.city;});
@@ -2858,7 +2873,7 @@ async function galUpload(i,input){
   const f=input.files&&input.files[0]; if(!f)return;
   if(f.size>5*1024*1024){toast('Bild zu groß (max 5 MB)');return;}
   toast('Lädt hoch…');
-  const path='gallery/'+Date.now()+'_'+f.name.replace(/[^a-zA-Z0-9.\-_]/g,'_');
+  const path='gallery/'+LOCATION_ID+'/'+Date.now()+'_'+f.name.replace(/[^a-zA-Z0-9.\-_]/g,'_');
   try{
     const r=await fetch(SUPA_URL+'/storage/v1/object/'+path,{method:'POST',
       headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':f.type||'image/jpeg','x-upsert':'true'},body:f});
