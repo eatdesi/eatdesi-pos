@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v183</title>
+<title>eatDeSi POS v186</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v183';",
+    "var CACHE='eatdesi-v186';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -393,15 +393,164 @@ window.RESTAURANT = {
       }
       var saved = localStorage.getItem('eatdesi_location_id');
       if(saved) return saved;
-      localStorage.setItem('eatdesi_location_id','eatdesi-bw');
-      localStorage.setItem('eatdesi_tenant_ok_eatdesi-bw','1');
-      return 'eatdesi-bw';
+      // v185 SYSTEMFIX: FRISCHES GERAET wird NICHT mehr automatisch bei
+      // eatDeSi BW angemeldet. Frueher wurden hier location_id UND tenant_ok
+      // gesetzt -> jedes neue Geraet sah sofort Restaurant-Name, Benutzer und
+      // Daten OHNE Anmeldung. Jetzt: nichts speichern, nichts freischalten.
+      // Der neutrale Belks-Anmeldebildschirm entscheidet, was geoeffnet wird.
+      try{ window.__BELKS_FRESH = true; }catch(e){}
+      return 'eatdesi-bw';   // nur technischer Platzhalter, NICHT gespeichert
     }catch(e){ return 'eatdesi-bw'; }
   })(),
   SUPA_URL    : 'https://myaidcfmssfhzdatsqiv.supabase.co',
   SUPA_KEY    : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15YWlkY2Ztc3NmaHpkYXRzcWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NTM0OTYsImV4cCI6MjA5NjQyOTQ5Nn0.zJl2j5EEgz6NQmhp0reyyool0RdEbt8PC0kdqrRDpaA'
 };
 // ═══════════════════ Ende RESTAURANT CONFIG ═══════════════════
+
+// ═══ v184: DATEN-EIGENTUEMER-SPERRE (KRITISCH) ═══
+// Problem bis v183: Beim Anmelden ueber den Login-Bildschirm wurde nur die
+// Location umgestellt, die localStorage-Daten der ALTEN Tochter blieben liegen.
+// Folge: Menue/Tische/Kunden von Restaurant A wurden in die Cloud von
+// Restaurant B hochgeladen (Speisekarte ueberschrieben, Tische verschwunden).
+// Loesung: Jedes Geraet merkt sich, WEM die lokalen Daten gehoeren.
+// Passt der Eigentuemer nicht zur aktiven Tochter -> Fremddaten sofort loeschen.
+window.belksWipeTenantData = function(newLoc){
+  try{
+    var keep = ['eatdesi_device_id','eatdesi_location_id','eatdesi_sb_url','eatdesi_sb_key',
+                'eatdesi_guard_v','eatdesi_printer','eatdesi_full_logout','eatdesi_session',
+                'eatdesi_data_owner'];
+    var kill = [];
+    for(var i=0;i<localStorage.length;i++){
+      var k = localStorage.key(i);
+      if(!k || k.indexOf('eatdesi_') !== 0) continue;
+      if(keep.indexOf(k) >= 0) continue;
+      if(k.indexOf('eatdesi_tenant_ok_') === 0) continue;   // Freischaltungen behalten
+      if(k.indexOf('eatdesi_setup_hide_') === 0) continue;
+      if(k.indexOf('eatdesi_belks_') === 0) continue;       // Betreiber-Flags
+      if(k.indexOf('eatdesi_master_h') === 0) continue;     // Offline-Master-Hash
+      kill.push(k);
+    }
+    kill.forEach(function(k){ try{ localStorage.removeItem(k); }catch(e){} });
+    // Drucker-HARDWARE behalten, aber FIRMENDATEN der alten Tochter entfernen
+    try{
+      var pr = JSON.parse(localStorage.getItem('eatdesi_printer')||'null');
+      if(pr){
+        ['name','address','phone','firmaName','firmaZusatz','firmaStrasse','firmaPlzOrt',
+         'firmaStNr','firmaUst','firmaGericht','firmaEmail','firmaWeb','googleLink']
+          .forEach(function(x){ delete pr[x]; });
+        localStorage.setItem('eatdesi_printer', JSON.stringify(pr));
+      }
+    }catch(e){}
+    try{ localStorage.removeItem('eatdesi_auth'); }catch(e){}   // v186: fremde Sitzung weg
+    if(newLoc){ try{ localStorage.setItem('eatdesi_data_owner', newLoc); }catch(e){} }
+    console.warn('Belks: Fremddaten geloescht, Geraet gehoert jetzt ' + newLoc);
+  }catch(e){}
+};
+(function(){
+  try{
+    var _loc = window.RESTAURANT.LOCATION_ID;
+    var _own = localStorage.getItem('eatdesi_data_owner');
+    if(_own && _own !== _loc){
+      window.belksWipeTenantData(_loc);   // Fremddaten weg -> Boot-Pull holt die richtigen
+    } else if(!_own && !window.__BELKS_FRESH){
+      localStorage.setItem('eatdesi_data_owner', _loc);
+    }
+  }catch(e){}
+})();
+
+// ═══ v186: SICHERHEIT STUFE 2 – SCHRITT 1: ECHTE BENUTZER-SITZUNG ═══
+// Bisher liefen ALLE Supabase-Aufrufe mit dem oeffentlichen anon-Schluessel.
+// Damit kann RLS (Zeilen-Schutz) nicht greifen – Supabase weiss nicht, WER fragt.
+// Ab jetzt: Login-Sitzung wird gespeichert und bei jedem Datenaufruf mitgeschickt.
+// Faellt die Sitzung aus, wird automatisch auf anon zurueckgefallen
+// (solange RLS noch AUS ist, laeuft dadurch nichts kaputt).
+(function(){
+  var AUTH_KEY = 'eatdesi_auth';
+
+  function _read(){
+    try{ return JSON.parse(localStorage.getItem(AUTH_KEY)||'null'); }catch(e){ return null; }
+  }
+  // Sitzung nach dem Login speichern
+  window.belksAuthSave = function(j){
+    try{
+      if(!j || !j.access_token) return;
+      var life = (j.expires_in ? Number(j.expires_in) : 3600) * 1000;
+      localStorage.setItem(AUTH_KEY, JSON.stringify({
+        access_token : j.access_token,
+        refresh_token: j.refresh_token || '',
+        expires_at   : Date.now() + life,
+        email        : (j.user && j.user.email) || ''
+      }));
+    }catch(e){}
+  };
+  window.belksAuthClear = function(){ try{ localStorage.removeItem(AUTH_KEY); }catch(e){} };
+  window.belksAuthEmail = function(){ var a=_read(); return a && a.email || ''; };
+
+  // Gueltiges Token holen (synchron). Laeuft es bald ab -> im Hintergrund erneuern.
+  window.belksAuthToken = function(){
+    var a = _read();
+    if(!a || !a.access_token) return null;
+    var restMs = a.expires_at - Date.now();
+    if(restMs > 120000) {                       // > 2 Minuten gueltig
+      if(restMs < 600000) window.belksAuthRefresh();   // < 10 Min -> vorsorglich erneuern
+      return a.access_token;
+    }
+    window.belksAuthRefresh();
+    return null;                                 // abgelaufen -> vorerst anon
+  };
+
+  var _refreshing = false;
+  window.belksAuthRefresh = function(){
+    if(_refreshing) return;
+    var a = _read();
+    if(!a || !a.refresh_token) return;
+    _refreshing = true;
+    var base = window.RESTAURANT.SUPA_URL, key = window.RESTAURANT.SUPA_KEY;
+    var _fx = window.__belksRawFetch || window.fetch;
+    if(typeof _fx !== 'function'){ _refreshing=false; return; }
+    _fx(base+'/auth/v1/token?grant_type=refresh_token',{
+      method:'POST',
+      headers:{ apikey:key, 'Content-Type':'application/json' },
+      body: JSON.stringify({ refresh_token: a.refresh_token })
+    }).then(function(r){ return r.ok ? r.json() : null; })
+     .then(function(j){ if(j && j.access_token) window.belksAuthSave(j); })
+     .catch(function(){})
+     .then(function(){ _refreshing = false; });
+  };
+
+  // ── fetch-Aufsatz: EIN Ort statt 15 Einzelstellen ──
+  // Jeder Supabase-DATEN-Aufruf bekommt automatisch das Benutzer-Token.
+  // Auth-Aufrufe selbst (/auth/v1/) bleiben unveraendert.
+  if(typeof window.fetch !== 'function') return;   // v186: kein fetch -> Aufsatz ueberspringen
+  var _raw = window.fetch.bind(window);
+  window.__belksRawFetch = _raw;
+  window.fetch = function(input, init){
+    try{
+      var base = window.RESTAURANT.SUPA_URL;
+      var url  = (typeof input === 'string') ? input : (input && input.url) || '';
+      if(base && url.indexOf(base) === 0 && url.indexOf('/auth/v1/') < 0){
+        var tok = window.belksAuthToken();
+        if(tok){
+          init = init || {};
+          var h = new Headers((init && init.headers) || (typeof input !== 'string' && input ? input.headers : null) || {});
+          h.set('apikey', window.RESTAURANT.SUPA_KEY);
+          h.set('Authorization', 'Bearer ' + tok);
+          init.headers = h;
+        }
+      }
+    }catch(e){}
+    return _raw(input, init);
+  };
+
+  // Sitzung regelmaessig frisch halten (POS laeuft den ganzen Tag)
+  try{
+    setInterval(function(){ window.belksAuthRefresh(); }, 20*60*1000);
+    window.addEventListener('focus', function(){ window.belksAuthToken(); });
+    document.addEventListener('visibilitychange', function(){
+      if(document.visibilityState === 'visible') window.belksAuthToken();
+    });
+  }catch(e){}
+})();
 
 (function() {
   'use strict';
@@ -19304,7 +19453,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v183"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v186"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -19813,7 +19962,10 @@ function App() {
   // v178: BOOT-PULL — beim ersten Start eines Restaurants ALLE Cloud-Schlüssel
   // dieses Restaurants laden (Menü, Tische, Firmendaten, Optionen, ALLES) und einmal neu laden.
   useEffect(() => {
-    try { if (localStorage.getItem('eatdesi_bootpull_' + LOCATION_ID) === '1') return; } catch(e) { return; }
+    try {
+      if (localStorage.getItem('eatdesi_tenant_ok_' + LOCATION_ID) !== '1') return;  // v185
+      if (localStorage.getItem('eatdesi_bootpull_' + LOCATION_ID) === '1') return;
+    } catch(e) { return; }
     const _t = setTimeout(async () => {
       try {
         const r = await fetch(SUPA_URL + "/rest/v1/pos_state?select=key,value&key=like." + encodeURIComponent(LOCATION_ID + "_") + "*", { headers: { "apikey": SUPA_KEY, "Authorization": "Bearer " + SUPA_KEY } });
@@ -21896,6 +22048,7 @@ async function belksAuthLogin(email, pw){
     if(/not confirmed/i.test(em)) throw new Error('E-Mail noch nicht best\u00e4tigt \u2013 bitte zuerst den Link in der Best\u00e4tigungs-E-Mail anklicken (auch Spam pr\u00fcfen).');
     throw new Error(/invalid/i.test(em)?'E-Mail oder Passwort falsch. Tipp: \u201EPasswort vergessen?\u201C setzt in 1 Minute ein neues.':em);
   }
+  try{ window.belksAuthSave && window.belksAuthSave(j); }catch(e){}   // v186
   return j; // {access_token, user:{email}}
 }
 async function belksAuthRecover(email){
@@ -21963,6 +22116,7 @@ function belksQuickSwitch(code, name, opts){
             }
           }catch(e){}
           localStorage.setItem('eatdesi_location_id',code);
+          localStorage.setItem('eatdesi_data_owner',code);   // v184
           localStorage.setItem('eatdesi_tenant_ok_'+code,'1');
           localStorage.removeItem('eatdesi_full_logout');
           // v164: Tochter-Anmeldung = KEIN Mutter-Modus (MUTTER-EBENE nur nach "Belks Pos"-Login)
@@ -21998,6 +22152,8 @@ function tenantAddressLine(){
    Master-Passwort (loest das APK-Problem: kein ?belks=1 noetig). */
 window.belksAccountOverlay=function(opts){
   try{
+    // v185: Tenant-Guard ist bereits offen -> kein zweites Anmeldefenster stapeln
+    if(document.getElementById('belksGuard')) return;
     var _lock = !!(opts && opts.lock);
     var old=document.getElementById('belksAcct'); if(old) old.remove();
     var ov=document.createElement('div');
@@ -24061,6 +24217,18 @@ async function pullOrdersFromSupabase() {
 var _NEVER_EMPTY_KEYS = { 'users': 1, 'zeiterfassung': 1 };
 async function pushStateToSupabase(key, value) {
   try {
+    // v185: Geraet ist noch nicht angemeldet -> NICHTS in die Cloud schreiben.
+    try {
+      if (localStorage.getItem('eatdesi_tenant_ok_' + LOCATION_ID) !== '1') return;
+    } catch(e00) {}
+    // v184 NOTBREMSE: Daten gehoeren einer anderen Tochter -> NIE hochladen.
+    try {
+      var _own = localStorage.getItem('eatdesi_data_owner');
+      if (_own && _own !== LOCATION_ID) {
+        console.warn('pushState blockiert: Daten gehoeren ' + _own + ', aktiv ist ' + LOCATION_ID);
+        return;
+      }
+    } catch(e0) {}
     // SCHUTZ: leere kritische Liste nicht in die Cloud schreiben (sonst Datenverlust)
     if (_NEVER_EMPTY_KEYS[key] && Array.isArray(value) && value.filter(function(e){return e && !e.deleted;}).length === 0) {
       console.warn('pushState blockiert: leere ' + key + '-Liste wuerde Cloud-Daten loeschen');
@@ -24248,6 +24416,7 @@ async function syncTableOrders() {
 var SYNC_BLACKLIST = [
   'eatdesi_device_id',     // jede Geraete-ID ist eigen
   'eatdesi_session',       // Login-Session lokal
+  'eatdesi_auth',          // v186: Zugangs-Token NIE synchronisieren!
   'eatdesi_printer',       // Drucker pro Geraet
   'eatdesi_mode',          // Betriebsmodus pro Geraet (POS/Kiosk)
   'eatdesi_sb_url',        // Sync-interne Konfiguration
@@ -24435,6 +24604,8 @@ function updateSyncBadge(status) {
 // Haupt-Sync-Loop
 var _syncRunning = false;
 async function runSync() {
+  // v185: Ohne Anmeldung kein Sync (sonst zieht ein frisches Geraet fremde Daten)
+  try { if (localStorage.getItem('eatdesi_tenant_ok_' + LOCATION_ID) !== '1') return; } catch(e) {}
   if (_syncRunning) return;
   _syncRunning = true;
   updateSyncBadge('syncing');
@@ -24640,6 +24811,7 @@ function belksRecoveryCheck(){
           try{
             localStorage.setItem('eatdesi_full_logout','1');
             localStorage.removeItem('eatdesi_belks_operator');
+            try{ window.belksAuthClear && window.belksAuthClear(); }catch(e){}   // v186
           }catch(e){}
           try{ if(typeof LS!=='undefined'){ LS.set('eatdesi_session', null); } }catch(e){}
           location.reload();
@@ -24654,8 +24826,10 @@ function belksRecoveryCheck(){
 // Prim\u00e4r: E-Mail + Passwort. Fallback-Link: Restaurant-Passwort (\u00dcbergang).
 function belksTenantGuard(){
   try{
-    var code = LOCATION_ID;
-    if(localStorage.getItem('eatdesi_tenant_ok_'+code)==='1') return;
+    // v185: Frisches Geraet -> KEIN Restaurant vorbelegen (sonst wuerde der
+    // Anmeldebildschirm eatDeSi BW verraten/bevorzugen). Voellig neutral.
+    var code = (window.__BELKS_FRESH ? '' : LOCATION_ID);
+    if(code && localStorage.getItem('eatdesi_tenant_ok_'+code)==='1') return;
     var ov=document.createElement('div');
     ov.id='belksGuard';
     ov.style.cssText='position:fixed;inset:0;z-index:999999;background:#1a1a1e;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto';
@@ -24708,7 +24882,8 @@ function belksTenantGuard(){
     }
     function renderSecretLogin(){
       ov.innerHTML=baseBox(
-        '<div style="font-size:13px;color:#555;margin-bottom:12px">Restaurant <b>'+code+'</b> aktivieren \u2013 Restaurant-Passwort eingeben (steht in der Belks-Zentrale unter \uD83D\uDD17 Links).</div>'
+        '<div style="font-size:13px;color:#555;margin-bottom:12px">'+(code?('Restaurant <b>'+code+'</b> aktivieren \u2013 '):'Restaurant aktivieren \u2013 Restaurant-Code und ')+'Restaurant-Passwort eingeben (steht in der Belks-Zentrale unter \uD83D\uDD17 Links).</div>'
+        +(code?'':'<input id="bgCode" type="text" autocapitalize="off" autocorrect="off" style="width:100%;padding:11px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;box-sizing:border-box;margin-bottom:8px" placeholder="Restaurant-Code (z.B. kleine-kneipe)">')
         +'<input id="bgSecret" type="password" style="width:100%;padding:11px;border:1.5px solid #ddd;border-radius:10px;font-size:14px;box-sizing:border-box;margin-bottom:6px" placeholder="Restaurant-Passwort">'
         +'<div id="bgErr2" style="color:#c62828;font-size:12px;font-weight:700;min-height:16px;margin-bottom:6px"></div>'
         +'<button id="bgOk2" style="width:100%;padding:12px;border:none;border-radius:10px;background:#2e7d32;color:#fff;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">\uD83D\uDD13 Freischalten</button>'
@@ -24718,10 +24893,14 @@ function belksTenantGuard(){
         err.textContent='Pr\u00fcfe\u2026';
         try{
           var pw=document.getElementById('bgSecret').value;
-          var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(code)+'&select=location_id,secret',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
+          // v185: auf frischem Geraet kommt der Code aus dem Eingabefeld
+          var cd=code || ((document.getElementById('bgCode')||{}).value||'').trim().toLowerCase();
+          if(!cd){ err.textContent='Bitte Restaurant-Code eingeben.'; return; }
+          var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(cd)+'&select=location_id,secret',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
           var j=r.ok?await r.json():[];
           var t=j&&j[0];
-          if(!t || !t.secret || String(pw)===String(t.secret)){ activate(code); return; }
+          if(!t){ err.textContent='Restaurant nicht gefunden.'; return; }
+          if(!t.secret || String(pw)===String(t.secret)){ activate(cd); return; }
           err.textContent='Falsches Passwort.';
         }catch(e){ err.textContent='Netzwerkfehler \u2013 bitte erneut versuchen.'; }
       };
@@ -24731,6 +24910,14 @@ function belksTenantGuard(){
     }
     function activate(c){
       try{
+        // v184 FIX: Daten der vorherigen Tochter loeschen, sonst werden sie
+        // in die Cloud DIESER Tochter hochgeladen (Menue/Tische-Verlust!).
+        try{
+          if(window.belksWipeTenantData && localStorage.getItem('eatdesi_data_owner') !== c){
+            window.belksWipeTenantData(c);
+          }
+        }catch(e){}
+        localStorage.setItem('eatdesi_data_owner',c);
         localStorage.setItem('eatdesi_location_id',c);
         localStorage.setItem('eatdesi_tenant_ok_'+c,'1');
         localStorage.removeItem('eatdesi_full_logout');
