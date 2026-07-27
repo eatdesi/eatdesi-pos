@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v177</title>
+<title>eatDeSi POS v178</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v177';",
+    "var CACHE='eatdesi-v178';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -19302,7 +19302,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v177"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v178"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -19808,21 +19808,31 @@ function App() {
     if (!window._menuHydrated) return; // FIX v159: Anzeige-Fallback nie persistieren
     LS.set("eatdesi_menu", menuData);
   }, [menuData]);
-  // v160: Sicherheitsnetz — wenn beim Start nur der Platzhalter da ist,
-  // Menue dieses Restaurants DIREKT aus der Cloud holen (unabhaengig vom Sync-Timing)
+  // v178: BOOT-PULL — beim ersten Start eines Restaurants ALLE Cloud-Schlüssel
+  // dieses Restaurants laden (Menü, Tische, Firmendaten, Optionen, ALLES) und einmal neu laden.
   useEffect(() => {
-    if (window._menuHydrated) return;
+    try { if (localStorage.getItem('eatdesi_bootpull_' + LOCATION_ID) === '1') return; } catch(e) { return; }
     const _t = setTimeout(async () => {
       try {
-        if (window._menuHydrated) return;
-        const r = await fetch(SUPA_URL + "/rest/v1/pos_state?key=eq." + LOCATION_ID + "_eatdesi_menu&select=value", { headers: { "apikey": SUPA_KEY, "Authorization": "Bearer " + SUPA_KEY } });
+        const r = await fetch(SUPA_URL + "/rest/v1/pos_state?select=key,value&key=like." + encodeURIComponent(LOCATION_ID + "_") + "*", { headers: { "apikey": SUPA_KEY, "Authorization": "Bearer " + SUPA_KEY } });
         if (!r.ok) return;
-        const j = await r.json();
-        const v = (j && j[0] && j[0].value) ? JSON.parse(j[0].value) : null;
-        const cnt = v ? Object.keys(v).reduce((a, c) => a + (((v[c] || []).length) || 0), 0) : 0;
-        if (v && cnt > 0) { window._menuHydrated = true; setMenuData(v); LS.set("eatdesi_menu", v); console.log("Menue aus Cloud geladen (" + cnt + " Artikel)"); }
-      } catch (e) {}
-    }, 1800);
+        const rows = await r.json();
+        let wrote = 0;
+        (rows || []).forEach(function(row) {
+          try {
+            const suf = String(row.key).slice(LOCATION_ID.length + 1);
+            if (!suf) return;
+            const lsKey = 'eatdesi_' + suf;
+            if (localStorage.getItem(lsKey) === null && row.value != null) {
+              localStorage.setItem(lsKey, row.value);
+              wrote++;
+            }
+          } catch(e) {}
+        });
+        try { localStorage.setItem('eatdesi_bootpull_' + LOCATION_ID, '1'); } catch(e) {}
+        if (wrote > 0) { console.log('Boot-Pull: ' + wrote + ' Schluessel geladen - App laedt neu'); location.reload(); }
+      } catch(e) {}
+    }, 1200);
     return () => clearTimeout(_t);
   }, []);
 
@@ -24016,7 +24026,7 @@ async function pushStateToSupabase(key, value) {
     }
     // v160 (MENUE-SCHUTZ): leeres/Platzhalter-Menue NIE in die Cloud schreiben —
     // sonst loescht ein frisches Geraet das importierte Tochter-Menue!
-    if (String(key).indexOf('eatdesi_menu') >= 0) {
+    if (String(key).indexOf('eatdesi_menu') >= 0 || /_menu$/.test(String(key))) {
       try {
         var _mm = (typeof value === 'string') ? JSON.parse(value) : value;
         var _cnt = _mm ? Object.keys(_mm).reduce(function(a, c) { return a + (((_mm[c] || []).length) || 0); }, 0) : 0;
