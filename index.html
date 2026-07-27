@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v174</title>
+<title>eatDeSi POS v177</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v174';",
+    "var CACHE='eatdesi-v177';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -16270,9 +16270,13 @@ function CustomersView({
           try{
             var P=(window.Capacitor&&window.Capacitor.Plugins)||{};
             if(P.FilePicker&&P.FilePicker.pickFiles){
-              P.FilePicker.pickFiles({types:['text/csv','application/json','text/plain'],readData:true}).then(function(res){
+              P.FilePicker.pickFiles({readData:true}).then(function(res){
                 var f=res&&res.files&&res.files[0];
                 if(f&&f.data){ _kiSet(decodeURIComponent(escape(atob(f.data)))); }
+                else if(f){
+                  var er=document.getElementById('kiErr');
+                  if(er) er.textContent='\u26A0\uFE0F Cloud-Datei (Drive) liefert keinen Inhalt. Bitte im Ausw\u00e4hler links oben \u2630 \u2192 \u201eDownloads\u201c/Ger\u00e4t w\u00e4hlen \u2013 oder Datei erst aus Drive herunterladen.';
+                }
               }).catch(function(){});
             } else {
               document.getElementById('kiFileInp').click();
@@ -19298,7 +19302,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v174"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v177"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24579,6 +24583,13 @@ function belksRecoveryCheck(){
         err.textContent='\u2705 Gespeichert! App startet neu \u2013 bitte mit dem neuen Passwort anmelden.';
         setTimeout(function(){
           try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+          // v175 (PRIVACY): Nach Passwort-Reset NIE ins zuletzt aktive Restaurant fallen —
+          // immer zum neutralen Anmeldebildschirm (Konto entscheidet, welche App oeffnet).
+          try{
+            localStorage.setItem('eatdesi_full_logout','1');
+            localStorage.removeItem('eatdesi_belks_operator');
+          }catch(e){}
+          try{ if(typeof LS!=='undefined'){ LS.set('eatdesi_session', null); } }catch(e){}
           location.reload();
         },1600);
       }catch(e){ err.textContent='Fehler: '+((e&&e.message)||e)+' \u2013 Link evtl. abgelaufen, bitte neu anfordern.'; }
