@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
+<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-27d: Tochter-Kategorien im Webshop sichtbar (auch außerhalb CAT_GROUPS) · Über-uns nie BW-Text auf Töchtern · Update 2026-07-27c: Speichern-Feedback sichtbar (Toast über Admin, Button-Bestätigung) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -261,7 +261,7 @@ footer .fl:hover{color:var(--gold)}
 .foot-social a:hover{border-color:var(--gold);transform:translateY(-3px);background:rgba(200,160,78,.1)}
 .foot-bot{margin-top:24px;padding-top:20px;border-top:1px solid var(--line);font-size:12px;color:var(--gold-deep);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
 
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120px);background:var(--gold);color:var(--ink);font-weight:700;font-size:14px;padding:13px 22px;border-radius:12px;z-index:200;box-shadow:var(--shadow);transition:transform .3s;display:flex;align-items:center;gap:9px;max-width:90vw}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120px);background:var(--gold);color:var(--ink);font-weight:700;font-size:14px;padding:13px 22px;border-radius:12px;z-index:9999;box-shadow:var(--shadow);transition:transform .3s;display:flex;align-items:center;gap:9px;max-width:90vw}
 .toast.show{transform:translateX(-50%) translateY(0)}
 
 @media(max-width:920px){
@@ -1088,12 +1088,18 @@ function indexMenu(){ window._byId={}; for(const c of Object.keys(MENU)){for(con
 function webVisible(it){ return (it.channel||'both')!=='house'; }
 let activeCat=null; // aktuell gewählte Kategorie (nur eine sichtbar)
 function visibleCats(){
-  const list=[];
+  const list=[]; const seen={};
   for(const grp of Object.keys(CAT_GROUPS)){
     for(const cat of CAT_GROUPS[grp]){
       const all=MENU[cat]; if(!all||!all.length)continue;
-      if(all.filter(webVisible).length) list.push({grp,cat});
+      if(all.filter(webVisible).length){ list.push({grp,cat}); seen[cat]=1; }
     }
+  }
+  // v27d: Tochter-Kategorien, die nicht in CAT_GROUPS stehen, trotzdem anzeigen (in Menü-Reihenfolge)
+  for(const cat of Object.keys(MENU)){
+    if(seen[cat]) continue;
+    const all=MENU[cat]; if(!all||!all.length) continue;
+    if(all.filter(webVisible).length) list.push({grp:'Speisekarte', cat});
   }
   return list;
 }
@@ -2282,6 +2288,7 @@ function applyCompany(){
   document.querySelectorAll('[data-co-name]').forEach(el=>{el.textContent=COMPANY.name;});
   // v2026-07-27a: Landing-White-Label — jede Tochter zeigt IHRE Marke (BW bleibt pixelgleich)
   if(LOCATION_ID!=='eatdesi-bw'){
+    if(/Sidhu/.test(String(COMPANY.about||''))) COMPANY.about='Willkommen bei '+(COMPANY.name||'uns')+'! Frisch zubereitet mit Liebe – jetzt online bestellen, abholen oder liefern lassen.';
     var _lg=document.querySelector('.lt-logo'); if(_lg) _lg.textContent=COMPANY.name||'';
     var _lt=document.querySelector('.lt-tag'); if(_lt) _lt.textContent=[COMPANY.street,[COMPANY.zip,COMPANY.city].filter(Boolean).join(' ')].filter(Boolean).join(' \u00b7 ');
     var _ld=document.querySelector('[data-lede-main]'); if(_ld) _ld.textContent='Frisch zubereitet mit Liebe \u2013 jetzt online bestellen:';
@@ -2363,7 +2370,11 @@ async function saveConfig(){
     const r=await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
       headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
       body:JSON.stringify({key:CONFIG_KEY,value:JSON.stringify(cfg),updated_at:new Date().toISOString()})});
-    if(r.ok||r.status===201||r.status===409){toast('✓ Gespeichert');renderOffers();renderEvents();checkOpen();applyCompany();renderGallery();}
+    if(r.ok||r.status===201||r.status===409){
+      toast('✓ Gespeichert');
+      try{ var _sb=document.getElementById('adminSaveTop'); if(_sb){ _sb.textContent='✓ Gespeichert'; setTimeout(function(){ _sb.textContent='💾 Speichern'; },1600); } }catch(e){}
+      renderOffers();renderEvents();checkOpen();applyCompany();renderGallery();
+    }
     else toast('⚠️ Speichern fehlgeschlagen');
   }catch(e){toast('⚠️ Speichern fehlgeschlagen');}
 }
