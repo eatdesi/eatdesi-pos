@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v181</title>
+<title>eatDeSi POS v183</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v181';",
+    "var CACHE='eatdesi-v183';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -8972,7 +8972,10 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
         }, "💵 Bar"),
         /*#__PURE__*/React.createElement("button", { onClick:()=>confirmPay("Karte"),
           style:{ padding:"13px 0", borderRadius:12, border:"none", background:C.orange, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
-        }, "💳 Karte")
+        }, "💳 Karte"),
+        /*#__PURE__*/React.createElement("button", { onClick:()=>{ try{ window.sumupPay((Number(selTotal)||0)+(Number(tgVal)||0), String(label||'')+" · Gast "+(gastNr+1)); }catch(e){} },
+          style:{ gridColumn:"1 / -1", padding:"11px 0", borderRadius:12, border:"2px solid #1565c0", background:"#e3f2fd", color:"#1565c0", cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:13 }
+        }, "💳 SumUp öffnen (Betrag automatisch) – danach hier Karte buchen")
       ),
       selItems.length === 0 && items.length > 0 && /*#__PURE__*/React.createElement("button", { onClick:onSkipGast,
         style:{ width:"100%", padding:11, borderRadius:10, border:"2px solid #ddd", background:"#fff", color:"#888", cursor:"pointer", fontFamily:"inherit", fontSize:12 }
@@ -9628,18 +9631,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
           sumupMode === "same" && /*#__PURE__*/React.createElement(React.Fragment, null,
             /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#888", marginBottom:12 } }, "SumUp App \xF6ffnen mit Betrag:"),
             /*#__PURE__*/React.createElement("button", {
-              onClick: () => {
-                const amt = totalWithTG.toFixed(2);
-                const deepLink = `sumupmerchant://pay?amount=${amt}&currency=EUR&title=${encodeURIComponent(label)}`;
-                // Open SumUp app via deep link
-                const a = document.createElement('a');
-                a.href = deepLink;
-                a.target = '_blank';
-                a.rel = 'noopener';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-              },
+              onClick: () => { try{ window.sumupPay(totalWithTG, label); }catch(e){} }, // v183: korrekter SumUp-Start (Affiliate-Key aus Einstellungen)
               style:{ width:"100%", padding:"16px 0", borderRadius:14, border:"none", background:C.orange, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:900, fontSize:18, marginBottom:10, display:"flex", alignItems:"center", justifyContent:"center", gap:10 }
             },
               /*#__PURE__*/React.createElement("span", { style:{ fontSize:28 } }, "\uD83D\uDCB3"),
@@ -19312,7 +19304,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v181"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v183"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
