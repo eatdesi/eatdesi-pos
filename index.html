@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v188</title>
+<title>eatDeSi POS v189</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v188';",
+    "var CACHE='eatdesi-v189';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -19489,7 +19489,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v188"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v189"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22109,6 +22109,48 @@ async function belksTenantsByEmail(email){
   var j=await r.json();
   return (j||[]).filter(function(t){return t.location_id!=='belks-master';});
 }
+// v189: Gehoert diese E-Mail der Belks-Zentrale (Mutter-Ebene)?
+// Wichtig: die Master-Zeile hat active=false und wird von belksTenantsByEmail
+// bewusst herausgefiltert – darum eine eigene, gezielte Abfrage.
+async function belksIsMasterEmail(email){
+  try{
+    var m=String(email||'').trim().toLowerCase();
+    if(!m) return false;
+    var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.belks-master&email=eq.'+encodeURIComponent(m)+'&select=location_id',
+      {headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
+    if(!r.ok) return false;
+    var j=await r.json();
+    return !!(j && j.length);
+  }catch(e){ return false; }
+}
+// v189: Mutter-Ebene freischalten (eine Stelle fuer beide Anmeldewege)
+function belksOpenMutterEbene(pw){
+  try{
+    localStorage.setItem('eatdesi_belks_operator','1');
+    localStorage.setItem('eatdesi_belks_home','1');
+    localStorage.removeItem('eatdesi_full_logout');
+    sessionStorage.setItem('eatdesi_master_auto','1');
+    // Geraet freischalten, damit der Anmelde-Schutz die Zentrale durchlaesst
+    try{
+      localStorage.setItem('eatdesi_tenant_ok_'+LOCATION_ID,'1');
+      if(!localStorage.getItem('eatdesi_location_id')) localStorage.setItem('eatdesi_location_id', LOCATION_ID);
+      if(!localStorage.getItem('eatdesi_data_owner'))  localStorage.setItem('eatdesi_data_owner',  LOCATION_ID);
+    }catch(e){}
+  }catch(e){}
+  if(pw){ try{ belksSha(pw).then(function(h){ if(h) localStorage.setItem('eatdesi_master_h', h); }); }catch(e){} }
+}
+// v189: Master-Passwort in der DATENBANK pruefen (gibt nur ja/nein zurueck).
+// Frueher wurde das echte Passwort in den Browser geladen – und seit v188
+// liefert die oeffentliche Sicht gar kein 'secret' mehr.
+async function belksCheckMasterSecret(pw){
+  try{
+    var rp=await fetch(SUPA_URL+'/rest/v1/rpc/belks_check_secret',{method:'POST',
+      headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({p_code:'belks-master', p_secret:String(pw)})});
+    if(rp.ok) return await rp.json();
+  }catch(e){}
+  return null;   // null = Funktion (noch) nicht verfuegbar
+}
 // Recovery-Token aus URL-Hash (#access_token=...&type=recovery) — pure, testbar
 function belksParseRecoveryToken(hash){
   var h=String(hash||'');
@@ -22224,17 +22266,16 @@ window.belksAccountOverlay=function(opts){
           if(un==='belkspos'||un==='belks'){
             err.style.color='#555'; err.textContent='Pr\u00fcfe Master-Passwort\u2026';
             var _masterOk=function(){
-              try{
-                localStorage.setItem('eatdesi_belks_operator','1');
-                localStorage.setItem('eatdesi_belks_home','1');
-                localStorage.removeItem('eatdesi_full_logout');
-                sessionStorage.setItem('eatdesi_master_auto','1');
-              }catch(e){}
-              try{ belksSha(pw).then(function(h){ if(h) localStorage.setItem('eatdesi_master_h', h); }); }catch(e){}
+              belksOpenMutterEbene(pw);   // v189
               err.style.color='#2e7d32'; err.textContent='\u2705 Willkommen, Belks \u2013 MUTTER-EBENE \u00f6ffnet\u2026';
               setTimeout(function(){ location.reload(); }, 600);
             };
             try{
+              // v189: Pruefung in der Datenbank (kein Passwort mehr im Browser)
+              var _rpc=await belksCheckMasterSecret(pw);
+              if(_rpc===true){ _masterOk(); return; }
+              if(_rpc===false){ err.style.color='#c62828'; err.textContent='Falsches Master-Passwort f\u00fcr "Belks Pos".'; return; }
+              // Rueckfall, solange die Pruef-Funktion in Supabase fehlt
               var mt=await belksGetTenant('belks-master');
               if(mt && mt.secret && String(pw)===String(mt.secret)){ _masterOk(); return; }
               err.style.color='#c62828'; err.textContent='Falsches Master-Passwort f\u00fcr "Belks Pos".';
@@ -22260,6 +22301,12 @@ window.belksAccountOverlay=function(opts){
           var sess=await belksAuthLogin(em,pw);
           var mail=(sess&&sess.user&&sess.user.email)||em;
           var rows=await belksTenantsByEmail(mail);
+          // v189: Ist das die Belks-Zentrale? Dann Mutter-Ebene oeffnen.
+          if(await belksIsMasterEmail(mail)){
+            belksOpenMutterEbene(pw);
+            err.style.color='#2e7d32'; err.textContent='\u2705 Willkommen, Belks \u2013 MUTTER-EBENE \u00f6ffnet\u2026';
+            setTimeout(function(){ location.reload(); }, 600); return;
+          }
           if(!rows.length){ err.style.color='#c62828'; err.textContent='Login ok, aber kein Restaurant mit dieser E-Mail verbunden.'; return; }
           ov.innerHTML=box('<div style="font-size:13px;color:#555;margin-bottom:10px">Welches Restaurant m\u00f6chtest du auf diesem Ger\u00e4t \u00f6ffnen?</div>'
             +rows.map(function(t){
@@ -24920,6 +24967,12 @@ function belksTenantGuard(){
           var sess=await belksAuthLogin(em,pw);
           var mail=(sess&&sess.user&&sess.user.email)||em;
           var rows=await belksTenantsByEmail(mail);
+          // v189: Belks-Zentrale erkannt -> Mutter-Ebene statt Fehlermeldung
+          if(await belksIsMasterEmail(mail)){
+            belksOpenMutterEbene(pw);
+            err.style.color='#2e7d32'; err.textContent='\u2705 Willkommen, Belks \u2013 MUTTER-EBENE \u00f6ffnet\u2026';
+            setTimeout(function(){ location.reload(); }, 600); return;
+          }
           if(!rows.length){ err.style.color='#c62828'; err.textContent='Login ok, aber kein Restaurant mit dieser E-Mail verbunden. Bitte in der Belks-Zentrale verbinden.'; return; }
           var target=null;
           if(code && rows.some(function(t){return t.location_id===code;})) target=code;
