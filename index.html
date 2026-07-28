@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v191</title>
+<title>eatDeSi POS v192</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v191';",
+    "var CACHE='eatdesi-v192';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -521,6 +521,14 @@ window.belksWipeTenantData = function(newLoc){
   };
   try{ setInterval(function(){ window.belksBackupFirma(); }, 60000); }catch(e){}
   window.belksAuthEmail = function(){ var a=_read(); return a && a.email || ''; };
+  // v192: Klartext-Status fuer die Fehlersuche – in der Konsole: belksAuthStatus()
+  window.belksAuthStatus = function(){
+    var a=_read();
+    if(!a || !a.access_token) return 'KEINE Sitzung – App laeuft als anon (bei aktivem Zeilenschutz sieht sie nichts)';
+    var min = Math.round((a.expires_at - Date.now())/60000);
+    return 'Sitzung fuer ' + (a.email||'?') + ' – noch ' + min + ' Min gueltig'
+         + (a.refresh_token ? ' (Erneuerung vorhanden)' : ' (KEINE Erneuerung!)');
+  };
 
   // Gueltiges Token holen (synchron). Laeuft es bald ab -> im Hintergrund erneuern.
   window.belksAuthToken = function(){
@@ -578,6 +586,9 @@ window.belksWipeTenantData = function(newLoc){
     return _raw(input, init);
   };
 
+  // v192: Beim Start SOFORT erneuern – nicht erst kurz vor Ablauf.
+  // Sonst laeuft die App nach einer Pause als anon weiter und sieht nichts.
+  try { setTimeout(function(){ window.belksAuthRefresh(); }, 300); } catch(e){}
   // Sitzung regelmaessig frisch halten (POS laeuft den ganzen Tag)
   try{
     setInterval(function(){ window.belksAuthRefresh(); }, 20*60*1000);
@@ -19489,7 +19500,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v191"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v192"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -20726,7 +20737,19 @@ function App() {
   }
   // v168: Frische Tochter ohne Benutzer -> ersten Chef/Admin anlegen (kein BW-Erbe!)
   const _activeUsers = (users||[]).filter(u => u && !u.deleted);
-  const _firstUserSetup = (!loggedInUser && _activeUsers.length===0) ? /*#__PURE__*/React.createElement("div",{style:{position:"fixed",inset:0,background:"linear-gradient(135deg,#C84B31 0%,#6B1200 100%)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}},
+  // v192 SCHUTZ: Ein leerer Benutzer-Stand heisst NICHT automatisch
+  // "neues Restaurant". Er kann auch bedeuten, dass die Cloud noch nicht
+  // gelesen wurde oder die Anmeldung abgelaufen ist. In beiden Faellen darf
+  // hier KEIN neuer Admin angelegt werden - sonst wird die echte
+  // Benutzerliste in der Cloud durch eine leere ersetzt.
+  const _darfErstBenutzer = (function(){
+    try {
+      if (!window.__belksHydrated) return false;          // Cloud noch nicht gelesen
+      if (window.__belksRechteFehler) return false;       // Anmeldung/Rechte kaputt
+      return true;
+    } catch(e) { return false; }
+  })();
+  const _firstUserSetup = (!loggedInUser && _activeUsers.length===0 && _darfErstBenutzer) ? /*#__PURE__*/React.createElement("div",{style:{position:"fixed",inset:0,background:"linear-gradient(135deg,#C84B31 0%,#6B1200 100%)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}},
     /*#__PURE__*/React.createElement("div",{style:{background:"#fff",borderRadius:18,padding:"26px 22px",maxWidth:360,width:"100%",textAlign:"center"}},
       /*#__PURE__*/React.createElement("div",{style:{fontSize:30}},"\uD83D\uDC64"),
       /*#__PURE__*/React.createElement("div",{style:{fontWeight:800,fontSize:18,color:"#C84B31",marginBottom:4}}, (typeof tenantDisplayName==='function'?tenantDisplayName():'')+" POS"),
@@ -20753,6 +20776,22 @@ function App() {
     )
   ) : null;
   if(_firstUserSetup) return _firstUserSetup;
+  // v192: Daten noch nicht da? Dann warten statt "neues Restaurant" anzunehmen.
+  if(!loggedInUser && _activeUsers.length===0 && !_darfErstBenutzer){
+    return /*#__PURE__*/React.createElement("div",{style:{position:"fixed",inset:0,background:"linear-gradient(135deg,#C84B31 0%,#6B1200 100%)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}},
+      /*#__PURE__*/React.createElement("div",{style:{background:"#fff",borderRadius:18,padding:26,maxWidth:380,width:"100%",textAlign:"center",boxShadow:"0 10px 40px rgba(0,0,0,.3)"}},
+        /*#__PURE__*/React.createElement("div",{style:{fontSize:40,marginBottom:10}}, window.__belksRechteFehler ? "\uD83D\uDD12" : "\u2601\uFE0F"),
+        /*#__PURE__*/React.createElement("div",{style:{fontSize:17,fontWeight:800,color:"#C84B31",marginBottom:8}},
+          window.__belksRechteFehler ? "Anmeldung abgelaufen" : "Daten werden geladen\u2026"),
+        /*#__PURE__*/React.createElement("div",{style:{fontSize:13,color:"#666",lineHeight:1.5,marginBottom:16}},
+          window.__belksRechteFehler
+            ? "Die Verbindung zum Restaurant-Konto ist abgelaufen. Bitte melde dich mit E-Mail und Passwort neu an. Es gehen keine Daten verloren."
+            : "Einen Moment \u2013 die Daten dieses Restaurants werden aus der Cloud geholt."),
+        /*#__PURE__*/React.createElement("button",{onClick:function(){ try{ window.belksAccountOverlay && window.belksAccountOverlay({lock:true}); }catch(e){} },
+          style:{width:"100%",padding:13,border:"none",borderRadius:11,background:"#2e7d32",color:"#fff",fontWeight:800,fontSize:15,cursor:"pointer",fontFamily:"inherit"}},
+          "\uD83D\uDD13 Jetzt anmelden")
+      ));
+  }
   const loginScreen = !loggedInUser ? /*#__PURE__*/React.createElement("div", { style:{ position:"fixed", inset:0, background:"linear-gradient(135deg, #C84B31 0%, #6B1200 100%)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:16, overflowY:"auto" } },
     /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:20, padding:28, width:320, maxWidth:"100%", boxShadow:"0 8px 40px #0006", textAlign:"center" } },
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:32 } }, "🔒"),
@@ -24686,6 +24725,15 @@ function _setLocalStamp(remoteKey, ts) {
 async function pullStateWithTime(remoteKey) {
   try {
     var resp = await supaFetch('/rest/v1/pos_state?key=eq.' + LOCATION_ID + '_' + remoteKey + '&select=value,updated_at');
+    // v192: 401/403 = keine gueltige Anmeldung bzw. keine Berechtigung.
+    // Das MUSS auffallen, sonst haelt die App das Restaurant faelschlich fuer leer.
+    if (resp.status === 401 || resp.status === 403) {
+      window.__belksRechteFehler = true;
+      console.warn('Keine Berechtigung (' + resp.status + ') fuer ' + remoteKey + ' – Anmeldung pruefen');
+      try { window.belksAuthRefresh && window.belksAuthRefresh(); } catch(e) {}
+      return null;
+    }
+    if (resp.ok) window.__belksRechteFehler = false;
     if (!resp.ok) return null;
     var data = await resp.json();
     if (data && data[0] && data[0].value) {
