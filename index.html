@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v186</title>
+<title>eatDeSi POS v188</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v186';",
+    "var CACHE='eatdesi-v188';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -428,8 +428,21 @@ window.belksWipeTenantData = function(newLoc){
       if(k.indexOf('eatdesi_setup_hide_') === 0) continue;
       if(k.indexOf('eatdesi_belks_') === 0) continue;       // Betreiber-Flags
       if(k.indexOf('eatdesi_master_h') === 0) continue;     // Offline-Master-Hash
+      if(k.indexOf('eatdesi_firmabak_') === 0) continue;    // v187: Firmendaten-Sicherungen NIE loeschen
       kill.push(k);
     }
+    // v187: Firmendaten + Druckeinstellungen der ALTEN Tochter sichern,
+    // damit sie beim Zurueckwechseln wieder da sind (nichts geht verloren).
+    var _oldOwner = null;
+    try{ _oldOwner = localStorage.getItem('eatdesi_data_owner'); }catch(e){}
+    try{
+      if(_oldOwner){
+        localStorage.setItem('eatdesi_firmabak_'+_oldOwner, JSON.stringify({
+          printer: localStorage.getItem('eatdesi_printer') || null,
+          firma  : localStorage.getItem('eatdesi_firma')   || null
+        }));
+      }
+    }catch(e){}
     kill.forEach(function(k){ try{ localStorage.removeItem(k); }catch(e){} });
     // Drucker-HARDWARE behalten, aber FIRMENDATEN der alten Tochter entfernen
     try{
@@ -439,6 +452,16 @@ window.belksWipeTenantData = function(newLoc){
          'firmaStNr','firmaUst','firmaGericht','firmaEmail','firmaWeb','googleLink']
           .forEach(function(x){ delete pr[x]; });
         localStorage.setItem('eatdesi_printer', JSON.stringify(pr));
+      }
+    }catch(e){}
+    // v187: Gibt es fuer die NEUE Tochter eine Sicherung? -> zurueckholen
+    try{
+      if(newLoc){
+        var bak = JSON.parse(localStorage.getItem('eatdesi_firmabak_'+newLoc)||'null');
+        if(bak){
+          if(bak.printer) localStorage.setItem('eatdesi_printer', bak.printer);
+          if(bak.firma)   localStorage.setItem('eatdesi_firma',   bak.firma);
+        }
       }
     }catch(e){}
     try{ localStorage.removeItem('eatdesi_auth'); }catch(e){}   // v186: fremde Sitzung weg
@@ -484,6 +507,19 @@ window.belksWipeTenantData = function(newLoc){
     }catch(e){}
   };
   window.belksAuthClear = function(){ try{ localStorage.removeItem(AUTH_KEY); }catch(e){} };
+  // v187: Firmendaten/Druckeinstellungen laufend fuer die aktive Tochter sichern,
+  // damit sie bei einem Wechsel nicht verloren gehen.
+  window.belksBackupFirma = function(){
+    try{
+      var own = localStorage.getItem('eatdesi_data_owner');
+      if(!own) return;
+      localStorage.setItem('eatdesi_firmabak_'+own, JSON.stringify({
+        printer: localStorage.getItem('eatdesi_printer') || null,
+        firma  : localStorage.getItem('eatdesi_firma')   || null
+      }));
+    }catch(e){}
+  };
+  try{ setInterval(function(){ window.belksBackupFirma(); }, 60000); }catch(e){}
   window.belksAuthEmail = function(){ var a=_read(); return a && a.email || ''; };
 
   // Gueltiges Token holen (synchron). Laeuft es bald ab -> im Hintergrund erneuern.
@@ -19453,7 +19489,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v186"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v188"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22372,8 +22408,15 @@ function belksRandPw(){
   return out;
 }
 async function belksGetTenant(code){
-  var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(code)+'&select=*',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
-  if(!r.ok) return null;
+  // v188 SICHERHEIT: aus der oeffentlichen Sicht lesen (ohne secret/email).
+  // Frueher holte 'select *' das Restaurant-Passwort mit in den Browser.
+  var url=SUPA_URL+'/rest/v1/belks_tenants_public?location_id=eq.'+encodeURIComponent(code)+'&select=location_id,name,street,city,phone,plan,active';
+  var r=await fetch(url,{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
+  if(!r.ok){
+    // Rueckfall fuer den Fall, dass die Sicht noch nicht angelegt ist
+    r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(code)+'&select=location_id,name,street,city,phone,plan,active',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
+    if(!r.ok) return null;
+  }
   var j=await r.json();
   return (j&&j[0])||null;
 }
@@ -22382,7 +22425,7 @@ function RestaurantSwitchView(){
   var [tenants,setTenants]=R.useState(null);
   var [err,setErr]=R.useState('');
   R.useEffect(function(){
-    fetch(SUPA_URL+'/rest/v1/belks_tenants?select=location_id,name,city&active=eq.true&order=created_at.asc',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}})
+    fetch(SUPA_URL+'/rest/v1/belks_tenants_public?select=location_id,name,city&active=eq.true&order=created_at.asc',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}})
     .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
     .then(function(j){ setTenants((j||[]).filter(function(t){return t.location_id!=='belks-master';})); })
     .catch(function(e){ setErr(String(e.message||e)); setTenants([]); });
@@ -24428,13 +24471,33 @@ var SYNC_BLACKLIST = [
   'eatdesi_tableorders',   // wird separat ueber syncTableOrders gesynct
   'eatdesi_orders_updated', // nur ein Event-Flag
   'eatdesi_abschluss_seen', // welchen Abschluss dieses Geraet schon verarbeitet hat (lokal)
-  'eatdesi_webrequests'    // Anfragen: Website ist Master, POS holt nur (eigene Pull-Logik)
+  'eatdesi_webrequests',   // Anfragen: Website ist Master, POS holt nur (eigene Pull-Logik)
+  // ── v187 (WURZEL DES ALTEN FEHLERS): IDENTITAET DES GERAETS ──
+  // Diese Schluessel sagen, WER dieses Geraet ist. Sie wurden bisher in die
+  // Cloud geschrieben und beim Aktualisieren wieder heruntergeladen. Stand
+  // dort ein falscher Wert, hielt sich das Geraet fuer ein anderes Restaurant
+  // – und loeschte seine eigenen Daten. Ab jetzt: NIEMALS synchronisieren.
+  'eatdesi_location_id',   // welches Restaurant dieses Geraet ist
+  'eatdesi_data_owner',    // wem die lokalen Daten gehoeren
+  'eatdesi_guard_v',       // Migrationsmarke
+  'eatdesi_master_h',      // Offline-Master-Hash
+  'eatdesi_full_logout',   // Abmelde-Zustand
+  'eatdesi_belks_operator',// Betreiber-Modus (nur dieses Geraet)
+  'eatdesi_belks_home',
+  'eatdesi_master_auto',
+  'eatdesi_tenant_info'    // Name/Adresse kommt aus belks_tenants, nicht aus pos_state
 ];
 // TSE bleibt IMMER lokal (gesetzlich: eigener Zaehler/Schluessel pro Kasse)
 function _isLocalOnlyKey(k) {
   if (SYNC_BLACKLIST.indexOf(k) >= 0) return true;
   if (k.indexOf('eatdesi_tse') === 0) return true;   // alle TSE-Keys
   if (k.indexOf('eatdesi_stamp_') === 0) return true; // Sync-Zeitstempel lokal
+  // v187: Freischaltungen, Boot-Pull-Marken und Firmendaten-Sicherungen
+  // gehoeren zum GERAET, nicht in die Cloud.
+  if (k.indexOf('eatdesi_tenant_ok_')  === 0) return true;
+  if (k.indexOf('eatdesi_bootpull_')   === 0) return true;
+  if (k.indexOf('eatdesi_setup_hide_') === 0) return true;
+  if (k.indexOf('eatdesi_firmabak_')   === 0) return true;
   return false;
 }
 // Aus localStorage alle aktuell vorhandenen sync-faehigen eatdesi_-Keys ermitteln
@@ -24896,6 +24959,19 @@ function belksTenantGuard(){
           // v185: auf frischem Geraet kommt der Code aus dem Eingabefeld
           var cd=code || ((document.getElementById('bgCode')||{}).value||'').trim().toLowerCase();
           if(!cd){ err.textContent='Bitte Restaurant-Code eingeben.'; return; }
+          // v188 SICHERHEIT: Das Passwort wird in der DATENBANK geprueft.
+          // Frueher wurde das echte Passwort in den Browser geladen und dort
+          // verglichen – jeder konnte es auslesen.
+          var ok=null;
+          try{
+            var rp=await fetch(SUPA_URL+'/rest/v1/rpc/belks_check_secret',{method:'POST',
+              headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+              body:JSON.stringify({p_code:cd, p_secret:String(pw)})});
+            if(rp.ok) ok=await rp.json();
+          }catch(e){}
+          if(ok===true){ activate(cd); return; }
+          if(ok===false){ err.textContent='Restaurant-Code oder Passwort falsch.'; return; }
+          // Rueckfall, solange die Pruef-Funktion in Supabase noch fehlt
           var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(cd)+'&select=location_id,secret',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
           var j=r.ok?await r.json():[];
           var t=j&&j[0];
