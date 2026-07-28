@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v189</title>
+<title>eatDeSi POS v190</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v189';",
+    "var CACHE='eatdesi-v190';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -19489,7 +19489,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v189"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v190"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24305,12 +24305,38 @@ async function pullOrdersFromSupabase() {
 // Kritische Listen, die NIE mit einer leeren Liste ueberschrieben werden duerfen
 // (Finanzamt-Schutz: Mitarbeiter + Zeiterfassung nie versehentlich loeschen)
 var _NEVER_EMPTY_KEYS = { 'users': 1, 'zeiterfassung': 1 };
+// v190: letzter bekannter Tischstand, um Aenderungen zu erkennen
+var _toVorher = (function(){ try { return JSON.parse(localStorage.getItem('eatdesi_tableorders')||'{}'); } catch(e){ return {}; } })();
+// v190: Diese Daten duerfen vor dem ersten Cloud-Lesen nicht durch Leeres ersetzt werden
+var _SCHUTZ_LEER = {
+  'eatdesi_tableorders':1, 'eatdesi_takeaway':1, 'eatdesi_firma':1, 'eatdesi_menu':1,
+  'eatdesi_customers':1, 'eatdesi_users':1, 'eatdesi_floors':1, 'eatdesi_optiongroups':1,
+  'eatdesi_reservations':1, 'eatdesi_drivers':1, 'eatdesi_inventory':1
+};
+function _istLeer(v){
+  try {
+    if (v === null || v === undefined || v === '') return true;
+    var o = (typeof v === 'string') ? JSON.parse(v) : v;
+    if (o === null || o === undefined) return true;
+    if (Array.isArray(o)) return o.length === 0;
+    if (typeof o === 'object') return Object.keys(o).length === 0;
+    return false;
+  } catch(e){ return false; }
+}
 async function pushStateToSupabase(key, value) {
   try {
     // v185: Geraet ist noch nicht angemeldet -> NICHTS in die Cloud schreiben.
     try {
       if (localStorage.getItem('eatdesi_tenant_ok_' + LOCATION_ID) !== '1') return;
+      // v190 (3): waehrend der Abmeldung nichts hochladen – sonst
+      // ueberschreibt der leere Start-Zustand die offenen Tische.
+      if (localStorage.getItem('eatdesi_full_logout') === '1') return;
     } catch(e00) {}
+    // v190 (1) HYDRATIONS-SPERRE: erst lesen, dann schreiben.
+    if (!window.__belksHydrated) {
+      console.warn('Hochladen blockiert (' + key + '): Cloud wurde noch nicht gelesen');
+      return;
+    }
     // v184 NOTBREMSE: Daten gehoeren einer anderen Tochter -> NIE hochladen.
     try {
       var _own = localStorage.getItem('eatdesi_data_owner');
@@ -24473,26 +24499,115 @@ async function pushPendingOrders() {
   localStorage.setItem('eatdesi_pending_push', JSON.stringify(stateKeysStillPending.concat(orderKeep)));
 }
 
+// ═══ v190 (1) HYDRATIONS-SPERRE: erst LESEN, dann SCHREIBEN ═══
+// Beim Start ist der Speicher noch leer. Wer jetzt schon in die Cloud
+// schreibt, loescht die offenen Tische der anderen Geraete.
+// Darum: kein Hochladen, bevor die Cloud einmal gelesen wurde.
+window.__belksHydrated = false;
+window.belksMarkHydrated = function(grund){
+  if (window.__belksHydrated) return;
+  window.__belksHydrated = true;
+  try { console.log('Sync freigegeben (' + (grund||'') + ') – Hochladen jetzt erlaubt'); } catch(e){}
+};
+// Ohne Internet darf sofort lokal weitergearbeitet werden
+try { if (navigator && navigator.onLine === false) window.belksMarkHydrated('offline'); } catch(e){}
+// Notbremse: falls die Cloud nicht antwortet, nach 10 Sek. trotzdem freigeben
+try { setTimeout(function(){ window.belksMarkHydrated('Zeitablauf'); }, 10000); } catch(e){}
+
+// ═══ v190 (4) TISCH-GENAUES ZUSAMMENFUEHREN ═══
+// Bisher wurde der GANZE Tischblock als ein Paket verschickt: wer zuletzt
+// schrieb, gewann – die Aenderung des anderen Kellners ging verloren.
+// Jetzt bekommt JEDER Tisch einen eigenen Zeitstempel, geloeschte Tische
+// eine Loeschmarke (sonst holt ein anderes Geraet sie wieder zurueck).
+var TO_META = 'eatdesi_to_meta';           // { ts:{Tisch:ms}, del:{Tisch:ms} }
+var TO_TOMB_MS = 24*60*60*1000;            // Loeschmarken 24 Std. behalten
+
+function toMetaRead(){
+  try { var m = JSON.parse(localStorage.getItem(TO_META)||'{}'); return { ts:m.ts||{}, del:m.del||{} }; }
+  catch(e){ return { ts:{}, del:{} }; }
+}
+function toMetaWrite(m){
+  try { localStorage.setItem(TO_META, JSON.stringify({ ts:m.ts||{}, del:m.del||{} })); } catch(e){}
+}
+// Alte Loeschmarken wegraeumen, damit die Liste nicht ewig waechst
+function toMetaPurge(m){
+  var grenze = Date.now() - TO_TOMB_MS;
+  Object.keys(m.del||{}).forEach(function(k){ if (m.del[k] < grenze) delete m.del[k]; });
+  return m;
+}
+// Was hat sich lokal geaendert? -> Zeitstempel bzw. Loeschmarke setzen
+function toMetaStampChanges(neu, alt){
+  var m = toMetaRead(), now = Date.now();
+  neu = neu || {}; alt = alt || {};
+  Object.keys(neu).forEach(function(k){
+    if (JSON.stringify(neu[k]) !== JSON.stringify(alt[k])) { m.ts[k] = now; delete m.del[k]; }
+  });
+  Object.keys(alt).forEach(function(k){
+    if (!(k in neu)) { m.del[k] = now; delete m.ts[k]; }   // Tisch wurde geschlossen/geloescht
+  });
+  toMetaWrite(toMetaPurge(m));
+  return m;
+}
+// Zwei Staende Tisch fuer Tisch zusammenfuehren – der juengste Eintrag gewinnt
+function toMerge(local, lmeta, remote, rmeta){
+  local=local||{}; remote=remote||{};
+  lmeta = { ts:(lmeta&&lmeta.ts)||{}, del:(lmeta&&lmeta.del)||{} };
+  rmeta = { ts:(rmeta&&rmeta.ts)||{}, del:(rmeta&&rmeta.del)||{} };
+  var out={}, meta={ ts:{}, del:{} }, keys={};
+  Object.keys(local).forEach(function(k){ keys[k]=1; });
+  Object.keys(remote).forEach(function(k){ keys[k]=1; });
+  Object.keys(lmeta.del).forEach(function(k){ keys[k]=1; });
+  Object.keys(rmeta.del).forEach(function(k){ keys[k]=1; });
+  Object.keys(keys).forEach(function(k){
+    var lt=lmeta.ts[k]||0, ld=lmeta.del[k]||0, rt=rmeta.ts[k]||0, rd=rmeta.del[k]||0;
+    var best=Math.max(lt,ld,rt,rd);
+    if (best===0){
+      // Keine Zeitstempel (altes Geraet): vorhandener Tisch gewinnt
+      if (k in local)  out[k]=local[k];
+      else if (k in remote) out[k]=remote[k];
+      return;
+    }
+    if (best===ld || best===rd){ meta.del[k]=best; return; }   // geloescht gewinnt
+    if (best===lt && (k in local)){ out[k]=local[k];  meta.ts[k]=lt; return; }
+    if (k in remote){ out[k]=remote[k]; meta.ts[k]=rt; }
+  });
+  return { tables: out, meta: toMetaPurge(meta) };
+}
+window.__toMerge = toMerge;   // fuer Tests
+
 // Tischbestellungen synchronisieren
 async function syncTableOrders() {
   try {
     // App speichert Tische unter 'eatdesi_tableorders' (klein!) via LS.set
     var local = JSON.parse(localStorage.getItem('eatdesi_tableorders') || '{}');
     var remote = await pullStateWithTime('tableOrders');
-    var localStamp = _localStamp('tableOrders');
+    var rmetaRow = await pullStateWithTime('tableordersmeta');
+    // Cloud wurde gelesen -> Hochladen ab jetzt erlaubt
+    window.belksMarkHydrated('Tische gelesen');
 
-    // Remote ist NEUER als unser letzter bekannter Stand -> Remote uebernehmen.
-    // (Last-Write-Wins per Zeitstempel - NICHT mehr "mehr items gewinnt",
-    //  denn das liess bezahlte/geleerte Tische immer zurueckkommen.)
-    if (remote && remote.updated_at > localStamp) {
-      var remoteStr = JSON.stringify(remote.value);
-      if (remoteStr !== JSON.stringify(local)) {
-        window._syncWriting = true;
-        localStorage.setItem('eatdesi_tableorders', remoteStr);
-        window._syncWriting = false;
-        window.dispatchEvent(new CustomEvent('eatdesi_tables_synced', { detail: remote.value }));
-      }
-      _setLocalStamp('tableOrders', remote.updated_at);
+    // v190: Tisch fuer Tisch zusammenfuehren statt den ganzen Block zu ersetzen.
+    // So geht die Arbeit eines zweiten Kellners nicht mehr verloren, und ein
+    // frisch gestartetes Geraet loescht keine offenen Tische mehr.
+    var lmeta = toMetaRead();
+    var rmeta = (rmetaRow && rmetaRow.value) || { ts:{}, del:{} };
+    var res   = toMerge(local, lmeta, (remote && remote.value) || {}, rmeta);
+
+    var mergedStr = JSON.stringify(res.tables);
+    if (mergedStr !== JSON.stringify(local)) {
+      window._syncWriting = true;
+      localStorage.setItem('eatdesi_tableorders', mergedStr);
+      window._syncWriting = false;
+      toMetaWrite(res.meta);
+      window.dispatchEvent(new CustomEvent('eatdesi_tables_synced', { detail: res.tables }));
+    } else {
+      toMetaWrite(res.meta);
+    }
+    // Weicht die Cloud vom zusammengefuehrten Stand ab? Dann hochladen –
+    // aber nur, wenn die Cloud einmal gelesen wurde (Hydrations-Sperre).
+    if (window.__belksHydrated && (!remote || JSON.stringify(remote.value||{}) !== mergedStr)) {
+      _setLocalStamp('tableOrders', Date.now());
+      pushStateToSupabase('tableOrders', res.tables);
+      pushStateToSupabase('tableordersmeta', res.meta);
     }
     // KEIN automatischer Push hier mehr - Push passiert nur bei echter lokaler
     // Aenderung (ueber den LS.set / setItem-Hook). So ueberschreibt ein Geraet
@@ -24516,6 +24631,7 @@ var SYNC_BLACKLIST = [
   'eatdesi_last_autoclose',// lokaler Timer
   'eatdesi_orders',        // wird separat ueber eatdesi_orders-Logik gesynct
   'eatdesi_tableorders',   // wird separat ueber syncTableOrders gesynct
+  'eatdesi_to_meta',       // v190: Tisch-Zeitstempel, wird separat gesynct
   'eatdesi_orders_updated', // nur ein Event-Flag
   'eatdesi_abschluss_seen', // welchen Abschluss dieses Geraet schon verarbeitet hat (lokal)
   'eatdesi_webrequests',   // Anfragen: Website ist Master, POS holt nur (eigene Pull-Logik)
@@ -24715,7 +24831,12 @@ function updateSyncBadge(status) {
 var _syncRunning = false;
 async function runSync() {
   // v185: Ohne Anmeldung kein Sync (sonst zieht ein frisches Geraet fremde Daten)
-  try { if (localStorage.getItem('eatdesi_tenant_ok_' + LOCATION_ID) !== '1') return; } catch(e) {}
+  try {
+    if (localStorage.getItem('eatdesi_tenant_ok_' + LOCATION_ID) !== '1') {
+      window.belksMarkHydrated('nicht angemeldet');   // v190: blockiert ohnehin alles
+      return;
+    }
+  } catch(e) {}
   if (_syncRunning) return;
   _syncRunning = true;
   updateSyncBadge('syncing');
@@ -24752,9 +24873,16 @@ LS.set = function(key, value) {
   if (key === 'eatdesi_tableorders') {
     // eigenen Zeitstempel JETZT setzen, damit der eigene Push nicht zurueckgeholt wird
     _setLocalStamp('tableOrders', Date.now());
-    (function(val){
-      setTimeout(function(){ pushStateToSupabase('tableOrders', val); }, 300);
-    })(value);
+    // v190: geaenderte/geloeschte Tische einzeln markieren
+    var _meta = null;
+    try { _meta = toMetaStampChanges(value, _toVorher); } catch(e){}
+    try { _toVorher = JSON.parse(JSON.stringify(value||{})); } catch(e){ _toVorher = {}; }
+    (function(val, mt){
+      setTimeout(function(){
+        pushStateToSupabase('tableOrders', val);
+        if (mt) pushStateToSupabase('tableordersmeta', mt);
+      }, 300);
+    })(value, _meta);
   }
   // AUTOMATISCH: jeder sync-faehige eatdesi_-Key wird bei Aenderung hochgeladen
   else if (key && key.indexOf('eatdesi_') === 0 && !_isLocalOnlyKey(key)) {
@@ -24771,6 +24899,18 @@ LS.set = function(key, value) {
 // Inventar-Transaktionen) - diese gehen NICHT ueber LS.set und wurden bisher nicht gesynct.
 var _origSetItem = localStorage.setItem.bind(localStorage);
 localStorage.setItem = function(key, valueStr) {
+  // ══ v190 (2) LEER-SCHUTZ ══
+  // Solange die Cloud noch nicht gelesen wurde, darf ein leerer Start-Zustand
+  // KEINE vorhandenen Daten ueberschreiben (Tische, Firmendaten, Speisekarte...).
+  // NACH dem Lesen ist leer eine echte Entscheidung (letzter Tisch bezahlt,
+  // X-Knopf, Tagesabschluss) und wird ganz normal gespeichert.
+  try {
+    if (!window.__belksHydrated && !window._syncWriting &&
+        _SCHUTZ_LEER[key] && _istLeer(valueStr) && !_istLeer(localStorage.getItem(key))) {
+      console.warn('Leeres ' + key + ' verworfen – Cloud wurde noch nicht gelesen');
+      return;
+    }
+  } catch(e){}
   _origSetItem(key, valueStr);
   // Wenn die Sync-Engine selbst gerade schreibt: NICHT erneut pushen (Endlosschleife vermeiden)
   if (window._syncWriting) return;
