@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v197</title>
+<title>eatDeSi POS v199</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v197';",
+    "var CACHE='eatdesi-v199';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -455,6 +455,10 @@ window.belksWipeTenantData = function(newLoc){
       }
     }catch(e){}
     kill.forEach(function(k){ try{ localStorage.removeItem(k); }catch(e){} });
+    // v198: Nach dem Aufraeumen sind ALLE Daten wieder ungelesen.
+    // Der Schutz muss deshalb komplett von vorne beginnen, sonst haelt die
+    // App Vorgabewerte faelschlich fuer gueltige Daten.
+    try{ window.__belksGelesen = {}; window.__belksHydrated = false; }catch(e){}
     // Drucker-HARDWARE behalten, aber FIRMENDATEN der alten Tochter entfernen
     try{
       var pr = JSON.parse(localStorage.getItem('eatdesi_printer')||'null');
@@ -496,6 +500,92 @@ window.belksWipeTenantData = function(newLoc){
     }
   }catch(e){}
 })();
+
+// ═══ v199: EINSTELLUNGEN SICHERN / WIEDERHERSTELLEN ═══
+// Schreibt alles, was muehsam eingerichtet wurde, in eine Datei auf dem Handy.
+// Damit ist die Arbeit unabhaengig von Cloud und App-Version gesichert.
+window.BELKS_SICHERUNG_KEYS = [
+  'eatdesi_floors',      // Tisch-Bereiche
+  'eatdesi_firma',       // Firmendaten
+  'eatdesi_printer',     // Drucker + Kassenschublade
+  'eatdesi_menu',        // Speisekarte
+  'eatdesi_optiongroups',// Options-Gruppen
+  'eatdesi_services',    // Leistungen
+  'eatdesi_deliveryCfg', // Liefer-Einstellungen
+  'eatdesi_happyhours',
+  'eatdesi_users'        // Benutzer inkl. PIN
+];
+window.belksSicherungErstellen = function(){
+  var daten = {};
+  window.BELKS_SICHERUNG_KEYS.forEach(function(k){
+    try { var v = localStorage.getItem(k); if (v !== null) daten[k] = v; } catch(e){}
+  });
+  var loc = 'unbekannt';
+  try { loc = localStorage.getItem('eatdesi_data_owner') || window.RESTAURANT.LOCATION_ID; } catch(e){}
+  return {
+    belks_sicherung: 1,
+    restaurant: loc,
+    erstellt: new Date().toISOString(),
+    daten: daten
+  };
+};
+window.belksSicherungHerunterladen = function(){
+  try {
+    var paket = window.belksSicherungErstellen();
+    var anzahl = Object.keys(paket.daten).length;
+    if (!anzahl) { alert('Es gibt noch nichts zu sichern.'); return; }
+    var name = 'belks-einstellungen_' + paket.restaurant + '_' +
+               new Date().toISOString().slice(0,10) + '.json';
+    var blob = new Blob([JSON.stringify(paket, null, 2)], {type:'application/json'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ try{ document.body.removeChild(a); URL.revokeObjectURL(a.href); }catch(e){} }, 1500);
+    alert('\u2705 Sicherung erstellt (' + anzahl + ' Bereiche)\n\nDatei: ' + name +
+          '\n\nBitte in WhatsApp an dich selbst schicken oder in die Cloud legen.');
+  } catch(e) { alert('Sicherung fehlgeschlagen: ' + e); }
+};
+window.belksSicherungEinlesen = function(text){
+  var paket;
+  try { paket = JSON.parse(text); } catch(e){ return { ok:false, text:'Datei ist keine gueltige Sicherung.' }; }
+  if (!paket || paket.belks_sicherung !== 1 || !paket.daten) {
+    return { ok:false, text:'Das ist keine Belks-Sicherungsdatei.' };
+  }
+  var jetzt = '';
+  try { jetzt = localStorage.getItem('eatdesi_data_owner') || window.RESTAURANT.LOCATION_ID; } catch(e){}
+  if (paket.restaurant && jetzt && paket.restaurant !== jetzt) {
+    return { ok:false, fremd:true,
+             text:'Diese Sicherung gehoert zu "' + paket.restaurant + '", offen ist aber "' + jetzt +
+                  '".\n\nZum Schutz wird nichts eingespielt. Bitte zuerst das richtige Restaurant oeffnen.' };
+  }
+  var n = 0;
+  Object.keys(paket.daten).forEach(function(k){
+    if (window.BELKS_SICHERUNG_KEYS.indexOf(k) < 0) return;   // nur bekannte Schluessel
+    try { localStorage.setItem(k, paket.daten[k]); n++; } catch(e){}
+  });
+  return { ok:true, anzahl:n, restaurant:paket.restaurant, erstellt:paket.erstellt };
+};
+window.belksSicherungWaehlen = function(){
+  try {
+    var inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.json,application/json';
+    inp.onchange = function(){
+      var f = inp.files && inp.files[0];
+      if (!f) return;
+      var leser = new FileReader();
+      leser.onload = function(){
+        var erg = window.belksSicherungEinlesen(String(leser.result||''));
+        if (!erg.ok) { alert('\u274c ' + erg.text); return; }
+        alert('\u2705 ' + erg.anzahl + ' Bereiche wiederhergestellt\n' +
+              'Restaurant: ' + erg.restaurant + '\n\nDie App wird jetzt neu geladen.');
+        setTimeout(function(){ location.reload(); }, 400);
+      };
+      leser.readAsText(f);
+    };
+    inp.click();
+  } catch(e) { alert('Datei konnte nicht geoeffnet werden: ' + e); }
+};
 
 // ═══ v186: SICHERHEIT STUFE 2 – SCHRITT 1: ECHTE BENUTZER-SITZUNG ═══
 // Bisher liefen ALLE Supabase-Aufrufe mit dem oeffentlichen anon-Schluessel.
@@ -15472,7 +15562,29 @@ function PrinterSettingsView({
       fontWeight: 700,
       fontSize: 14
     }
-  }, saved ? "✓ Gespeichert!" : "💾 Speichern")));
+  }, saved ? "✓ Gespeichert!" : "💾 Speichern")),
+  // ══ v199: Eigene Sicherung der Einstellungen ══
+  /*#__PURE__*/React.createElement("div", {
+    style:{ marginTop:18, padding:14, background:"#eef4ff", border:"1.5px solid #c5d8f5", borderRadius:12 }
+  },
+    /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:14, color:"#1565c0", marginBottom:4 } },
+      "🛡️ Einstellungen sichern"),
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, color:"#5b6b7f", lineHeight:1.5, marginBottom:11 } },
+      "Speichert Tisch-Bereiche, Firmendaten, Drucker, Speisekarte und Benutzer in eine Datei auf dem Handy. Nach jeder größeren Änderung einmal sichern – dann ist die Arbeit nie verloren."),
+    /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8 } },
+      /*#__PURE__*/React.createElement("button", {
+        onClick: function(){ try{ window.belksSicherungHerunterladen(); }catch(e){ alert(e); } },
+        style:{ flex:1, padding:12, borderRadius:10, border:"none", background:"#1565c0", color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
+      }, "💾 Sicherung erstellen"),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: function(){
+          if(!window.confirm("Sicherung einspielen?\n\nDie aktuellen Einstellungen dieses Restaurants werden dabei ersetzt.")) return;
+          try{ window.belksSicherungWaehlen(); }catch(e){ alert(e); }
+        },
+        style:{ flex:1, padding:12, borderRadius:10, border:"2px solid #1565c0", background:"#fff", color:"#1565c0", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
+      }, "📂 Wiederherstellen")
+    )
+  ));
 }
 
 function MarketingView({ printerSettings, setPrinterSettings }) {
@@ -19531,7 +19643,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v197"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v199"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -20042,6 +20154,8 @@ function App() {
   useEffect(() => {
     try {
       if (localStorage.getItem('eatdesi_tenant_ok_' + LOCATION_ID) !== '1') return;  // v185
+      // v198: Nach einem Wechsel ist der Boot-Pull-Merker geloescht -> er laeuft
+      // neu und holt die Daten der neuen Tochter, bevor etwas ueberschrieben wird.
       if (localStorage.getItem('eatdesi_bootpull_' + LOCATION_ID) === '1') return;
     } catch(e) { return; }
     const _t = setTimeout(async () => {
@@ -25058,8 +25172,13 @@ localStorage.setItem = function(key, valueStr) {
     // einmal aus der Cloud gelesen wurde, darf ein leerer Wert ihn ersetzen.
     // (Frueher genuegte, dass irgendein anderer Wert geladen war - deshalb
     //  gingen Tisch-Bereiche und Firmendaten nach jedem Upload verloren.)
-    if (!window._syncWriting && _SCHUTZ_LEER[key] &&
-        _istLeer(valueStr) && !_istLeer(localStorage.getItem(key)) &&
+    // v198 KERNFIX: Die frühere Zusatzbedingung "und lokal ist noch etwas da"
+    // war falsch. Direkt nach einem Restaurant-Wechsel ist lokal NICHTS da -
+    // genau dann griff der Schutz nicht und der leere Vorgabewert loeschte
+    // die echten Daten in der Cloud. Jetzt zaehlt nur noch:
+    // Wurde dieser Schluessel schon aus der Cloud gelesen? Wenn nein: nichts
+    // Leeres speichern.
+    if (!window._syncWriting && _SCHUTZ_LEER[key] && _istLeer(valueStr) &&
         !(window.__belksHydrated && _schonGelesen(key))) {
       console.warn('Leeres ' + key + ' verworfen – dieser Schluessel wurde noch nicht aus der Cloud gelesen');
       return;
