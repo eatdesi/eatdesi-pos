@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v196</title>
+<title>eatDeSi POS v197</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v196';",
+    "var CACHE='eatdesi-v197';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -19531,7 +19531,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v196"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v197"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -20838,10 +20838,26 @@ function App() {
             style:{ padding:"10px 16px", borderRadius:12, border:"2px solid "+(u.role==="Admin"?"#C84B31":"#ddd"), background:u.role==="Admin"?"#fff5f2":"#f9f9f9", color:"#333", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
           }, u.name, u.role==="Admin" && /*#__PURE__*/React.createElement("span",{style:{fontSize:9,color:"#C84B31",display:"block",fontWeight:600}},"Chef/Admin")))
         ),
-        /*#__PURE__*/React.createElement("button", {
-          onClick:()=>{ try{ window.belksAccountOverlay && window.belksAccountOverlay(); }catch(e){} },
-          style:{ marginTop:18, width:"100%", padding:10, borderRadius:10, border:"1.5px dashed #c9b8b3", background:"#faf7f6", color:"#8a6f68", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
-        }, "\uD83D\uDCE7 Mit E-Mail anmelden \u00b7 Restaurant wechseln")
+        // v197: Der E-Mail-Knopf erscheint NUR, wenn das Geraet wirklich
+        // abgemeldet oder noch nicht freigeschaltet ist. Beim einfachen
+        // Benutzer-Wechsel (Kopfzeile) bleibt er weg - Kellner sollen kein
+        // Restaurant wechseln koennen.
+        (function(){
+          var abgemeldet = false;
+          try {
+            abgemeldet = (localStorage.getItem('eatdesi_full_logout') === '1') ||
+                         (localStorage.getItem('eatdesi_tenant_ok_' + LOCATION_ID) !== '1');
+          } catch(e) { abgemeldet = false; }
+          if (!abgemeldet) {
+            return /*#__PURE__*/React.createElement("div", {
+              style:{ marginTop:16, fontSize:11, color:"#aaa", lineHeight:1.5 }
+            }, "Restaurant wechseln oder neu anmelden: \u2630 Men\u00fc \u2192 Restaurant abmelden");
+          }
+          return /*#__PURE__*/React.createElement("button", {
+            onClick:()=>{ try{ window.belksAccountOverlay && window.belksAccountOverlay(); }catch(e){} },
+            style:{ marginTop:18, width:"100%", padding:10, borderRadius:10, border:"1.5px dashed #c9b8b3", background:"#faf7f6", color:"#8a6f68", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
+          }, "\uD83D\uDCE7 Mit E-Mail anmelden \u00b7 Restaurant wechseln");
+        })()
       ) :
       // SCHRITT 2: PIN fuer gewaehlten Mitarbeiter
       /*#__PURE__*/React.createElement("div", null,
