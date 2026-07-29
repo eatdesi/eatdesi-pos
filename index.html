@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v193</title>
+<title>eatDeSi POS v196</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,10 +36,20 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v193';",
+    "var CACHE='eatdesi-v196';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
-    "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
+    "self.addEventListener('fetch',function(e){",
+    "  var istSeite = (e.request.mode==='navigate') || (e.request.destination==='document');",
+    "  if(istSeite){",
+    "    e.respondWith(fetch(e.request).then(function(r){",
+    "      try{ var kopie=r.clone(); caches.open(CACHE).then(function(c){ c.put('/', kopie); }); }catch(err){}",
+    "      return r;",
+    "    }).catch(function(){ return caches.match('/'); }));",
+    "    return;",
+    "  }",
+    "  e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));",
+    "});"
   ];
   try {
     var swBlob = new Blob([swLines.join('\n')], {type:'application/javascript'});
@@ -418,7 +428,8 @@ window.belksWipeTenantData = function(newLoc){
   try{
     var keep = ['eatdesi_device_id','eatdesi_location_id','eatdesi_sb_url','eatdesi_sb_key',
                 'eatdesi_guard_v','eatdesi_printer','eatdesi_full_logout','eatdesi_session',
-                'eatdesi_data_owner'];
+                'eatdesi_data_owner',
+                'eatdesi_auth'];   // v194: Sitzung ueberlebt das Aufraeumen
     var kill = [];
     for(var i=0;i<localStorage.length;i++){
       var k = localStorage.key(i);
@@ -464,7 +475,12 @@ window.belksWipeTenantData = function(newLoc){
         }
       }
     }catch(e){}
-    try{ localStorage.removeItem('eatdesi_auth'); }catch(e){}   // v186: fremde Sitzung weg
+    // v194: Die Sitzung wird hier NICHT mehr geloescht.
+    // Grund: Beim E-Mail-Login lief zuerst die Anmeldung (Sitzung gespeichert)
+    // und DANACH dieses Aufraeumen - es hat also seine eigene, frische Sitzung
+    // wieder weggeworfen. Ergebnis: Die App lief dauerhaft ohne Anmeldung.
+    // Beim Abmelden und beim Tochter-Wechsel in der Zentrale wird die Sitzung
+    // weiterhin gezielt entfernt (belksAuthClear).
     if(newLoc){ try{ localStorage.setItem('eatdesi_data_owner', newLoc); }catch(e){} }
     console.warn('Belks: Fremddaten geloescht, Geraet gehoert jetzt ' + newLoc);
   }catch(e){}
@@ -520,6 +536,21 @@ window.belksWipeTenantData = function(newLoc){
     }catch(e){}
   };
   try{ setInterval(function(){ window.belksBackupFirma(); }, 60000); }catch(e){}
+  // v195: Sind die Firmendaten leer, aber es gibt eine Sicherung dieser
+  // Tochter? Dann zurueckholen (z.B. nach einem Upload mit leerem Start).
+  window.belksFirmaWiederherstellen = function(){
+    try{
+      var own = localStorage.getItem('eatdesi_data_owner');
+      if(!own) return false;
+      var bak = JSON.parse(localStorage.getItem('eatdesi_firmabak_'+own)||'null');
+      if(!bak) return false;
+      var jetzt = localStorage.getItem('eatdesi_firma');
+      var leer = !jetzt || jetzt === 'null' || jetzt === '{}' ||
+                 (function(){ try{ return Object.keys(JSON.parse(jetzt)||{}).length===0; }catch(e){ return false; } })();
+      if(leer && bak.firma){ localStorage.setItem('eatdesi_firma', bak.firma); return true; }
+    }catch(e){}
+    return false;
+  };
   window.belksAuthEmail = function(){ var a=_read(); return a && a.email || ''; };
   // v192: Klartext-Status fuer die Fehlersuche – in der Konsole: belksAuthStatus()
   window.belksAuthStatus = function(){
@@ -19500,7 +19531,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v193"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v196"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22256,6 +22287,7 @@ function belksQuickSwitch(code, name, opts){
               localStorage.setItem('eatdesi_printer', JSON.stringify(pr));
             }
           }catch(e){}
+          try{ localStorage.removeItem('eatdesi_auth'); }catch(e){}   // v194: hier gezielt
           localStorage.setItem('eatdesi_location_id',code);
           localStorage.setItem('eatdesi_data_owner',code);   // v184
           localStorage.setItem('eatdesi_tenant_ok_'+code,'1');
@@ -24376,6 +24408,20 @@ var _SCHUTZ_LEER = {
   'eatdesi_customers':1, 'eatdesi_users':1, 'eatdesi_floors':1, 'eatdesi_optiongroups':1,
   'eatdesi_reservations':1, 'eatdesi_drivers':1, 'eatdesi_inventory':1
 };
+// v195: lokaler Schluessel -> Cloud-Name (gleiche Regel wie im Sync)
+function _cloudNameVon(lsKey){
+  try {
+    if (lsKey === 'eatdesi_tableorders') return 'tableOrders';
+    return String(lsKey).replace(/^eatdesi_/, '');
+  } catch(e) { return ''; }
+}
+// v195: Wurde dieser Schluessel schon einmal aus der Cloud gelesen?
+function _schonGelesen(lsKey){
+  try {
+    var n = _cloudNameVon(lsKey);
+    return !!(window.__belksGelesen && window.__belksGelesen[n]);
+  } catch(e) { return false; }
+}
 function _istLeer(v){
   try {
     if (v === null || v === undefined || v === '') return true;
@@ -24400,6 +24446,16 @@ async function pushStateToSupabase(key, value) {
       console.warn('Hochladen blockiert (' + key + '): Cloud wurde noch nicht gelesen');
       return;
     }
+    // v195: Diesen einen Schluessel nie leeren, solange er nicht gelesen wurde.
+    try {
+      var _leer = (value === null || value === undefined) ||
+                  (Array.isArray(value) && value.length === 0) ||
+                  (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0);
+      if (_leer && !(window.__belksGelesen && window.__belksGelesen[key])) {
+        console.warn('Leeres ' + key + ' NICHT hochgeladen – noch nie aus der Cloud gelesen');
+        return;
+      }
+    } catch(e0) {}
     // v184 NOTBREMSE: Daten gehoeren einer anderen Tochter -> NIE hochladen.
     try {
       var _own = localStorage.getItem('eatdesi_data_owner');
@@ -24757,7 +24813,12 @@ async function pullStateWithTime(remoteKey) {
       try { window.belksAuthRefresh && window.belksAuthRefresh(); } catch(e) {}
       return null;
     }
-    if (resp.ok) window.__belksRechteFehler = false;
+    if (resp.ok) {
+      window.__belksRechteFehler = false;
+      // v195: Dieser Schluessel wurde jetzt aus der Cloud gelesen.
+      // Ab hier darf die App ihn auch ueberschreiben - vorher nicht.
+      try { (window.__belksGelesen = window.__belksGelesen || {})[remoteKey] = true; } catch(e) {}
+    }
     if (!resp.ok) return null;
     var data = await resp.json();
     if (data && data[0] && data[0].value) {
@@ -24977,9 +25038,14 @@ localStorage.setItem = function(key, valueStr) {
   // NACH dem Lesen ist leer eine echte Entscheidung (letzter Tisch bezahlt,
   // X-Knopf, Tagesabschluss) und wird ganz normal gespeichert.
   try {
-    if (!window.__belksHydrated && !window._syncWriting &&
-        _SCHUTZ_LEER[key] && _istLeer(valueStr) && !_istLeer(localStorage.getItem(key))) {
-      console.warn('Leeres ' + key + ' verworfen – Cloud wurde noch nicht gelesen');
+    // v195: Der Schutz gilt PRO SCHLUESSEL. Erst wenn GENAU DIESER Schluessel
+    // einmal aus der Cloud gelesen wurde, darf ein leerer Wert ihn ersetzen.
+    // (Frueher genuegte, dass irgendein anderer Wert geladen war - deshalb
+    //  gingen Tisch-Bereiche und Firmendaten nach jedem Upload verloren.)
+    if (!window._syncWriting && _SCHUTZ_LEER[key] &&
+        _istLeer(valueStr) && !_istLeer(localStorage.getItem(key)) &&
+        !(window.__belksHydrated && _schonGelesen(key))) {
+      console.warn('Leeres ' + key + ' verworfen – dieser Schluessel wurde noch nicht aus der Cloud gelesen');
       return;
     }
   } catch(e){}
@@ -25254,7 +25320,13 @@ function belksTenantGuard(){
         // v184 FIX: Daten der vorherigen Tochter loeschen, sonst werden sie
         // in die Cloud DIESER Tochter hochgeladen (Menue/Tische-Verlust!).
         try{
-          if(window.belksWipeTenantData && localStorage.getItem('eatdesi_data_owner') !== c){
+          // v194: Nur aufraeumen, wenn WIRKLICH ein anderes Restaurant kommt.
+          // Frueher genuegte ein leeres data_owner (alte Geraete) - dann wurden
+          // beim normalen Anmelden alle lokalen Daten geloescht.
+          var _own = localStorage.getItem('eatdesi_data_owner');
+          var _loc = localStorage.getItem('eatdesi_location_id');
+          var _fremd = (_own && _own !== c) || (!_own && _loc && _loc !== c);
+          if(window.belksWipeTenantData && _fremd){
             window.belksWipeTenantData(c);
           }
         }catch(e){}
