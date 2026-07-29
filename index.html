@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v192</title>
+<title>eatDeSi POS v193</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v192';",
+    "var CACHE='eatdesi-v193';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}).catch(function(){return caches.match('/');}));});"
@@ -19500,7 +19500,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v192"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v193"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -20875,9 +20875,33 @@ function App() {
     /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:20, padding:24, width:"100%", maxWidth:360, boxShadow:"0 8px 40px #0005" } },
       // Title
       /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:18, marginBottom:6, textAlign:"center" } }, "⚙️ Verbindungsmodus"),
-      /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#999", textAlign:"center", marginBottom:20 } },
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#999", textAlign:"center", marginBottom:10 } },
         "Netzwerk: ", isOnline ? "✅ Verbunden" : "❌ Getrennt"
       ),
+      // v193: Anmelde-Status – muss GRUEN sein, bevor der Zeilenschutz aktiviert wird
+      (function(){
+        var st='', gut=false;
+        try { st = (window.belksAuthStatus && window.belksAuthStatus()) || 'unbekannt'; } catch(e){ st='unbekannt'; }
+        gut = st.indexOf('Sitzung fuer') === 0;
+        return /*#__PURE__*/React.createElement("div", {
+          style:{ fontSize:12, textAlign:"center", marginBottom:8, padding:"9px 11px", borderRadius:10,
+                  background: gut ? "#e8f5e9" : "#ffebee", color: gut ? "#2e7d32" : "#c62828",
+                  fontWeight:600, lineHeight:1.45 }
+        },
+          /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, marginBottom:3 } },
+            "Anmeldung: " + (gut ? "\u2705 aktiv" : "\u274c fehlt")),
+          /*#__PURE__*/React.createElement("div", { style:{ fontWeight:500, fontSize:11, opacity:0.95 } }, st),
+          !gut && /*#__PURE__*/React.createElement("div", { style:{ fontWeight:500, fontSize:11, marginTop:4 } },
+            "Bitte abmelden und mit E-Mail neu anmelden.")
+        );
+      })(),
+      /*#__PURE__*/React.createElement("div", {
+        onClick: function(){
+          try { window.belksAuthRefresh && window.belksAuthRefresh(); } catch(e){}
+          setTimeout(function(){ setShowModeModal(false); setTimeout(function(){ setShowModeModal(true); }, 60); }, 900);
+        },
+        style:{ fontSize:11, color:"#1565c0", textAlign:"center", marginBottom:16, cursor:"pointer", textDecoration:"underline" }
+      }, "\uD83D\uDD04 Anmeldung jetzt erneuern"),
 
       // Auto Mode
       /*#__PURE__*/React.createElement("div", {
