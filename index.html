@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v200</title>
+<title>eatDeSi POS v202</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v200';",
+    "var CACHE='eatdesi-v202';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -501,6 +501,45 @@ window.belksWipeTenantData = function(newLoc){
     }
   }catch(e){}
 })();
+
+// ═══ v202: VORGABE-BENUTZER NUR BEI eatDeSi BW ═══
+// "Abdullah" (PIN 0000) und "Küche" (PIN 1111) sind Vorgabe-Benutzer von
+// eatDeSi BW. Durch die Stoerungen vom 27.07. sind sie in die Cloud der
+// anderen Toechter gelangt und lassen sich dort nicht mehr von allein
+// entfernen (Benutzer werden per ID zusammengefuehrt).
+// Diese Funktion markiert sie in allen anderen Toechtern als geloescht -
+// aber NUR, wenn sie unveraendert sind (gleicher Name UND Vorgabe-PIN).
+// Wer sie umbenannt oder die PIN geaendert hat, behaelt sie.
+window.belksVorgabeBenutzerAufraeumen = function(){
+  try{
+    var loc = localStorage.getItem('eatdesi_location_id') || window.RESTAURANT.LOCATION_ID;
+    if(!loc || loc === 'eatdesi-bw') return 0;          // BW darf sie behalten
+    var raw = localStorage.getItem('eatdesi_users');
+    if(!raw) return 0;
+    var list = JSON.parse(raw);
+    if(!Array.isArray(list)) return 0;
+    var vorgaben = {
+      'u_default_abdullah': { name:'Abdullah', pin:'0000' },
+      'u_default_kueche'  : { name:'K\u00fcche',   pin:'1111' }
+    };
+    var n = 0;
+    list.forEach(function(u){
+      if(!u || u.deleted) return;
+      var v = vorgaben[u.id];
+      if(!v) return;                                    // selbst angelegt -> behalten
+      if(String(u.name) !== v.name) return;              // umbenannt   -> behalten
+      if(String(u.pin)  !== v.pin)  return;              // PIN geaendert -> behalten
+      u.deleted = true;
+      u.time = new Date().toISOString();                 // neuer Stempel gewinnt beim Sync
+      n++;
+    });
+    if(n){
+      localStorage.setItem('eatdesi_users', JSON.stringify(list));
+      console.warn('v202: ' + n + ' Vorgabe-Benutzer aus ' + loc + ' entfernt');
+    }
+    return n;
+  }catch(e){ return 0; }
+};
 
 // ═══ v199: EINSTELLUNGEN SICHERN / WIEDERHERSTELLEN ═══
 // Schreibt alles, was muehsam eingerichtet wurde, in eine Datei auf dem Handy.
@@ -19662,7 +19701,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v200"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v202"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22423,19 +22462,33 @@ function belksQuickSwitch(code, name, opts){
       try{ if(window.runSync) window.runSync(); }catch(e){}
       setTimeout(function(){
         try{
-          var keep=['eatdesi_location_id','eatdesi_sb_url','eatdesi_sb_key','eatdesi_printer','eatdesi_guard_v'];
-          var kill=[];
-          for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k&&k.indexOf('eatdesi_')===0&&keep.indexOf(k)<0&&k.indexOf('eatdesi_tenant_ok_')!==0&&k.indexOf('eatdesi_setup_hide_')!==0) kill.push(k); }
-          kill.forEach(function(k){ localStorage.removeItem(k); });
-          // FIX v154: Drucker-HARDWARE behalten (Methode/IP/Breite/Kopien/AI-Key),
-          // aber FIRMENDATEN der alten Tochter entfernen — jede Tochter hat eigene!
-          try{
-            var pr=JSON.parse(localStorage.getItem('eatdesi_printer')||'null');
-            if(pr){
-              ['name','address','phone','firmaName','firmaZusatz','firmaStrasse','firmaPlzOrt','firmaStNr','firmaUst','firmaGericht','firmaEmail','firmaWeb','googleLink'].forEach(function(k){ delete pr[k]; });
-              localStorage.setItem('eatdesi_printer', JSON.stringify(pr));
+          // ══ v201 URSACHE BEHOBEN ══
+          // Hier stand eine ZWEITE, veraltete Aufraeum-Routine mit einer viel
+          // kuerzeren Behalten-Liste. Sie hat bei JEDEM Restaurant-Wechsel
+          // ueber die Zentrale ALLE Anmeldungen (eatdesi_auth_*) und alle
+          // Firmendaten-Sicherungen (eatdesi_firmabak_*) mitgeloescht.
+          // Genau deshalb waren nach jedem Wechsel alle Apps rot.
+          // Jetzt wird die EINE gepflegte Routine benutzt – sie behaelt
+          // Sitzungen, Sicherungen, Geraete-ID und Drucker-Hardware.
+          if(window.belksWipeTenantData){
+            window.belksWipeTenantData(code);
+          } else {
+            // Notfall-Rueckfall, falls die Funktion fehlt
+            var keep=['eatdesi_location_id','eatdesi_sb_url','eatdesi_sb_key','eatdesi_printer',
+                      'eatdesi_guard_v','eatdesi_device_id','eatdesi_data_owner','eatdesi_master_h'];
+            var kill=[];
+            for(var i=0;i<localStorage.length;i++){
+              var k=localStorage.key(i);
+              if(!k || k.indexOf('eatdesi_')!==0) continue;
+              if(keep.indexOf(k)>=0) continue;
+              if(k.indexOf('eatdesi_tenant_ok_')===0) continue;
+              if(k.indexOf('eatdesi_setup_hide_')===0) continue;
+              if(k.indexOf('eatdesi_auth_')===0) continue;       // Anmeldungen behalten!
+              if(k.indexOf('eatdesi_firmabak_')===0) continue;   // Sicherungen behalten!
+              kill.push(k);
             }
-          }catch(e){}
+            kill.forEach(function(k){ localStorage.removeItem(k); });
+          }
           // v200: Die Sitzungen der einzelnen Toechter bleiben erhalten
           // (eatdesi_auth_<code>) - jede Tochter behaelt ihre eigene Anmeldung.
           localStorage.setItem('eatdesi_location_id',code);
@@ -24853,6 +24906,20 @@ async function syncTableOrders() {
     var rmetaRow = await pullStateWithTime('tableordersmeta');
     // Cloud wurde gelesen -> Hochladen ab jetzt erlaubt
     window.belksMarkHydrated('Tische gelesen');
+    // v202: Erst NACH dem Cloud-Lesen aufraeumen, sonst arbeitet die Funktion
+    // auf Vorgabewerten statt auf den echten Benutzern dieser Tochter.
+    try{
+      if(!window.__belksVorgabeGeprueft){
+        window.__belksVorgabeGeprueft = true;
+        setTimeout(function(){
+          try{
+            if(window.belksVorgabeBenutzerAufraeumen() > 0){
+              window.dispatchEvent(new CustomEvent('eatdesi_users_cleaned'));
+            }
+          }catch(e){}
+        }, 2500);
+      }
+    }catch(e){}
 
     // v190: Tisch fuer Tisch zusammenfuehren statt den ganzen Block zu ersetzen.
     // So geht die Arbeit eines zweiten Kellners nicht mehr verloren, und ein
