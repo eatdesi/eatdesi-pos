@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v199</title>
+<title>eatDeSi POS v200</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v199';",
+    "var CACHE='eatdesi-v200';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -440,6 +440,7 @@ window.belksWipeTenantData = function(newLoc){
       if(k.indexOf('eatdesi_belks_') === 0) continue;       // Betreiber-Flags
       if(k.indexOf('eatdesi_master_h') === 0) continue;     // Offline-Master-Hash
       if(k.indexOf('eatdesi_firmabak_') === 0) continue;    // v187: Firmendaten-Sicherungen NIE loeschen
+      if(k.indexOf('eatdesi_auth_') === 0) continue;        // v200: Sitzungen der Toechter behalten
       kill.push(k);
     }
     // v187: Firmendaten + Druckeinstellungen der ALTEN Tochter sichern,
@@ -594,17 +595,34 @@ window.belksSicherungWaehlen = function(){
 // Faellt die Sitzung aus, wird automatisch auf anon zurueckgefallen
 // (solange RLS noch AUS ist, laeuft dadurch nichts kaputt).
 (function(){
-  var AUTH_KEY = 'eatdesi_auth';
+  // v200: EIGENE Sitzung je Restaurant.
+  // Vorher gab es nur 'eatdesi_auth' fuer das ganze Geraet - auf einem Handy
+  // mit mehreren Toechtern hat jede neue Anmeldung die vorherige geloescht.
+  function _authKey(){
+    var loc = 'unbekannt';
+    try { loc = localStorage.getItem('eatdesi_location_id') || window.RESTAURANT.LOCATION_ID || 'unbekannt'; } catch(e){}
+    return 'eatdesi_auth_' + loc;
+  }
+  // Einmalige Uebernahme der alten, geraeteweiten Sitzung
+  (function(){
+    try{
+      var alt = localStorage.getItem('eatdesi_auth');
+      if(alt && !localStorage.getItem(_authKey())){
+        localStorage.setItem(_authKey(), alt);
+      }
+      if(alt) localStorage.removeItem('eatdesi_auth');
+    }catch(e){}
+  })();
 
   function _read(){
-    try{ return JSON.parse(localStorage.getItem(AUTH_KEY)||'null'); }catch(e){ return null; }
+    try{ return JSON.parse(localStorage.getItem(_authKey())||'null'); }catch(e){ return null; }
   }
   // Sitzung nach dem Login speichern
   window.belksAuthSave = function(j){
     try{
       if(!j || !j.access_token) return;
       var life = (j.expires_in ? Number(j.expires_in) : 3600) * 1000;
-      localStorage.setItem(AUTH_KEY, JSON.stringify({
+      localStorage.setItem(_authKey(), JSON.stringify({
         access_token : j.access_token,
         refresh_token: j.refresh_token || '',
         expires_at   : Date.now() + life,
@@ -612,7 +630,8 @@ window.belksSicherungWaehlen = function(){
       }));
     }catch(e){}
   };
-  window.belksAuthClear = function(){ try{ localStorage.removeItem(AUTH_KEY); }catch(e){} };
+  // v200: Abmelden entfernt NUR die Sitzung dieser Tochter
+  window.belksAuthClear = function(){ try{ localStorage.removeItem(_authKey()); }catch(e){} };
   // v187: Firmendaten/Druckeinstellungen laufend fuer die aktive Tochter sichern,
   // damit sie bei einem Wechsel nicht verloren gehen.
   window.belksBackupFirma = function(){
@@ -19643,7 +19662,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v199"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v200"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22417,7 +22436,8 @@ function belksQuickSwitch(code, name, opts){
               localStorage.setItem('eatdesi_printer', JSON.stringify(pr));
             }
           }catch(e){}
-          try{ localStorage.removeItem('eatdesi_auth'); }catch(e){}   // v194: hier gezielt
+          // v200: Die Sitzungen der einzelnen Toechter bleiben erhalten
+          // (eatdesi_auth_<code>) - jede Tochter behaelt ihre eigene Anmeldung.
           localStorage.setItem('eatdesi_location_id',code);
           localStorage.setItem('eatdesi_data_owner',code);   // v184
           localStorage.setItem('eatdesi_tenant_ok_'+code,'1');
@@ -24910,6 +24930,7 @@ function _isLocalOnlyKey(k) {
   if (k.indexOf('eatdesi_bootpull_')   === 0) return true;
   if (k.indexOf('eatdesi_setup_hide_') === 0) return true;
   if (k.indexOf('eatdesi_firmabak_')   === 0) return true;
+  if (k.indexOf('eatdesi_auth_')       === 0) return true;   // v200: Sitzungen je Tochter
   return false;
 }
 // Aus localStorage alle aktuell vorhandenen sync-faehigen eatdesi_-Keys ermitteln
