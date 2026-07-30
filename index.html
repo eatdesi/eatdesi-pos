@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v208</title>
+<title>eatDeSi POS v211</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v208';",
+    "var CACHE='eatdesi-v211';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -441,6 +441,7 @@ window.belksWipeTenantData = function(newLoc){
       if(k.indexOf('eatdesi_master_h') === 0) continue;     // Offline-Master-Hash
       if(k.indexOf('eatdesi_firmabak_') === 0) continue;    // v187: Firmendaten-Sicherungen NIE loeschen
       if(k.indexOf('eatdesi_auth_') === 0) continue;        // v200: Sitzungen der Toechter behalten
+      if(k.indexOf('eatdesi_printer_') === 0) continue;     // v209: Drucker aller Toechter behalten
       kill.push(k);
     }
     // v187: Firmendaten + Druckeinstellungen der ALTEN Tochter sichern,
@@ -450,7 +451,7 @@ window.belksWipeTenantData = function(newLoc){
     try{
       if(_oldOwner){
         localStorage.setItem('eatdesi_firmabak_'+_oldOwner, JSON.stringify({
-          printer: localStorage.getItem('eatdesi_printer') || null,
+          printer: (window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer")) || null,
           firma  : localStorage.getItem('eatdesi_firma')   || null
         }));
       }
@@ -465,16 +466,10 @@ window.belksWipeTenantData = function(newLoc){
       setTimeout(function(){ try{ window.belksBestandLesen(); }catch(e){} }, 600);
       setTimeout(function(){ try{ window.belksBestandFreigeben('Zeitablauf nach Wechsel'); }catch(e){} }, 8000);
     }catch(e){}
-    // Drucker-HARDWARE behalten, aber FIRMENDATEN der alten Tochter entfernen
-    try{
-      var pr = JSON.parse(localStorage.getItem('eatdesi_printer')||'null');
-      if(pr){
-        ['name','address','phone','firmaName','firmaZusatz','firmaStrasse','firmaPlzOrt',
-         'firmaStNr','firmaUst','firmaGericht','firmaEmail','firmaWeb','googleLink']
-          .forEach(function(x){ delete pr[x]; });
-        localStorage.setItem('eatdesi_printer', JSON.stringify(pr));
-      }
-    }catch(e){}
+    // v209: Kein Ausschneiden mehr noetig – jede Tochter hat seit v209 ihre
+    // eigenen Drucker- und Bon-Daten unter 'eatdesi_printer_<Restaurant>'.
+    // Frueher wurde hier der gemeinsame Datensatz beschnitten, was die Daten
+    // der vorherigen Tochter zerstoerte.
     // v187: Gibt es fuer die NEUE Tochter eine Sicherung? -> zurueckholen
     try{
       if(newLoc){
@@ -835,7 +830,7 @@ window.belksSicherungWaehlen = function(){
       var own = localStorage.getItem('eatdesi_data_owner');
       if(!own) return;
       localStorage.setItem('eatdesi_firmabak_'+own, JSON.stringify({
-        printer: localStorage.getItem('eatdesi_printer') || null,
+        printer: (window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer")) || null,
         firma  : localStorage.getItem('eatdesi_firma')   || null
       }));
     }catch(e){}
@@ -7911,7 +7906,7 @@ window.TSE = TSE;
 // Rueckgabe: Antworttext (String). Bei Fehler: wirft Error.
 window.callAI = async function(prompt, maxTokens) {
   var cfg = {};
-  try { cfg = JSON.parse(localStorage.getItem('eatdesi_printer') || '{}') || {}; } catch(e) {}
+  try { cfg = JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer")) || '{}') || {}; } catch(e) {}
   var provider = cfg.aiProvider || 'gemini';
   var key = cfg.geminiKey || '';
   if (!key) throw new Error('Kein Gemini API-Key. Bitte in Drucker-Einstellungen eingeben.');
@@ -7946,7 +7941,7 @@ window.callAI = async function(prompt, maxTokens) {
 // b64jpeg = reiner Base64-String (ohne "data:image/jpeg;base64," Prefix).
 window.callAIVision = async function(prompt, b64jpeg, maxTokens, mimeType) {
   var cfg = {};
-  try { cfg = JSON.parse(localStorage.getItem('eatdesi_printer') || '{}') || {}; } catch(e) {}
+  try { cfg = JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer")) || '{}') || {}; } catch(e) {}
   var key = cfg.geminiKey || '';
   if (!key) throw new Error('Kein Gemini API-Key. Bitte in Drucker-Einstellungen eingeben.');
   var model = cfg.geminiModel || 'gemini-2.5-flash-lite';
@@ -19864,7 +19859,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v208"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v211"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -20058,7 +20053,7 @@ function App() {
         var ac = new Ctx();
         // Lautstärke aus Einstellungen lesen (direkt aus LS, da printerSettings hier evtl. noch nicht initialisiert)
         var vol = 'laut';
-        try { var ps = LS.get('eatdesi_printer', {}); if (ps && ps.notifVolume) vol = ps.notifVolume; } catch(e){}
+        try { var ps = (function(){ try{ return JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer"))||'{}')||{}; }catch(e){ return {}; } })(); if (ps && ps.notifVolume) vol = ps.notifVolume; } catch(e){}
         var volMap = { leise:0.4, mittel:1.0, laut:2.0, sehr_laut:3.5 };
         var peak = volMap[vol] || 2.0;
         var master = ac.createGain();
@@ -21090,6 +21085,34 @@ function App() {
       try { window.belksAccountOverlay && window.belksAccountOverlay({ lock: true }); } catch(e) {}
     }
   }, []);
+  // ══ v211: CLOUD ZUERST – nichts anzeigen, bevor die Daten da sind ══
+  const [startBereit, setStartBereit] = useState(function(){
+    try { return !!window.__belksStartGeladen; } catch(e) { return true; }
+  });
+  useEffect(function(){
+    if (startBereit) return;
+    var fertig = function(){ setStartBereit(true); };
+    window.addEventListener('eatdesi_start_geladen', fertig);
+    var t = setTimeout(fertig, 9000);          // Notausgang: nie haengen bleiben
+    try { if (window.__belksStartGeladen) fertig(); } catch(e){}
+    return function(){ window.removeEventListener('eatdesi_start_geladen', fertig); clearTimeout(t); };
+  }, []);
+  if (!startBereit && !_fullOut) {
+    return /*#__PURE__*/React.createElement("div", {
+      style:{ position:"fixed", inset:0, background:"linear-gradient(135deg,#C84B31 0%,#6B1200 100%)",
+              display:"flex", alignItems:"center", justifyContent:"center", padding:16, zIndex:9998 }
+    },
+      /*#__PURE__*/React.createElement("div", {
+        style:{ background:"#fff", borderRadius:18, padding:28, maxWidth:340, width:"100%",
+                textAlign:"center", boxShadow:"0 10px 40px rgba(0,0,0,.3)" }
+      },
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:38, marginBottom:10 } }, "\u2601\uFE0F"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:17, fontWeight:800, color:"#C84B31", marginBottom:6 } },
+          "Daten werden geladen\u2026"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:12.5, color:"#666", lineHeight:1.55 } },
+          "Die Daten dieses Restaurants kommen aus der Cloud. Einen Moment \u2013 so ist sicher, dass nichts \u00fcberschrieben wird.")
+      ));
+  }
   if (_fullOut && !loggedInUser) {
     return /*#__PURE__*/React.createElement("div", { style:{ position:"fixed", inset:0, background:"linear-gradient(135deg, #1a1a1e 0%, #2d1f1a 100%)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:16 } },
       /*#__PURE__*/React.createElement("div", { style:{ textAlign:"center", color:"#fff" } },
@@ -22572,8 +22595,21 @@ async function belksIsMasterEmail(email){
 // v189: Mutter-Ebene freischalten (eine Stelle fuer beide Anmeldewege)
 function belksOpenMutterEbene(pw){
   try{
-    // v203: Anmeldung der Zentrale dem aktiven Geraet zuordnen
-    try{ window.belksAuthUebernehmen && window.belksAuthUebernehmen(LOCATION_ID); }catch(e){}
+    // ══ v209: Die Zentrale ist ein EIGENER Bereich, keine Tochter ══
+    // Vorher blieb das zuletzt geoeffnete Restaurant aktiv - mit
+    // belks786@gmail.com landete man deshalb direkt in der Kleinen Kneipe.
+    // Jetzt laeuft die Mutter-Ebene unter 'belks-master'.
+    var _M = 'belks-master';
+    try{ window.belksAuthUebernehmen && window.belksAuthUebernehmen(_M); }catch(e){}
+    try{
+      var _vorher = localStorage.getItem('eatdesi_location_id');
+      if(_vorher !== _M && window.belksWipeTenantData){
+        window.belksWipeTenantData(_M);      // Tochter-Daten bleiben in der Cloud
+      }
+      localStorage.setItem('eatdesi_location_id', _M);
+      localStorage.setItem('eatdesi_data_owner',  _M);
+      localStorage.setItem('eatdesi_tenant_ok_' + _M, '1');
+    }catch(e){}
     localStorage.setItem('eatdesi_belks_operator','1');
     localStorage.setItem('eatdesi_belks_home','1');
     localStorage.removeItem('eatdesi_full_logout');
@@ -22868,7 +22904,7 @@ function eposDrawerPulse(ip){
 // Ziel-Drucker = Gastbon-Bereich (Kasse), sonst Haupt-Drucker.
 function maybeOpenDrawer(payMethod, opts){
   try{
-    var cfg={}; try{ cfg=JSON.parse(localStorage.getItem('eatdesi_printer')||'null')||{}; }catch(e){}
+    var cfg={}; try{ cfg=JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer"))||'null')||{}; }catch(e){}
     var mode=cfg.drawerMode||'aus';
     var force=opts&&opts.force;
     if(!force){
@@ -22974,6 +23010,15 @@ function BelksZentraleView(){
   var [code,setCode]=R.useState('');
   var [codeTouched,setCodeTouched]=R.useState(false);
   var [street,setStreet]=R.useState('');
+  // v210: vollstaendige Stammdaten schon beim Anlegen
+  var [steuernr,setSteuernr]=R.useState('');
+  var [ustId,setUstId]=R.useState('');
+  var [amtsger,setAmtsger]=R.useState('');
+  var [tischzahl,setTischzahl]=R.useState('30');
+  var [bonFuss,setBonFuss]=R.useState('Danke & bis bald! \uD83D\uDE4F');
+  var [sumupKey,setSumupKey]=R.useState('');
+  var [aiKey,setAiKey]=R.useState('');
+  var [website,setWebsite]=R.useState('');
   var [city,setCity]=R.useState('');
   var [phone,setPhone]=R.useState('');
   var [email,setEmail]=R.useState('');
@@ -23082,6 +23127,41 @@ function BelksZentraleView(){
           body:JSON.stringify({location_id:effCode,name:name.trim(),street:street.trim(),city:city.trim(),phone:phone.trim(),plan:'free',active:true,secret:pw,email:mail||null})});
         if(r.status===409) throw new Error('Code "'+effCode+'" existiert schon \u2013 bitte anderen Code w\u00e4hlen.');
         if(!r.ok&&r.status!==201) throw new Error('HTTP '+r.status);
+
+        // ══ v210: ALLE Stammdaten sofort in die Cloud der neuen Tochter ══
+        // Damit muss die Tochter-App nichts mehr erfragen und nichts kann
+        // durch Vorgabewerte ueberschrieben werden.
+        try{
+          var _firma = {
+            name       : name.trim(),
+            address    : (street.trim()+(city.trim()?' \u00b7 '+city.trim():'')).trim(),
+            phone      : phone.trim(),
+            footer     : String(bonFuss||'').trim(),
+            firmaName  : name.trim(),
+            firmaStrasse: street.trim(),
+            firmaPlzOrt : city.trim(),
+            firmaStNr   : String(steuernr||'').trim(),
+            firmaUst    : String(ustId||'').trim(),
+            firmaGericht: String(amtsger||'').trim(),
+            firmaEmail  : mail,
+            firmaWeb    : String(website||'').trim()
+          };
+          var _sk = String(sumupKey||'').trim(); if(_sk) _firma.sumupKey = _sk;
+          var _ak = String(aiKey||'').trim();    if(_ak) _firma.geminiKey = _ak;
+          var _tz = parseInt(tischzahl,10); if(!(_tz>=1&&_tz<=200)) _tz = 30;
+
+          var _schreib = function(suffix, wert){
+            return fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
+              headers:{apikey:SUPA_KEY, Authorization:'Bearer '+SUPA_KEY,
+                       'Content-Type':'application/json',
+                       Prefer:'return=minimal,resolution=merge-duplicates'},
+              body: JSON.stringify({ key: effCode+'_'+suffix,
+                                     value: JSON.stringify(wert),
+                                     updated_at: new Date().toISOString() })});
+          };
+          await _schreib('firma', _firma);
+          await _schreib('tablecount', String(_tz));
+        }catch(e){ console.warn('Stammdaten konnten nicht gespeichert werden:', e); }
         var msg='\u2705 "'+name.trim()+'" angelegt! Code: '+effCode;
         if(mail){
           if(_su&&_su.pwUnchanged){
@@ -23093,6 +23173,8 @@ function BelksZentraleView(){
         else msg+=' \u00b7 Restaurant-Passwort: '+pw+' (kein E-Mail-Login verbunden)';
         setOk(msg);
         setName('');setCode('');setCodeTouched(false);setStreet('');setCity('');setPhone('');setEmail('');setEmail2('');setLoginPwNew('');
+        setSteuernr('');setUstId('');setAmtsger('');setTischzahl('30');setSumupKey('');setAiKey('');setWebsite('');
+        setBonFuss('Danke & bis bald! \uD83D\uDE4F');
         setShowLinks(effCode); load(); setBusy(false);
       }catch(e){ setErr(String(e.message||e)); setBusy(false); }
     })();
@@ -23180,6 +23262,38 @@ function BelksZentraleView(){
       lbl('\uD83D\uDD10 Login-Passwort w\u00e4hlen * (mind. 6 Zeichen \u2013 damit meldet sich das Restaurant an)'),
       R.createElement('input',{type:'password',value:loginPwNew,onChange:function(e){setLoginPwNew(e.target.value);},style:iS,placeholder:'Passwort f\u00fcr dieses Restaurant'}),
       R.createElement('div',{style:{fontSize:11,color:'#7b1fa2',fontWeight:700,margin:'2px 0 8px'}},'\uD83D\uDD10 Die Tochter meldet sich mit dieser E-Mail + deinem gew\u00e4hlten Passwort an (wie GloriaFood). Nach dem Anlegen: Best\u00e4tigungs-Link anklicken. \u201EPasswort vergessen\u201C schickt automatisch eine Reset-E-Mail.'),
+
+      // ══ v210: Stammdaten gleich hier eintragen – sie landen sofort in der
+      // Cloud der neuen Tochter. Die Tochter-App muss danach nichts mehr
+      // erfragen, und kein Vorgabewert kann sie ueberschreiben. ══
+      R.createElement('div',{style:{marginTop:14,marginBottom:6,paddingTop:12,borderTop:'2px solid #eee',
+        fontWeight:800,fontSize:14,color:'#1565c0'}},'\uD83C\uDFE2 Firmendaten (kommen auf jeden Bon)'),
+      R.createElement('div',{style:{fontSize:11,color:'#666',lineHeight:1.5,marginBottom:8}},
+        'Jetzt eintragen \u2013 dann sind sie fest bei dieser Tochter gespeichert und gehen nie verloren.'),
+      lbl('Steuernummer'),
+      R.createElement('input',{value:steuernr,onChange:function(e){setSteuernr(e.target.value);},style:iS,placeholder:'024 869 63959'}),
+      lbl('USt-ID (falls vorhanden)'),
+      R.createElement('input',{value:ustId,onChange:function(e){setUstId(e.target.value);},style:iS,placeholder:'DE123456789'}),
+      lbl('Amtsgericht (optional)'),
+      R.createElement('input',{value:amtsger,onChange:function(e){setAmtsger(e.target.value);},style:iS,placeholder:'Amtsgericht Kassel'}),
+      lbl('Website (optional)'),
+      R.createElement('input',{value:website,onChange:function(e){setWebsite(e.target.value);},style:iS,placeholder:'www.restaurant.de'}),
+      lbl('Bon-Fu\u00dfzeile'),
+      R.createElement('input',{value:bonFuss,onChange:function(e){setBonFuss(e.target.value);},style:iS,placeholder:'Danke & bis bald!'}),
+
+      R.createElement('div',{style:{marginTop:14,marginBottom:6,paddingTop:12,borderTop:'2px solid #eee',
+        fontWeight:800,fontSize:14,color:'#1565c0'}},'\u2699\uFE0F Betrieb'),
+      lbl('Anzahl Tische (1\u2013200)'),
+      R.createElement('input',{type:'number',min:'1',max:'200',value:tischzahl,
+        onChange:function(e){setTischzahl(e.target.value);},style:iS,placeholder:'30'}),
+      lbl('\uD83D\uDCB3 SumUp Affiliate Key (optional, sp\u00e4ter m\u00f6glich)'),
+      R.createElement('input',{value:sumupKey,onChange:function(e){setSumupKey(e.target.value);},style:iS,placeholder:'aus developer.sumup.com \u2192 Affiliate Keys'}),
+      lbl('\uD83E\uDD16 AI-Schl\u00fcssel Google Gemini (optional)'),
+      R.createElement('input',{value:aiKey,onChange:function(e){setAiKey(e.target.value);},style:iS,placeholder:'aus aistudio.google.com/apikey'}),
+      R.createElement('div',{style:{fontSize:11,color:'#666',lineHeight:1.5,margin:'8px 0 4px'}},
+        '\uD83D\uDCCB Speisekarte, Tisch-Bereiche und der Drucker werden danach in der Tochter-App eingerichtet \u2013 '+
+        'der Drucker geh\u00f6rt zum jeweiligen Ger\u00e4t und kann hier nicht vorgegeben werden.'),
+
       err&&err!=='TABLE_MISSING'?R.createElement('div',{style:{color:'#c62828',fontSize:12,fontWeight:700,marginBottom:8}},'\u26A0\uFE0F '+err):null,
       okMsg?R.createElement('div',{style:{color:'#2e7d32',fontSize:12,fontWeight:700,marginBottom:8,userSelect:'all'}},okMsg):null,
       R.createElement('button',{onClick:create,disabled:busy,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:busy?'#999':'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},busy?'Lege an\u2026':'\uD83C\uDFEA Tochter anlegen')),
@@ -25154,6 +25268,78 @@ function toMerge(local, lmeta, remote, rmeta){
 }
 window.__toMerge = toMerge;   // fuer Tests
 
+// ═══ v211: CLOUD ZUERST ═══
+// Holt beim Start ALLE Daten dieses Restaurants aus der Cloud, BEVOR die App
+// etwas anzeigt. Damit gibt es den gefaehrlichen Moment nicht mehr, in dem
+// Vorgabewerte sichtbar sind und in die Cloud zurueckgeschrieben werden.
+window.__belksStartGeladen = false;
+window.belksStartFertig = function(grund){
+  if (window.__belksStartGeladen) return;
+  window.__belksStartGeladen = true;
+  try { window.belksMarkHydrated('Start: ' + (grund||'')); } catch(e){}
+  try { window.belksBestandFreigeben('Start: ' + (grund||'')); } catch(e){}
+  try { console.log('Start abgeschlossen (' + (grund||'') + ') – App wird angezeigt'); } catch(e){}
+  try { window.dispatchEvent(new CustomEvent('eatdesi_start_geladen')); } catch(e){}
+};
+
+async function belksStartLaden(){
+  try{
+    var loc = localStorage.getItem('eatdesi_location_id') || LOCATION_ID;
+    // Noch nicht angemeldet? Dann uebernimmt der Anmeldebildschirm.
+    if (localStorage.getItem('eatdesi_tenant_ok_' + loc) !== '1') {
+      window.belksStartFertig('nicht angemeldet'); return;
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      window.belksStartFertig('offline'); return;
+    }
+    var resp = await supaFetch('/rest/v1/pos_state?select=key,value,updated_at&key=like.' +
+                               encodeURIComponent(loc + '_') + '*');
+    if (!resp || !resp.ok) { window.belksStartFertig('Cloud nicht erreichbar'); return; }
+    var rows = await resp.json();
+    var uebernommen = 0;
+    // Diese gehoeren zum GERAET, nie aus der Cloud holen
+    var GERAET = ['session','printer','guard_v','full_logout','master_h','location_id',
+                  'master_auto','data_owner','auth','tenant_info'];
+    (rows || []).forEach(function(row){
+      try{
+        var suf = String(row.key).slice(loc.length + 1);
+        if (!suf) return;
+        if (GERAET.indexOf(suf) >= 0) return;
+        if (suf.indexOf('belks_') === 0 || suf.indexOf('tenant_ok') === 0 ||
+            suf.indexOf('bootpull') === 0 || suf.indexOf('setup_hide') === 0 ||
+            suf.indexOf('auth_') === 0 || suf.indexOf('printer_') === 0 ||
+            suf.indexOf('firmabak_') === 0) return;
+        (window.__belksGelesen = window.__belksGelesen || {})[suf] = true;
+        if (row.value == null) return;
+        var fern = new Date(row.updated_at).getTime();
+        var nah  = _localStamp(suf);
+        var lsKey = 'eatdesi_' + (suf === 'tableOrders' ? 'tableorders' : suf);
+        var vorhanden = localStorage.getItem(lsKey);
+        // Cloud gewinnt, ausser es gibt eine neuere, noch nicht hochgeladene
+        // Aenderung auf diesem Geraet.
+        if (vorhanden === null || fern >= nah) {
+          if (vorhanden !== row.value) {
+            window._syncWriting = true;
+            localStorage.setItem(lsKey, row.value);
+            window._syncWriting = false;
+            uebernommen++;
+          }
+          _setLocalStamp(suf, fern);
+        }
+      }catch(e){}
+    });
+    window.belksStartFertig((rows||[]).length + ' Schluessel, ' + uebernommen + ' aktualisiert');
+  }catch(e){
+    window.belksStartFertig('Fehler beim Laden');
+  }
+}
+window.belksStartLaden = belksStartLaden;
+try {
+  setTimeout(function(){ belksStartLaden(); }, 60);
+  setTimeout(function(){ window.belksStartFertig('Zeitablauf'); }, 8000);
+  window.addEventListener('offline', function(){ window.belksStartFertig('offline'); });
+} catch(e){}
+
 // Tischbestellungen synchronisieren
 async function syncTableOrders() {
   try {
@@ -25255,6 +25441,7 @@ function _isLocalOnlyKey(k) {
   if (k.indexOf('eatdesi_setup_hide_') === 0) return true;
   if (k.indexOf('eatdesi_firmabak_')   === 0) return true;
   if (k.indexOf('eatdesi_auth_')       === 0) return true;   // v200: Sitzungen je Tochter
+  if (k.indexOf('eatdesi_printer_')    === 0) return true;   // v209: Drucker je Tochter, nie in die Cloud
   return false;
 }
 // Aus localStorage alle aktuell vorhandenen sync-faehigen eatdesi_-Keys ermitteln
@@ -25506,7 +25693,52 @@ LS.set = function(key, value) {
 // AUCH direktes localStorage.setItem abfangen (z.B. Kategorien 'eatdesi_cat_order',
 // Inventar-Transaktionen) - diese gehen NICHT ueber LS.set und wurden bisher nicht gesynct.
 var _origSetItem = localStorage.setItem.bind(localStorage);
+var _origGetItem = localStorage.getItem.bind(localStorage);
+
+// ═══ v209: DRUCKER + RESTAURANT-INFO PRO TOCHTER ═══
+// Bisher lagen Bon-Kopf (Name, Adresse, Telefon, Fusszeile) und die
+// Druckereinstellungen unter EINEM geraeteweiten Schluessel. Auf einem Handy
+// mit mehreren Restaurants zeigte darum jede Tochter die Daten der zuletzt
+// eingerichteten - die Kleine Kneipe druckte die Adresse von eatDeSi BW.
+// Jetzt bekommt jede Tochter ihren eigenen Schluessel. Der Code muss dafuer
+// nicht angefasst werden: 'eatdesi_printer' wird hier zentral umgeleitet.
+function _druckerSchluessel(){
+  try{
+    var loc = _origGetItem('eatdesi_location_id') ||
+              (window.RESTAURANT && window.RESTAURANT.LOCATION_ID) || '';
+    return loc ? ('eatdesi_printer_' + loc) : 'eatdesi_printer';
+  }catch(e){ return 'eatdesi_printer'; }
+}
+// v209: EINE Lesefunktion fuer Drucker-/Bon-Daten der aktiven Tochter.
+// (Kein Ueberschreiben von localStorage.getItem – das ist nicht in jeder
+//  Umgebung zuverlaessig. Geschrieben wird ueber den setItem-Aufsatz unten.)
+window.belksDruckerLesen = function(){
+  try{
+    var pk = _druckerSchluessel();
+    var v = _origGetItem(pk);
+    if(v !== null) return v;
+    var alt = _origGetItem('eatdesi_printer');
+    if(alt === null) return null;
+    // v209c: Uebernahme NUR der Geraete-Hardware.
+    // Aus dem alten gemeinsamen Datensatz laesst sich nicht erkennen, welcher
+    // Tochter der Bon-Kopf gehoert. Wuerde man ihn uebernehmen, staende die
+    // Adresse eines fremden Restaurants auf dem Bon - genau der gemeldete
+    // Fehler (Kleine Kneipe zeigte Brunnenallee 30, Bad Wildungen).
+    try{
+      var ob = JSON.parse(alt) || {};
+      ['name','address','phone','footer','firmaName','firmaZusatz','firmaStrasse',
+       'firmaPlzOrt','firmaStNr','firmaUst','firmaGericht','firmaEmail','firmaWeb','googleLink']
+        .forEach(function(k){ delete ob[k]; });
+      var neuStr = JSON.stringify(ob);
+      _origSetItem(pk, neuStr);
+      return neuStr;
+    }catch(e){ _origSetItem(pk, alt); return alt; }
+  }catch(e){ return null; }
+};
+
 localStorage.setItem = function(key, valueStr) {
+  // v209: Drucker/Restaurant-Info immer beim richtigen Restaurant ablegen
+  if (key === 'eatdesi_printer') { _origSetItem(_druckerSchluessel(), valueStr); return; }
   // ══ v190 (2) LEER-SCHUTZ ══
   // Solange die Cloud noch nicht gelesen wurde, darf ein leerer Start-Zustand
   // KEINE vorhandenen Daten ueberschreiben (Tische, Firmendaten, Speisekarte...).
@@ -25578,7 +25810,7 @@ console.log('Sync Engine gestartet - Geraet: ' + window._deviceId);
 // Wird von Bewirtungsbeleg & Zahlungs-Beleg genutzt (ausserhalb von BonModal).
 function printAny(htmlContent, forceFontCmd) {
   var cfg = {};
-  try { cfg = JSON.parse(localStorage.getItem('eatdesi_printer')||'{}') || {}; } catch(e) {}
+  try { cfg = JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer"))||'{}') || {}; } catch(e) {}
   var method = cfg.method || 'browser';
   var szMap={klein:0x00,normal:0x00,gross:0x01,xl:0x11};
   var fsz = (typeof forceFontCmd==='number') ? forceFontCmd : (szMap[cfg.bonFontSize||'gross']??0x01);
