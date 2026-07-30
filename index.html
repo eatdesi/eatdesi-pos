@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v216</title>
+<title>eatDeSi POS v219</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v216';",
+    "var CACHE='eatdesi-v219';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -507,6 +507,29 @@ window.belksWipeTenantData = function(newLoc){
 // gleich. Sie lagen bisher in 'eatdesi_printer' (nur Geraet, nie Cloud) -
 // deshalb waren sie nach jedem Wechsel weg und die Zentrale konnte sie
 // beim Anlegen nicht vorgeben.
+// v218: Nicht fertige Funktionen ausblenden.
+// "AI WhatsApp" ist nur eine Vorfuehrung im eigenen Fenster und NICHT mit
+// WhatsApp verbunden. Sichtbar waere sie ein falsches Versprechen an Kunden.
+// Zum Vorfuehren: Adresse mit  ?demo=1  aufrufen.
+window.BELKS_DEMO_SICHTBAR = (function(){
+  try{
+    if(new URL(location.href).searchParams.get('demo') === '1'){
+      localStorage.setItem('eatdesi_demo_an','1'); return true;
+    }
+    return localStorage.getItem('eatdesi_demo_an') === '1';
+  }catch(e){ return false; }
+})();
+// v219: Beide Funktionen bleiben sichtbar – sie gehoeren zum Produkt.
+// Statt sie zu verstecken, steht in jeder Ansicht ein klarer Hinweis,
+// was heute schon geht und was noch fehlt.
+window.BELKS_NICHT_FERTIG = [];
+window.belksKachelSichtbar = function(id){
+  try{
+    if(window.BELKS_DEMO_SICHTBAR) return true;
+    return window.BELKS_NICHT_FERTIG.indexOf(id) < 0;
+  }catch(e){ return true; }
+};
+
 window.BELKS_FIRMA_FELDER = ['name','address','phone','footer','googleLink',
   'firmaName','firmaZusatz','firmaStrasse','firmaPlzOrt','firmaStNr',
   'firmaUst','firmaGericht','firmaEmail','firmaWeb','firmaPhone',
@@ -17418,9 +17441,10 @@ var ALL_PERMISSION_VIEWS = [
   { id:"ai_kellnerin", l:"AI Kellnerin", i:"🤖" },
   { id:"ai_betriebsleiter", l:"AI Betriebsleiter", i:"📊" },
   { id:"ai_whatsapp", l:"AI WhatsApp", i:"💬" },
+  { id:"ai_telefonistin", l:"AI Telefonistin", i:"📞" },
   { id:"ai_marketing", l:"AI Marketing", i:"📢" },
   { id:"saas_dashboard", l:"SaaS", i:"🏢" }
-];
+].filter(function(k){ return !window.belksKachelSichtbar || window.belksKachelSichtbar(k.id); });
 
 function UserManagementView({
   users,
@@ -19938,7 +19962,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v216"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v219"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21112,6 +21136,8 @@ function App() {
   }, {
     id: "ai_whatsapp", l: "AI WhatsApp", i: "💬"
   }, {
+    id: "ai_telefonistin", l: "AI Telefonistin", i: "📞"
+  }, {
     id: "ai_marketing", l: "AI Marketing", i: "📢"
   }, {
     id: "kds_pro", l: "KDS Pro", i: "🍳"
@@ -22069,6 +22095,7 @@ function App() {
   ), view === "menu_import" && React.createElement(MenuImportExportView, {menuData:menuData,onUpdate:setMenuData}
   ), view === "test_center" && React.createElement(TestCenterView, {menuData:menuData,printerSettings:printerSettings,completedOrders:completedOrders}
   ), view === "ai_betriebsleiter" && React.createElement(AiBetriebsleiterView, {completedOrders:completedOrders}
+  ), view === "ai_telefonistin" && React.createElement(AiTelefonistinView, {}
   ), view === "ai_whatsapp" && React.createElement(AiWhatsAppView, {menuData:menuData}
   ), view === "ai_marketing" && React.createElement(AiMarketingView, {completedOrders:completedOrders}
   ), view === "kds_pro" && React.createElement(KdsProView, {tableOrders:tableOrders,takeaway:takeaway,setTableOrders:setTableOrders,completedOrders:completedOrders,setCompletedOrders:setCompletedOrders,setTakeaway:setTakeaway}
@@ -23166,6 +23193,12 @@ function BelksZentraleView(){
   var [aiKey,setAiKey]=R.useState('');
   var [website,setWebsite]=R.useState('');
   // v213: Speisekarte gleich beim Anlegen mitgeben (optional)
+  // v217: eigene Links der Tochter fuer die Website
+  var [googleReview,setGoogleReview]=R.useState('');
+  var [menuPdf,setMenuPdf]=R.useState('');
+  var [instagram,setInstagram]=R.useState('');
+  var [facebook,setFacebook]=R.useState('');
+  var [tiktok,setTiktok]=R.useState('');
   var [karteText,setKarteText]=R.useState('');
   var [karteInfo,setKarteInfo]=R.useState('');
   var [city,setCity]=R.useState('');
@@ -23296,6 +23329,13 @@ function BelksZentraleView(){
             firmaWeb    : String(website||'').trim()
           };
           _firma.firmaPhone = phone.trim();          // v215: Bon-Telefon
+          // v217: eigene Website-Links – nur gesetzt, wenn ausgefuellt
+          var _l = function(x){ return String(x||'').trim(); };
+          if(_l(googleReview)) _firma.googleReview = _l(googleReview);
+          if(_l(menuPdf))      _firma.menuPdf      = _l(menuPdf);
+          if(_l(instagram))    _firma.instagram    = _l(instagram);
+          if(_l(facebook))     _firma.facebook     = _l(facebook);
+          if(_l(tiktok))       _firma.tiktok       = _l(tiktok);
           var _sk = String(sumupKey||'').trim(); if(_sk) _firma.sumupKey = _sk;
           var _ak = String(aiKey||'').trim();    if(_ak) _firma.geminiKey = _ak;
           var _tz = parseInt(tischzahl,10); if(!(_tz>=1&&_tz<=200)) _tz = 30;
@@ -23343,6 +23383,7 @@ function BelksZentraleView(){
         setSteuernr('');setUstId('');setAmtsger('');setTischzahl('30');setSumupKey('');setAiKey('');setWebsite('');
         setBonFuss('Danke & bis bald! \uD83D\uDE4F');
         setKarteText('');setKarteInfo('');
+        setGoogleReview('');setMenuPdf('');setInstagram('');setFacebook('');setTiktok('');
         setShowLinks(effCode); load(); setBusy(false);
       }catch(e){ setErr(String(e.message||e)); setBusy(false); }
     })();
@@ -23458,6 +23499,23 @@ function BelksZentraleView(){
       R.createElement('input',{value:sumupKey,onChange:function(e){setSumupKey(e.target.value);},style:iS,placeholder:'aus developer.sumup.com \u2192 Affiliate Keys'}),
       lbl('\uD83E\uDD16 AI-Schl\u00fcssel Google Gemini (optional)'),
       R.createElement('input',{value:aiKey,onChange:function(e){setAiKey(e.target.value);},style:iS,placeholder:'aus aistudio.google.com/apikey'}),
+      // ══ v217: eigene Links der Tochter ══
+      R.createElement('div',{style:{marginTop:14,marginBottom:6,paddingTop:12,borderTop:'2px solid #eee',
+        fontWeight:800,fontSize:14,color:'#1565c0'}},'\uD83C\uDF10 Website-Links (optional)'),
+      R.createElement('div',{style:{fontSize:11,color:'#666',lineHeight:1.5,marginBottom:8}},
+        'Diese Schaltfl\u00e4chen erscheinen auf der Website nur, wenn ein Link hinterlegt ist. '+
+        'Ohne eigenen Link bleiben sie aus \u2013 sonst w\u00fcrden G\u00e4ste auf den Seiten eines anderen Restaurants landen.'),
+      lbl('\u2B50 Google-Bewertung'),
+      R.createElement('input',{value:googleReview,onChange:function(e){setGoogleReview(e.target.value);},style:iS,placeholder:'https://search.google.com/local/writereview?placeid=\u2026'}),
+      lbl('\uD83D\uDCC4 Speisekarte als PDF'),
+      R.createElement('input',{value:menuPdf,onChange:function(e){setMenuPdf(e.target.value);},style:iS,placeholder:'https://\u2026'}),
+      lbl('\uD83D\uDCF7 Instagram'),
+      R.createElement('input',{value:instagram,onChange:function(e){setInstagram(e.target.value);},style:iS,placeholder:'https://www.instagram.com/\u2026'}),
+      lbl('\uD83D\uDC4D Facebook'),
+      R.createElement('input',{value:facebook,onChange:function(e){setFacebook(e.target.value);},style:iS,placeholder:'https://www.facebook.com/\u2026'}),
+      lbl('\uD83C\uDFB5 TikTok'),
+      R.createElement('input',{value:tiktok,onChange:function(e){setTiktok(e.target.value);},style:iS,placeholder:'https://www.tiktok.com/@\u2026'}),
+
       // ══ v213: Speisekarte optional gleich mitgeben ══
       R.createElement('div',{style:{marginTop:14,marginBottom:6,paddingTop:12,borderTop:'2px solid #eee',
         fontWeight:800,fontSize:14,color:'#1565c0'}},'\uD83D\uDCCB Speisekarte (optional)'),
@@ -24179,6 +24237,11 @@ function AiTelefonistinView() {
 
   return React.createElement('div', {style:{padding:14,overflowY:'auto',height:'calc(100vh - 90px)'}},
     React.createElement('div', {style:{fontWeight:800,fontSize:17,color:'#C84B31',marginBottom:4}}, '📞 AI Telefonistin'),
+    React.createElement(BelksVorschauHinweis, {
+      titel: 'Vorschau \u2013 noch keine echte Telefonleitung',
+      jetzt: 'Du kannst die Antworten der AI hier ausprobieren und den Text anpassen.',
+      fehlt: 'Eine Telefonnummer mit Anruf-Weiterleitung und ein kleiner Server, der den Anruf annimmt. Eine App allein kann keine Anrufe entgegennehmen.'
+    }),
     React.createElement('div', {style:{fontSize:12,color:'#888',marginBottom:14}}, '24h erreichbar - Reservierungen, Bestellungen, Infos'),
     React.createElement('div', {style:{background:active?'#e8f5e9':'#f5f5f5',borderRadius:14,padding:20,textAlign:'center',marginBottom:14,border:'2px solid '+(active?'#4caf50':'#ddd')}},
       React.createElement('div', {style:{fontSize:48,marginBottom:8}}, active?'📞':'📵'),
@@ -24192,6 +24255,16 @@ function AiTelefonistinView() {
     log.length > 0 && React.createElement('div', {style:{background:'#1a1a2e',borderRadius:10,padding:10,maxHeight:200,overflowY:'auto'}},
       log.map((l,i) => React.createElement('div', {key:i, style:{fontFamily:'monospace',fontSize:11,color:l.type==='ai'?'#66bb6a':l.type==='user'?'#60a5fa':l.type==='speak'?'#ffd166':l.type==='err'?'#ef5350':'#888',marginBottom:3}}, '['+l.t+'] '+l.msg))
     )
+  );
+}
+
+// v219: Hinweisfeld – erklaert, was heute schon geht und was noch fehlt.
+function BelksVorschauHinweis({ titel, jetzt, fehlt }) {
+  return React.createElement('div', {style:{background:'#fff8e1', border:'2px solid #ffb300',
+      borderRadius:12, padding:'12px 14px', margin:'0 0 12px', fontSize:12.5, lineHeight:1.6, color:'#5d4037'}},
+    React.createElement('div', {style:{fontWeight:800, marginBottom:4, color:'#e65100'}}, '\u26A0\uFE0F ' + titel),
+    React.createElement('div', null, React.createElement('b', null, 'Heute schon m\u00f6glich: '), jetzt),
+    React.createElement('div', {style:{marginTop:4}}, React.createElement('b', null, 'Noch n\u00f6tig: '), fehlt)
   );
 }
 
@@ -24222,7 +24295,7 @@ function AiWhatsAppView({ menuData }) {
       React.createElement('div', {style:{width:36,height:36,borderRadius:'50%',background:'#25d366',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}, '🤖'),
       React.createElement('div', null,
         React.createElement('div', {style:{fontWeight:700,color:'#fff',fontSize:14}}, firma.name+' Bot'),
-        React.createElement('div', {style:{fontSize:11,color:'#b2dfdb'}}, 'Online • AI WhatsApp')
+        React.createElement('div', {style:{fontSize:11,color:'#b2dfdb'}}, 'Vorschau • AI WhatsApp')
       )
     ),
     React.createElement('div', {style:{flex:1,overflowY:'auto',padding:12,background:'#e5ddd5',display:'flex',flexDirection:'column',gap:8}},
