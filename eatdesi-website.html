@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-27d: Tochter-Kategorien im Webshop sichtbar (auch außerhalb CAT_GROUPS) · Über-uns nie BW-Text auf Töchtern · Update 2026-07-27c: Speichern-Feedback sichtbar (Toast über Admin, Button-Bestätigung) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
+<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-31a: Tochter-Kategorien im Webshop sichtbar (auch außerhalb CAT_GROUPS) · Über-uns nie BW-Text auf Töchtern · Update 2026-07-27c: Speichern-Feedback sichtbar (Toast über Admin, Button-Bestätigung) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -535,7 +535,7 @@ footer .fl:hover{color:var(--gold)}
   <div class="lt-wrap">
     <div class="lt-brand">
       <div class="lt-logo">eat<b>De</b><span>Si</span></div>
-      <div class="lt-tag">Indian Fusion Kitchen &amp; Grill · Bad Wildungen</div>
+      <div class="lt-tag" data-co-tag>Indian Fusion Kitchen &amp; Grill · Bad Wildungen</div>
     </div>
     <a class="lt-btn lt-primary" id="lt-menu"><span class="lt-ic">📋</span><span>Speisekarte ansehen &amp; bestellen</span><span class="lt-arr">›</span></a>
     <div class="lt-grid">
@@ -555,7 +555,7 @@ footer .fl:hover{color:var(--gold)}
 <section class="hero" id="top">
   <div class="wrap hero-in">
     <div>
-      <span class="eyebrow">Bad Wildungen · Indian Fusion Kitchen & Grill</span>
+      <span class="eyebrow" data-co-tag>Bad Wildungen · Indian Fusion Kitchen & Grill</span>
       <h1>Trendiges Essen.<br><em>Frisch. Indisch. Anders.</em></h1>
       <p class="lede" data-lede-main>Currys, Smashed Burger, Tacos, Pizza & mehr – frisch von Familie Sidhu. Jetzt online bestellen:</p>
       <div class="shopbar" style="margin:6px 0 14px">
@@ -573,12 +573,12 @@ footer .fl:hover{color:var(--gold)}
       <div class="hero-badges">
         <div>⏱️ <b>25–35 Min</b> Zubereitung</div>
         <div>🛵 Lieferung <b>ab 9,90 €</b></div>
-        <div>📍 <b>Brunnenallee 30</b></div>
+        <div data-co-street>📍 <b>Brunnenallee 30</b></div>
       </div>
     </div>
     <div class="hero-card">
       <span class="ribbon">Jetzt geöffnet?</span>
-      <h3>eatDeSi heute</h3>
+      <h3 data-co-heute>eatDeSi heute</h3>
       <div class="statusline" id="openStatus"><span class="dot"></span><span>Lädt…</span></div>
       <div class="hc-row"><span class="k">Öffnungszeiten</span><span class="v">11:30 – 21:30</span></div>
       <div class="hc-row"><span class="k">Ruhetag</span><span class="v">Dienstag</span></div>
@@ -594,10 +594,10 @@ footer .fl:hover{color:var(--gold)}
   <div class="wrap about-grid">
     <div>
       <span class="eyebrow">Über uns</span>
-      <h2 class="head">eatDeSi Fusion Kitchen & Grill</h2>
+      <h2 class="head" data-co-headline>eatDeSi Fusion Kitchen & Grill</h2>
       <p data-co-about>Bei eatDeSi treffen indische Tradition und moderne Küche aufeinander. Familie Sidhu aus Indien kocht mit Liebe und Leidenschaft – frisch zubereitet, mit hochwertigen Zutaten.</p>
       <p>Unser Angebot reicht von aromatischen Currys über Smashed Burger, Tacos, Pizza und Paccheri Cheese bis zu Smashed Potato Bombs und frischen Salaten – für jeden Geschmack etwas dabei.</p>
-      <p>Besuchen Sie uns im Obergeschoss in der Brunnenallee 30 – mit wunderschönem Blick über die Brunnenallee und die malerische Altstadt von Bad Wildungen.</p>
+      <p data-bw-text>Besuchen Sie uns im Obergeschoss in der Brunnenallee 30 – mit wunderschönem Blick über die Brunnenallee und die malerische Altstadt von Bad Wildungen.</p>
       <p class="sig">— Familie Sidhu</p>
       <div class="about-pills">
         <span class="pill">Indisch</span><span class="pill">Smashed Burger</span><span class="pill">Tacos</span>
@@ -695,7 +695,7 @@ footer .fl:hover{color:var(--gold)}
           <button type="button" data-mode="lieferung" onclick="setShopMode('lieferung')">🛵 Lieferung</button>
           <button type="button" data-mode="dinein" onclick="setShopMode('dinein')">🍽️ Vor Ort</button>
         </div>
-        <div class="shop-mode-hint" id="shopModeHint">🥡 Kostenlos abholen in der Brunnenallee 30.</div>
+        <div class="shop-mode-hint" id="shopModeHint">🥡 Kostenlos abholen.</div>
       </div>
       <nav class="catnav" id="catNav"></nav>
       <div class="menu-col" id="menuCol"></div>
@@ -857,7 +857,7 @@ function reqText(p){
   if(p.date) lines.push('Wunschtermin: '+p.date);
   if(p.guests) lines.push('Personen: '+p.guests);
   if(p.message) lines.push('Nachricht: '+p.message);
-  lines.push('— eatDeSi Webshop');
+  lines.push('\u2014 ' + ((typeof COMPANY!=='undefined' && COMPANY.name) ? COMPANY.name : 'Belks') + ' Webshop');
   return lines.join('\n');
 }
 /* Schickt eine Benachrichtigungs-Email an den Inhaber (nutzt bestehende EmailJS-Vorlage) */
@@ -1314,7 +1314,7 @@ function goCheckout(){
       <div class="hint" id="plzHint" style="margin:-4px 0 8px">${activeOrt?('Liefergebiet: '+(ZONES[activeZone]?ZONES[activeZone].name:'')+' · PLZ '+(ZONES[activeZone]?ZONES[activeZone].plz:'')):'Erst Ort wählen – die passende PLZ wird gesetzt.'}</div>`
       :isDine?`<div class="field"><label>Anzahl Personen *</label><input id="f_guests" inputmode="numeric" placeholder="z.B. 4"><div class="err">Bitte Personenzahl angeben</div></div>
       <div class="deliv-note">${TABLE_NO?('🍽️ Du sitzt an <b>Tisch '+TABLE_NO+'</b> – wir bringen dein Essen direkt an deinen Tisch.'):'🍽️ Wir reservieren deinen Tisch und bereiten dein Essen vor. Die genaue Zeit bestätigen wir dir.'}</div>`
-      :`<div class="deliv-note">🥡 Abholung: <b>eatDeSi, Brunnenallee 30, Bad Wildungen</b>.</div>`}
+      :`<div class="deliv-note">\uD83E\uDD61 Abholung: <b>${(COMPANY.name||'')}${COMPANY.street?(', '+COMPANY.street):''}${COMPANY.city?(', '+COMPANY.city):''}</b>.</div>`}
 
     <div class="field"><label>Wann? *</label>
       <div class="time-pills" id="timePills">
@@ -1700,7 +1700,8 @@ function applyShopMode(m){
   var hint=document.getElementById('shopModeHint');
   if(hint) hint.textContent = m==='lieferung'
     ? ('🛵 Lieferung nach '+(activeOrt||'')+' · Mindestbestellwert '+eur((ZONES[activeZone]||{min:0}).min)+' · Gebühr '+eur((ZONES[activeZone]||{fee:0}).fee))
-    : (m==='dinein' ? '🍽️ Vor Ort essen – Tisch reservieren & vorbestellen.' : '🥡 Kostenlos abholen in der Brunnenallee 30.');
+    : (m==='dinein' ? '🍽️ Vor Ort essen – Tisch reservieren & vorbestellen.'
+       : '🥡 Kostenlos abholen' + (COMPANY.street ? (' in der ' + COMPANY.street) : '') + '.');
   // auch Hero-Pills synchron halten (falls vorhanden)
   document.querySelectorAll('#modePills button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
 }
@@ -2231,8 +2232,80 @@ async function loadTenantBranding(){
   }catch(e){}
 }
 window.GOOGLE_LINK = (LOCATION_ID==='eatdesi-bw') ? 'https://beacons.ai/eatdesi.bw' : '';
+// ═══ WHITE LABEL: Firmendaten der Tochter sind der Ursprung ═══
+// Frueher standen hier fest die Daten von eatDeSi Bad Wildungen. Jede andere
+// Tochter zeigte damit fremde Adresse und Telefonnummer – und Anfragen
+// gingen an die falsche E-Mail. Jetzt kommt alles aus '<code>_firma',
+// also genau aus dem, was die Zentrale beim Anlegen eingetragen hat.
+async function ladeFirmendaten(){
+  try{
+    const r = await fetch(SUPA_URL + '/rest/v1/pos_state?key=eq.' +
+      encodeURIComponent(LOCATION_ID + '_firma') + '&select=value',
+      {headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
+    if(!r.ok) return;
+    const j = await r.json();
+    if(!j || !j[0] || !j[0].value) return;
+    let f = j[0].value;
+    if(typeof f === 'string'){ try{ f = JSON.parse(f); }catch(e){ return; } }
+    if(!f || typeof f !== 'object') return;
+
+    const nimm = (...w) => { for(const x of w){ if(x !== undefined && x !== null && String(x).trim() !== '') return String(x).trim(); } return ''; };
+
+    const name = nimm(f.firmaName, f.name);
+    if(name){ COMPANY.name = name; COMPANY.legalName = COMPANY.legalName || name; }
+
+    const strasse = nimm(f.firmaStrasse, f.street);
+    if(strasse) COMPANY.street = strasse;
+
+    // "34587 Felsberg" in PLZ und Ort trennen
+    const plzOrt = nimm(f.firmaPlzOrt, f.city);
+    if(plzOrt){
+      const m = plzOrt.match(/^\s*(\d{4,5})\s+(.+)$/);
+      if(m){ COMPANY.zip = m[1]; COMPANY.city = m[2].trim(); }
+      else { COMPANY.city = plzOrt; COMPANY.zip = ''; }
+    }
+
+    const tel = nimm(f.firmaPhone, f.phone);
+    if(tel){
+      COMPANY.phone = tel;
+      // WhatsApp-Nummer: nur Ziffern, fuehrende 0 durch 49 ersetzen
+      let w = tel.replace(/\D/g,'');
+      if(w.startsWith('00')) w = w.slice(2);
+      else if(w.startsWith('0')) w = '49' + w.slice(1);
+      COMPANY.whatsapp = w;
+      NOTIFY.whatsapp = w;
+    }
+
+    const mail = nimm(f.firmaEmail, f.email);
+    if(mail){ COMPANY.email = mail; NOTIFY.email = mail; }
+
+    const web = nimm(f.firmaWeb); if(web) COMPANY.website = web;
+    const ust = nimm(f.firmaUst, f.taxId); if(ust) COMPANY.ustId = ust;
+    const stnr = nimm(f.firmaStNr, f.stNr); if(stnr) COMPANY.stNr = stnr;
+    const ger = nimm(f.firmaGericht); if(ger) COMPANY.register = ger;
+    if(f.googleLink) window.GOOGLE_LINK = f.googleLink;
+
+    // Karten-Link zur eigenen Adresse
+    if(COMPANY.street && COMPANY.city){
+      COMPANY.maps = 'https://www.google.com/maps/search/?api=1&query=' +
+        encodeURIComponent(COMPANY.street + ' ' + (COMPANY.zip||'') + ' ' + COMPANY.city);
+    }
+
+    // Texte, die den Namen von eatDeSi enthielten, neutral setzen
+    if(LOCATION_ID !== 'eatdesi-bw'){
+      COMPANY.tagline = COMPANY.tagline && COMPANY.tagline.indexOf('Fusion') < 0 ? COMPANY.tagline : '';
+      if(!f.about) COMPANY.about = '';
+      COMPANY.social = [];
+      COMPANY.menu_pdf = '';
+      COMPANY.google_review = '';
+    }
+    try{ document.title = COMPANY.name + (COMPANY.city ? (' \u00b7 ' + COMPANY.city) : ''); }catch(e){}
+  }catch(e){ console.warn('Firmendaten:', e); }
+}
+
 async function loadConfig(){
   try{ await loadTenantBranding(); }catch(e){}
+  try{ await ladeFirmendaten(); }catch(e){}
   try{
     const g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+CONFIG_KEY+'&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
     if(g.ok){const j=await g.json(); if(j&&j[0]&&j[0].value){const c=JSON.parse(j[0].value);
@@ -2286,6 +2359,21 @@ function socialIcon(icon){
 }
 function applyCompany(){
   document.querySelectorAll('[data-co-name]').forEach(el=>{el.textContent=COMPANY.name;});
+  // White Label: alle Stellen mit festen eatDeSi-Texten fuellen
+  document.querySelectorAll('[data-co-tag]').forEach(el=>{
+    el.textContent = [COMPANY.tagline, COMPANY.city].filter(Boolean).join(' \u00b7 ') || COMPANY.name;
+  });
+  document.querySelectorAll('[data-co-headline]').forEach(el=>{
+    el.textContent = COMPANY.name + (COMPANY.tagline ? (' ' + COMPANY.tagline) : '');
+  });
+  document.querySelectorAll('[data-co-heute]').forEach(el=>{ el.textContent = COMPANY.name + ' heute'; });
+  document.querySelectorAll('[data-co-street]').forEach(el=>{
+    el.innerHTML = '\uD83D\uDCCD <b>' + (COMPANY.street||'') + '</b>';
+  });
+  // Text, der nur zu eatDeSi Bad Wildungen passt, bei anderen Toechtern ausblenden
+  if(LOCATION_ID !== 'eatdesi-bw'){
+    document.querySelectorAll('[data-bw-text],[data-bw-only]').forEach(el=>{ el.style.display='none'; });
+  }
   // v2026-07-27a: Landing-White-Label — jede Tochter zeigt IHRE Marke (BW bleibt pixelgleich)
   if(LOCATION_ID!=='eatdesi-bw'){
     if(/Sidhu/.test(String(COMPANY.about||''))) COMPANY.about='Willkommen bei '+(COMPANY.name||'uns')+'! Frisch zubereitet mit Liebe – jetzt online bestellen, abholen oder liefern lassen.';
