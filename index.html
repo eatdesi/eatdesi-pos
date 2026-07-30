@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v213</title>
+<title>eatDeSi POS v215</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v213';",
+    "var CACHE='eatdesi-v215';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -502,6 +502,82 @@ window.belksWipeTenantData = function(newLoc){
   }catch(e){}
 })();
 
+// ═══ v214: FIRMENDATEN GEHOEREN IN DIE CLOUD ═══
+// Diese Felder stehen auf dem Bon und sind fuer ein Restaurant ueberall
+// gleich. Sie lagen bisher in 'eatdesi_printer' (nur Geraet, nie Cloud) -
+// deshalb waren sie nach jedem Wechsel weg und die Zentrale konnte sie
+// beim Anlegen nicht vorgeben.
+window.BELKS_FIRMA_FELDER = ['name','address','phone','footer','googleLink',
+  'firmaName','firmaZusatz','firmaStrasse','firmaPlzOrt','firmaStNr',
+  'firmaUst','firmaGericht','firmaEmail','firmaWeb','firmaPhone',
+  'stNr','street','city','email','taxId','slogan','oeffnung',
+  'sumupKey','geminiKey'];
+
+// v215: Fehlende Entsprechungen ergaenzen, damit JEDE Maske dieselben Werte
+// sieht - egal welche Schreibweise sie benutzt.
+window.belksFirmaVollstaendig = function(f){
+  f = f || {};
+  var paare = [['name','firmaName'],['street','firmaStrasse'],['city','firmaPlzOrt'],
+               ['stNr','firmaStNr'],['taxId','firmaUst'],['email','firmaEmail'],
+               ['phone','firmaPhone']];
+  paare.forEach(function(p){
+    if((f[p[0]] === undefined || f[p[0]] === '') && f[p[1]]) f[p[0]] = f[p[1]];
+    if((f[p[1]] === undefined || f[p[1]] === '') && f[p[0]]) f[p[1]] = f[p[0]];
+  });
+  // Anschrift fuer den Bon zusammensetzen, falls sie fehlt
+  if(!f.address && (f.firmaStrasse || f.firmaPlzOrt)){
+    f.address = [f.firmaStrasse, f.firmaPlzOrt].filter(Boolean).join(' \u00b7 ');
+  }
+  return f;
+};
+
+// Firmendaten lesen (Cloud-Schluessel), mit Rueckfall auf alte Geraetedaten
+window.belksFirmaLesen = function(){
+  try{
+    var f = {};
+    try{ f = JSON.parse(localStorage.getItem('eatdesi_firma')||'{}') || {}; }catch(e){}
+    // Einmaliger Umzug: alte Werte aus den Druckereinstellungen uebernehmen,
+    // aber nur, wenn in der Cloud-Ablage noch nichts steht.
+    var p = {};
+    try{ p = JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen()
+                        : localStorage.getItem('eatdesi_printer'))||'{}') || {}; }catch(e){}
+    var geaendert = false;
+    window.BELKS_FIRMA_FELDER.forEach(function(k){
+      if((f[k] === undefined || f[k] === '') && p[k] !== undefined && p[k] !== ''){
+        f[k] = p[k]; geaendert = true;
+      }
+    });
+    f = window.belksFirmaVollstaendig(f);
+    if(geaendert){
+      try{ localStorage.setItem('eatdesi_firma', JSON.stringify(f)); }catch(e){}
+      try{ console.log('v214: Firmendaten in die Cloud-Ablage umgezogen'); }catch(e){}
+    }
+    return f;
+  }catch(e){ return {}; }
+};
+
+// Firmendaten speichern - immer ZUSAMMENFUEHREN, nie ersetzen.
+// (Es gibt zwei Eingabemasken mit unterschiedlichen Feldnamen; frueher hat
+//  jede beim Speichern die Felder der anderen geloescht.)
+window.belksFirmaSpeichern = function(neu){
+  try{
+    var alt = {};
+    try{ alt = JSON.parse(localStorage.getItem('eatdesi_firma')||'{}') || {}; }catch(e){}
+    var z = Object.assign({}, alt, neu || {});
+    // Beide Schreibweisen gleich halten, damit beide Masken dasselbe zeigen
+    var paare = [['name','firmaName'],['street','firmaStrasse'],['city','firmaPlzOrt'],
+                 ['stNr','firmaStNr'],['taxId','firmaUst'],['email','firmaEmail']];
+    paare.forEach(function(pr){
+      var a = pr[0], b = pr[1];
+      if(neu && neu[a] !== undefined && neu[a] !== '') z[b] = neu[a];
+      else if(neu && neu[b] !== undefined && neu[b] !== '') z[a] = neu[b];
+    });
+    z = window.belksFirmaVollstaendig(z);
+    localStorage.setItem('eatdesi_firma', JSON.stringify(z));
+    return z;
+  }catch(e){ return neu || {}; }
+};
+
 // ═══ v202: VORGABE-BENUTZER NUR BEI eatDeSi BW ═══
 // "Abdullah" (PIN 0000) und "Küche" (PIN 1111) sind Vorgabe-Benutzer von
 // eatDeSi BW. Durch die Stoerungen vom 27.07. sind sie in die Cloud der
@@ -726,7 +802,8 @@ window.belksSicherungEinfuegen = function(){
 window.belksSicherungWaehlen = function(){
   try {
     var inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = '.json,application/json';
+    // v214: ohne Typ-Filter – die Android-App zeigte sonst keine Dateien an
+    inp.type = 'file'; inp.accept = '*/*';
     inp.onchange = function(){
       var f = inp.files && inp.files[0];
       if (!f) return;
@@ -19859,7 +19936,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v213"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v215"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -20231,7 +20308,7 @@ function App() {
   }, []);
   const [loyaltySettings, setLoyaltySettings] = useState(() => LS.get("eatdesi_loyalty_settings", { pointsPerEuro:3, redeemRate:100, minRedeem:100, active:true }));
   const [happyHours, setHappyHours] = useState(() => LS.get("eatdesi_happyhours", []));
-  const [printerSettings, setPrinterSettings] = useState(() => { const saved = LS.get("eatdesi_printer", {}); const _isBW = (LOCATION_ID === "eatdesi-bw"); const _ti = window.TENANT_INFO || {}; const _tn = (typeof tenantDisplayName === "function") ? tenantDisplayName() : "eatDeSi"; const merged = Object.assign({ name: _isBW ? "eatDeSi" : _tn, address: _isBW ? "Brunnenallee 30 · 34537 Bad Wildungen" : ([_ti.street, _ti.city].filter(Boolean).join(" · ")), phone: _isBW ? "05621 9449087" : (_ti.phone || ""), footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: _isBW ? "Belks Direktvertrieb GmbH" : (_ti.name || _tn), firmaZusatz: _isBW ? "eatDeSi – Fusion Kitchen & Grill" : "", firmaStrasse: _isBW ? "Brunnenallee 30" : (_ti.street || ""), firmaPlzOrt: _isBW ? "34537 Bad Wildungen" : (_ti.city || ""), firmaStNr: _isBW ? "26/229/25450" : "", firmaUst: _isBW ? "DE361161517" : "", firmaGericht: _isBW ? "Amtsgericht Kassel" : "", firmaEmail: _isBW ? "eatdesi.bw@gmail.com" : "", firmaWeb: _isBW ? "www.eatdesi-bw.de" : "", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal", notifVolume: "laut", emailOn: true, emailServiceId: "service_b27x5h9", emailTemplateId: "template_6d8or1d", emailPublicKey: "eYBKtltVeOaq9pa0B", waOn: true, waAuto: true }, saved); if (!merged.emailServiceId) merged.emailServiceId = "service_b27x5h9"; if (!merged.emailTemplateId) merged.emailTemplateId = "template_6d8or1d"; if (!merged.emailPublicKey) merged.emailPublicKey = "eYBKtltVeOaq9pa0B"; if (!merged.width || merged.width < 384) merged.width = 384; return merged; });
+  const [printerSettings, setPrinterSettings] = useState(() => { const saved = Object.assign({}, LS.get("eatdesi_printer", {}), (window.belksFirmaLesen ? window.belksFirmaLesen() : {})); const _isBW = (LOCATION_ID === "eatdesi-bw"); const _ti = window.TENANT_INFO || {}; const _tn = (typeof tenantDisplayName === "function") ? tenantDisplayName() : "eatDeSi"; const merged = Object.assign({ name: _isBW ? "eatDeSi" : _tn, address: _isBW ? "Brunnenallee 30 · 34537 Bad Wildungen" : ([_ti.street, _ti.city].filter(Boolean).join(" · ")), phone: _isBW ? "05621 9449087" : (_ti.phone || ""), footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: _isBW ? "Belks Direktvertrieb GmbH" : (_ti.name || _tn), firmaZusatz: _isBW ? "eatDeSi – Fusion Kitchen & Grill" : "", firmaStrasse: _isBW ? "Brunnenallee 30" : (_ti.street || ""), firmaPlzOrt: _isBW ? "34537 Bad Wildungen" : (_ti.city || ""), firmaStNr: _isBW ? "26/229/25450" : "", firmaUst: _isBW ? "DE361161517" : "", firmaGericht: _isBW ? "Amtsgericht Kassel" : "", firmaEmail: _isBW ? "eatdesi.bw@gmail.com" : "", firmaWeb: _isBW ? "www.eatdesi-bw.de" : "", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal", notifVolume: "laut", emailOn: true, emailServiceId: "service_b27x5h9", emailTemplateId: "template_6d8or1d", emailPublicKey: "eYBKtltVeOaq9pa0B", waOn: true, waAuto: true }, saved); if (!merged.emailServiceId) merged.emailServiceId = "service_b27x5h9"; if (!merged.emailTemplateId) merged.emailTemplateId = "template_6d8or1d"; if (!merged.emailPublicKey) merged.emailPublicKey = "eYBKtltVeOaq9pa0B"; if (!merged.width || merged.width < 384) merged.width = 384; return merged; });
   // ANFRAGE-Pull: Setter global verfügbar machen + alle 8s aus Cloud holen
   React.useEffect(() => {
     window._setWebRequests = setWebRequests;
@@ -20535,8 +20612,60 @@ function App() {
     if (!window._menuHydrated) return; // FIX v159: Anzeige-Fallback nie persistieren
     LS.set("eatdesi_menu", menuData);
   }, [menuData]);
+  // ══ v215: EIN URSPRUNG – Firmendaten fliessen von selbst ueberall hin ══
+  // 51 Stellen lesen Firmendaten ueber 'printerSettings'. Statt alle 51 zu
+  // aendern, wird 'printerSettings' hier laufend aus 'eatdesi_firma'
+  // nachgefuellt. Damit kann keine Maske mehr die falsche Schublade oeffnen.
   useEffect(() => {
-    LS.set("eatdesi_printer", printerSettings);
+    var uebernehmen = function(){
+      try{
+        var f = window.belksFirmaLesen ? window.belksFirmaLesen() : null;
+        if(!f) return;
+        setPrinterSettings(function(alt){
+          var neu = null;
+          window.BELKS_FIRMA_FELDER.forEach(function(k){
+            var w = f[k];
+            if(w === undefined || w === '') return;
+            if(alt && alt[k] === w) return;
+            if(!neu) neu = Object.assign({}, alt || {});
+            neu[k] = w;
+          });
+          return neu || alt;      // nur bei echter Aenderung neu setzen
+        });
+      }catch(e){}
+    };
+    uebernehmen();
+    var beiSync = function(ev){
+      try{
+        var k = ev && ev.detail && ev.detail.key;
+        if(!k || k === 'eatdesi_firma') uebernehmen();
+      }catch(e){ uebernehmen(); }
+    };
+    window.addEventListener('eatdesi_state_synced', beiSync);
+    window.addEventListener('eatdesi_start_geladen', uebernehmen);
+    window.addEventListener('focus', uebernehmen);
+    var t = setInterval(uebernehmen, 15000);
+    return function(){
+      window.removeEventListener('eatdesi_state_synced', beiSync);
+      window.removeEventListener('eatdesi_start_geladen', uebernehmen);
+      window.removeEventListener('focus', uebernehmen);
+      clearInterval(t);
+    };
+  }, []);
+
+  useEffect(() => {
+    // v214: Aufteilen – Firmendaten in die Cloud-Ablage, Hardware ans Geraet.
+    // Vorher landete BEIDES in 'eatdesi_printer' und war damit nach jedem
+    // Geraetewechsel verloren und fuer die Zentrale unerreichbar.
+    try{
+      var f = {}, h = {};
+      Object.keys(printerSettings || {}).forEach(function(k){
+        if(window.BELKS_FIRMA_FELDER.indexOf(k) >= 0) f[k] = printerSettings[k];
+        else h[k] = printerSettings[k];
+      });
+      if(Object.keys(f).length) window.belksFirmaSpeichern(f);
+      LS.set("eatdesi_printer", h);
+    }catch(e){ LS.set("eatdesi_printer", printerSettings); }
   }, [printerSettings]);
   const openTable = id => {
     setActiveTable(id);
@@ -22354,7 +22483,12 @@ function FirmendatenView() {
           taxId:'DE361161517', stNr:'26/229/25450' });
   });
   var iS = {width:'100%',padding:'8px 10px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8};
-  var save = function() { LS.set('eatdesi_firma', data); alert('Gespeichert!'); };
+  var save = function() {
+    // v214: ZUSAMMENFUEHREN. Frueher ersetzte diese Maske den ganzen Datensatz
+    // und loeschte damit alle Felder der Drucker-Maske (Steuernummer usw.).
+    try{ window.belksFirmaSpeichern(data); }catch(e){ LS.set('eatdesi_firma', data); }
+    alert('Gespeichert!');
+  };
 
   return R.createElement('div',{style:{padding:16,overflowY:'auto',height:'calc(100vh - 90px)'}},
     R.createElement('div',{style:{fontWeight:800,fontSize:17,color:'#C84B31',marginBottom:12}},'Firmendaten'),
@@ -23159,6 +23293,7 @@ function BelksZentraleView(){
             firmaEmail  : mail,
             firmaWeb    : String(website||'').trim()
           };
+          _firma.firmaPhone = phone.trim();          // v215: Bon-Telefon
           var _sk = String(sumupKey||'').trim(); if(_sk) _firma.sumupKey = _sk;
           var _ak = String(aiKey||'').trim();    if(_ak) _firma.geminiKey = _ak;
           var _tz = parseInt(tischzahl,10); if(!(_tz>=1&&_tz<=200)) _tz = 30;
