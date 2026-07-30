@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v206</title>
+<title>eatDeSi POS v208</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v206';",
+    "var CACHE='eatdesi-v208';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -595,15 +595,76 @@ window.belksSicherungHerunterladen = function(){
     if (!anzahl) { alert('Es gibt noch nichts zu sichern.'); return; }
     var name = 'belks-einstellungen_' + paket.restaurant + '_' +
                new Date().toISOString().slice(0,10) + '.json';
-    var blob = new Blob([JSON.stringify(paket, null, 2)], {type:'application/json'});
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    document.body.appendChild(a); a.click();
-    setTimeout(function(){ try{ document.body.removeChild(a); URL.revokeObjectURL(a.href); }catch(e){} }, 1500);
-    alert('\u2705 Sicherung erstellt (' + anzahl + ' Bereiche)\n\nDatei: ' + name +
-          '\n\nBitte in WhatsApp an dich selbst schicken oder in die Cloud legen.');
+    var text = JSON.stringify(paket);
+    window.belksSicherungFenster(text, name, anzahl, paket.restaurant);
   } catch(e) { alert('Sicherung fehlgeschlagen: ' + e); }
+};
+
+// v208: Eigenes Fenster – funktioniert in der APK UND im Browser.
+// Der Datei-Download allein reichte nicht: die Android-App hat keinen
+// Download-Manager, deshalb passierte beim Knopf gar nichts.
+window.belksSicherungFenster = function(text, name, anzahl, restaurant){
+  try{
+    var alt = document.getElementById('belksSichBox');
+    if(alt) alt.parentNode.removeChild(alt);
+    var ov = document.createElement('div');
+    ov.id = 'belksSichBox';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000000;'+
+                       'display:flex;align-items:center;justify-content:center;padding:14px';
+    var box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:16px;padding:18px;max-width:460px;width:100%;'+
+                        'max-height:88vh;overflow:auto;font-family:inherit;box-shadow:0 12px 44px rgba(0,0,0,.35)';
+    box.innerHTML =
+      '<div style="font-weight:800;font-size:16px;color:#1565c0;margin-bottom:4px">\uD83D\uDEE1\uFE0F Sicherung erstellt</div>'+
+      '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:10px">'+
+        restaurant + ' \u00b7 ' + anzahl + ' Bereiche gesichert.<br>'+
+        '<b>Kopieren</b> dr\u00fccken und den Text in WhatsApp an dich selbst schicken. '+
+        'Zum Zur\u00fcckholen sp\u00e4ter einfach wieder einf\u00fcgen.</div>'+
+      '<textarea id="belksSichText" readonly style="width:100%;height:130px;font-size:10px;'+
+        'font-family:monospace;border:1.5px solid #ddd;border-radius:10px;padding:8px;box-sizing:border-box"></textarea>'+
+      '<div style="display:flex;gap:8px;margin-top:10px">'+
+        '<button id="belksSichCopy" style="flex:2;padding:13px;border:none;border-radius:11px;background:#1565c0;'+
+          'color:#fff;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">\uD83D\uDCCB Kopieren</button>'+
+        '<button id="belksSichShare" style="flex:1;padding:13px;border:2px solid #1565c0;border-radius:11px;'+
+          'background:#fff;color:#1565c0;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">\uD83D\uDCE4 Teilen</button>'+
+      '</div>'+
+      '<button id="belksSichFile" style="width:100%;margin-top:8px;padding:11px;border:1.5px solid #ccc;'+
+        'border-radius:11px;background:#fafafa;color:#555;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit">'+
+        '\u2B07\uFE0F Als Datei speichern (nur im Browser)</button>'+
+      '<button id="belksSichClose" style="width:100%;margin-top:8px;padding:11px;border:none;border-radius:11px;'+
+        'background:#eee;color:#333;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit">Schlie\u00dfen</button>';
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    var ta = document.getElementById('belksSichText');
+    ta.value = text;
+
+    document.getElementById('belksSichCopy').onclick = function(){
+      var b = this;
+      var fertig = function(){ b.textContent = '\u2705 Kopiert!'; b.style.background = '#2e7d32';
+                               setTimeout(function(){ b.textContent = '\uD83D\uDCCB Kopieren'; b.style.background = '#1565c0'; }, 2200); };
+      try{
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(text).then(fertig).catch(function(){ ta.select(); document.execCommand('copy'); fertig(); });
+        } else { ta.select(); ta.setSelectionRange(0, text.length); document.execCommand('copy'); fertig(); }
+      }catch(e){ ta.select(); alert('Bitte den markierten Text von Hand kopieren.'); }
+    };
+    document.getElementById('belksSichShare').onclick = function(){
+      try{
+        if(navigator.share){ navigator.share({ title:name, text:text }).catch(function(){}); }
+        else alert('Teilen ist hier nicht verf\u00fcgbar \u2013 bitte "Kopieren" benutzen.');
+      }catch(e){ alert('Teilen nicht m\u00f6glich \u2013 bitte "Kopieren" benutzen.'); }
+    };
+    document.getElementById('belksSichFile').onclick = function(){
+      try{
+        var blob = new Blob([text], {type:'application/json'});
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = name;
+        document.body.appendChild(a); a.click();
+        setTimeout(function(){ try{ document.body.removeChild(a); URL.revokeObjectURL(a.href); }catch(e){} }, 1500);
+      }catch(e){ alert('Datei-Speichern geht hier nicht \u2013 bitte "Kopieren" benutzen.'); }
+    };
+    document.getElementById('belksSichClose').onclick = function(){ try{ ov.parentNode.removeChild(ov); }catch(e){} };
+  }catch(e){ alert('Anzeige fehlgeschlagen: ' + e); }
 };
 window.belksSicherungEinlesen = function(text){
   var paket;
@@ -625,6 +686,48 @@ window.belksSicherungEinlesen = function(text){
   });
   return { ok:true, anzahl:n, restaurant:paket.restaurant, erstellt:paket.erstellt };
 };
+// v208: Wiederherstellen per EINGEFUEGTEM Text (funktioniert immer)
+window.belksSicherungEinfuegen = function(){
+  try{
+    var alt = document.getElementById('belksRestBox');
+    if(alt) alt.parentNode.removeChild(alt);
+    var ov = document.createElement('div');
+    ov.id = 'belksRestBox';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000000;'+
+                       'display:flex;align-items:center;justify-content:center;padding:14px';
+    var box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:16px;padding:18px;max-width:460px;width:100%;font-family:inherit';
+    box.innerHTML =
+      '<div style="font-weight:800;font-size:16px;color:#1565c0;margin-bottom:4px">\uD83D\uDCC2 Sicherung einspielen</div>'+
+      '<div style="font-size:12px;color:#555;line-height:1.55;margin-bottom:10px">'+
+        'Den gesicherten Text hier einf\u00fcgen (aus WhatsApp kopieren).</div>'+
+      '<textarea id="belksRestText" placeholder="Hier einf\u00fcgen\u2026" style="width:100%;height:130px;font-size:10px;'+
+        'font-family:monospace;border:1.5px solid #ddd;border-radius:10px;padding:8px;box-sizing:border-box"></textarea>'+
+      '<button id="belksRestGo" style="width:100%;margin-top:10px;padding:13px;border:none;border-radius:11px;'+
+        'background:#1565c0;color:#fff;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">\u2705 Einspielen</button>'+
+      '<button id="belksRestFile" style="width:100%;margin-top:8px;padding:11px;border:1.5px solid #ccc;border-radius:11px;'+
+        'background:#fafafa;color:#555;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit">\uD83D\uDCC1 Stattdessen Datei w\u00e4hlen</button>'+
+      '<button id="belksRestClose" style="width:100%;margin-top:8px;padding:11px;border:none;border-radius:11px;'+
+        'background:#eee;color:#333;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit">Abbrechen</button>';
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    document.getElementById('belksRestGo').onclick = function(){
+      var t = (document.getElementById('belksRestText')||{}).value || '';
+      if(!t.trim()){ alert('Bitte zuerst den Sicherungstext einf\u00fcgen.'); return; }
+      var erg = window.belksSicherungEinlesen(t.trim());
+      if(!erg.ok){ alert('\u274c ' + erg.text); return; }
+      alert('\u2705 ' + erg.anzahl + ' Bereiche wiederhergestellt\nRestaurant: ' + erg.restaurant +
+            '\n\nDie App wird jetzt neu geladen.');
+      setTimeout(function(){ location.reload(); }, 400);
+    };
+    document.getElementById('belksRestFile').onclick = function(){
+      try{ ov.parentNode.removeChild(ov); }catch(e){}
+      window.belksSicherungWaehlen();
+    };
+    document.getElementById('belksRestClose').onclick = function(){ try{ ov.parentNode.removeChild(ov); }catch(e){} };
+  }catch(e){ alert('Anzeige fehlgeschlagen: ' + e); }
+};
+
 window.belksSicherungWaehlen = function(){
   try {
     var inp = document.createElement('input');
@@ -686,14 +789,20 @@ window.belksSicherungWaehlen = function(){
 
   function _read(){
     try{
+      // v207 WICHTIG: Eine GERADE erstellte Anmeldung hat IMMER Vorrang.
+      // Sonst gewinnt bei "erst Tochter, dann Mutter" die alte Tochter-Sitzung,
+      // die Abfrage laeuft unter dem falschen Konto und der Zeilenschutz
+      // liefert nichts -> "kein Restaurant mit dieser E-Mail verbunden".
+      // Der Zwischenspeicher gilt nur 2 Minuten, damit eine abgebrochene
+      // Anmeldung die normale Sitzung nicht dauerhaft verdraengt.
+      var p = JSON.parse(localStorage.getItem('eatdesi_auth_pending')||'null');
+      if(p && p.access_token){
+        var frisch = !p.gespeichert || (Date.now() - p.gespeichert) < 120000;
+        if(frisch) return p;
+        try{ localStorage.removeItem('eatdesi_auth_pending'); }catch(e){}
+      }
       var a = JSON.parse(localStorage.getItem(_authKey())||'null');
       if(a && a.access_token) return a;
-      // v205: Direkt nach dem Login liegt die Sitzung noch im Zwischenspeicher
-      // und ist noch keinem Restaurant zugeordnet. Sie muss aber SOFORT nutzbar
-      // sein - sonst laufen die Abfragen auf belks_tenants als anon und der
-      // Zeilenschutz blockiert sie ("kein Restaurant mit dieser E-Mail").
-      var p = JSON.parse(localStorage.getItem('eatdesi_auth_pending')||'null');
-      if(p && p.access_token) return p;
       return null;
     }catch(e){ return null; }
   }
@@ -712,6 +821,7 @@ window.belksSicherungWaehlen = function(){
         access_token : j.access_token,
         refresh_token: j.refresh_token || '',
         expires_at   : Date.now() + life,
+        gespeichert  : Date.now(),                 // v207: fuer den 2-Minuten-Vorrang
         email        : (j.user && j.user.email) || ''
       }));
     }catch(e){}
@@ -15690,7 +15800,7 @@ function PrinterSettingsView({
       /*#__PURE__*/React.createElement("button", {
         onClick: function(){
           if(!window.confirm("Sicherung einspielen?\n\nDie aktuellen Einstellungen dieses Restaurants werden dabei ersetzt.")) return;
-          try{ window.belksSicherungWaehlen(); }catch(e){ alert(e); }
+          try{ window.belksSicherungEinfuegen(); }catch(e){ alert(e); }
         },
         style:{ flex:1, padding:12, borderRadius:10, border:"2px solid #1565c0", background:"#fff", color:"#1565c0", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
       }, "📂 Wiederherstellen")
@@ -19754,7 +19864,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v206"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v208"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
