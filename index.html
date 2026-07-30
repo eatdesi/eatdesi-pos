@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v211</title>
+<title>eatDeSi POS v213</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v211';",
+    "var CACHE='eatdesi-v213';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -19859,7 +19859,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v211"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v213"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22423,13 +22423,23 @@ function MenuImportExportView({ menuData, onUpdate }) {
 
   var exportMenu = function() {
     try {
-      var json = JSON.stringify(menuData, null, 2);
-      var blob = new Blob([json], {type:'application/json'});
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'eatdesi-menu.json';
-      a.click();
-      setMsg('Export erfolgreich!');
+      // v213: Der reine Datei-Download funktioniert in der Android-App nicht
+      // (kein Download-Manager) – es passierte einfach nichts.
+      // Jetzt dasselbe Fenster wie bei der Sicherung: Kopieren / Teilen / Datei.
+      var json = JSON.stringify(menuData);
+      var anz = Object.keys(menuData||{}).reduce(function(a,c){
+        return a + (((menuData[c]||[]).length)||0); }, 0);
+      if (window.belksSicherungFenster) {
+        window.belksSicherungFenster(json, 'eatdesi-menu.json', anz, 'Speisekarte');
+        setMsg('Fenster ge\u00f6ffnet \u2013 mit "Kopieren" sichern.');
+      } else {
+        var blob = new Blob([json], {type:'application/json'});
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'eatdesi-menu.json';
+        a.click();
+        setMsg('Export erfolgreich!');
+      }
     } catch(e) { setMsg('Fehler: ' + e.message); }
   };
 
@@ -23019,6 +23029,9 @@ function BelksZentraleView(){
   var [sumupKey,setSumupKey]=R.useState('');
   var [aiKey,setAiKey]=R.useState('');
   var [website,setWebsite]=R.useState('');
+  // v213: Speisekarte gleich beim Anlegen mitgeben (optional)
+  var [karteText,setKarteText]=R.useState('');
+  var [karteInfo,setKarteInfo]=R.useState('');
   var [city,setCity]=R.useState('');
   var [phone,setPhone]=R.useState('');
   var [email,setEmail]=R.useState('');
@@ -23160,7 +23173,24 @@ function BelksZentraleView(){
                                      updated_at: new Date().toISOString() })});
           };
           await _schreib('firma', _firma);
-          await _schreib('tablecount', String(_tz));
+
+          // v213: Speisekarte mitgeben, falls eingetragen
+          try{
+            var _rohKarte = String(karteText||'').trim();
+            if(_rohKarte){
+              var _karte = JSON.parse(_rohKarte);
+              var _anz = Object.keys(_karte||{}).reduce(function(a,c){
+                return a + (((_karte[c]||[]).length)||0); }, 0);
+              if(_karte && typeof _karte === 'object' && !Array.isArray(_karte) && _anz > 0){
+                await _schreib('menu', _karte);
+                await _schreib('menu_standard', _karte);
+              }
+            }
+          }catch(e){ console.warn('Speisekarte konnte nicht uebernommen werden:', e); }
+          // v212: als ZAHL schreiben. Vorher stand "50" mit Anfuehrungszeichen
+          // in der Cloud - die App liest den Wert roh mit parseInt und bekam
+          // NaN, also die Vorgabe 30.
+          await _schreib('tablecount', _tz);
         }catch(e){ console.warn('Stammdaten konnten nicht gespeichert werden:', e); }
         var msg='\u2705 "'+name.trim()+'" angelegt! Code: '+effCode;
         if(mail){
@@ -23175,6 +23205,7 @@ function BelksZentraleView(){
         setName('');setCode('');setCodeTouched(false);setStreet('');setCity('');setPhone('');setEmail('');setEmail2('');setLoginPwNew('');
         setSteuernr('');setUstId('');setAmtsger('');setTischzahl('30');setSumupKey('');setAiKey('');setWebsite('');
         setBonFuss('Danke & bis bald! \uD83D\uDE4F');
+        setKarteText('');setKarteInfo('');
         setShowLinks(effCode); load(); setBusy(false);
       }catch(e){ setErr(String(e.message||e)); setBusy(false); }
     })();
@@ -23290,8 +23321,59 @@ function BelksZentraleView(){
       R.createElement('input',{value:sumupKey,onChange:function(e){setSumupKey(e.target.value);},style:iS,placeholder:'aus developer.sumup.com \u2192 Affiliate Keys'}),
       lbl('\uD83E\uDD16 AI-Schl\u00fcssel Google Gemini (optional)'),
       R.createElement('input',{value:aiKey,onChange:function(e){setAiKey(e.target.value);},style:iS,placeholder:'aus aistudio.google.com/apikey'}),
+      // ══ v213: Speisekarte optional gleich mitgeben ══
+      R.createElement('div',{style:{marginTop:14,marginBottom:6,paddingTop:12,borderTop:'2px solid #eee',
+        fontWeight:800,fontSize:14,color:'#1565c0'}},'\uD83D\uDCCB Speisekarte (optional)'),
+      R.createElement('div',{style:{fontSize:11,color:'#666',lineHeight:1.5,marginBottom:8}},
+        'Aus einer anderen App exportieren (\u2630 Men\u00fc \u2192 Men\u00fc Import \u2192 exportieren) und hier einf\u00fcgen. '+
+        'Dann ist die Tochter beim ersten Login sofort komplett. Sp\u00e4ter geht es auch.'),
+      R.createElement('div',{style:{display:'flex',gap:8,marginBottom:8}},
+        R.createElement('button',{onClick:function(){
+          try{
+            var inp=document.createElement('input');
+            inp.type='file'; inp.accept='.json,application/json';
+            inp.onchange=function(){
+              var f=inp.files&&inp.files[0]; if(!f) return;
+              var leser=new FileReader();
+              leser.onload=function(){
+                var t=String(leser.result||'');
+                setKarteText(t);
+                try{
+                  var k=JSON.parse(t);
+                  var n=Object.keys(k||{}).reduce(function(a,c){ return a+(((k[c]||[]).length)||0); },0);
+                  setKarteInfo(n>0 ? ('\u2705 '+Object.keys(k).length+' Kategorien, '+n+' Artikel')
+                                   : '\u274c Keine Artikel gefunden');
+                }catch(e){ setKarteInfo('\u274c Datei ist kein g\u00fcltiges Men\u00fc'); }
+              };
+              leser.readAsText(f);
+            };
+            inp.click();
+          }catch(e){ alert('Datei konnte nicht ge\u00f6ffnet werden.'); }
+        },style:{flex:1,padding:11,borderRadius:10,border:'1.5px solid #1565c0',background:'#fff',
+                 color:'#1565c0',fontWeight:800,fontSize:12,cursor:'pointer',fontFamily:'inherit'}},
+          '\uD83D\uDCC1 Datei w\u00e4hlen'),
+        R.createElement('button',{onClick:function(){ setKarteText(''); setKarteInfo(''); },
+          style:{padding:'11px 14px',borderRadius:10,border:'1.5px solid #ccc',background:'#fafafa',
+                 color:'#666',fontWeight:700,fontSize:12,cursor:'pointer',fontFamily:'inherit'}},'Leeren')
+      ),
+      R.createElement('textarea',{value:karteText,
+        onChange:function(e){
+          var t=e.target.value; setKarteText(t);
+          if(!t.trim()){ setKarteInfo(''); return; }
+          try{
+            var k=JSON.parse(t);
+            var n=Object.keys(k||{}).reduce(function(a,c){ return a+(((k[c]||[]).length)||0); },0);
+            setKarteInfo(n>0 ? ('\u2705 '+Object.keys(k).length+' Kategorien, '+n+' Artikel')
+                             : '\u274c Keine Artikel gefunden');
+          }catch(e2){ setKarteInfo('\u23F3 Text unvollst\u00e4ndig oder kein g\u00fcltiges Men\u00fc'); }
+        },
+        placeholder:'Hier den Men\u00fc-Text einf\u00fcgen \u2026',
+        style:{width:'100%',height:90,fontSize:10,fontFamily:'monospace',border:'1.5px solid #ddd',
+               borderRadius:10,padding:8,boxSizing:'border-box'}}),
+      karteInfo ? R.createElement('div',{style:{fontSize:12,fontWeight:700,margin:'6px 0 2px',
+        color: karteInfo.indexOf('\u2705')===0 ? '#2e7d32' : '#c62828'}}, karteInfo) : null,
       R.createElement('div',{style:{fontSize:11,color:'#666',lineHeight:1.5,margin:'8px 0 4px'}},
-        '\uD83D\uDCCB Speisekarte, Tisch-Bereiche und der Drucker werden danach in der Tochter-App eingerichtet \u2013 '+
+        '\uD83C\uDF7D\uFE0F Tisch-Bereiche und der Drucker werden danach in der Tochter-App eingerichtet \u2013 '+
         'der Drucker geh\u00f6rt zum jeweiligen Ger\u00e4t und kann hier nicht vorgegeben werden.'),
 
       err&&err!=='TABLE_MISSING'?R.createElement('div',{style:{color:'#c62828',fontSize:12,fontWeight:700,marginBottom:8}},'\u26A0\uFE0F '+err):null,
@@ -25318,9 +25400,18 @@ async function belksStartLaden(){
         // Cloud gewinnt, ausser es gibt eine neuere, noch nicht hochgeladene
         // Aenderung auf diesem Geraet.
         if (vorhanden === null || fern >= nah) {
-          if (vorhanden !== row.value) {
+          // v212: Einfache Werte (Zahl/Text) roh ablegen, nicht eingepackt.
+          // 'eatdesi_tablecount' & Co. werden direkt mit parseInt gelesen -
+          // ein eingepacktes "50" ergaebe NaN und damit den Vorgabewert.
+          var wert = row.value;
+          try{
+            var p = JSON.parse(row.value);
+            if (typeof p === 'number' || typeof p === 'boolean') wert = String(p);
+            else if (typeof p === 'string' && !/^[\[{]/.test(p)) wert = p;
+          }catch(e){}
+          if (vorhanden !== wert) {
             window._syncWriting = true;
-            localStorage.setItem(lsKey, row.value);
+            localStorage.setItem(lsKey, wert);
             window._syncWriting = false;
             uebernommen++;
           }
