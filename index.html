@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v215</title>
+<title>eatDeSi POS v216</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v215';",
+    "var CACHE='eatdesi-v216';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -804,6 +804,8 @@ window.belksSicherungWaehlen = function(){
     var inp = document.createElement('input');
     // v214: ohne Typ-Filter – die Android-App zeigte sonst keine Dateien an
     inp.type = 'file'; inp.accept = '*/*';
+    inp.style.display = 'none';
+    document.body.appendChild(inp);   // v216: sonst reagiert die Android-App nicht
     inp.onchange = function(){
       var f = inp.files && inp.files[0];
       if (!f) return;
@@ -19936,7 +19938,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v215"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v216"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -23466,7 +23468,10 @@ function BelksZentraleView(){
         R.createElement('button',{onClick:function(){
           try{
             var inp=document.createElement('input');
-            inp.type='file'; inp.accept='.json,application/json';
+            // v216: ohne Typ-Filter, sonst zeigt Android keine Dateien an
+            inp.type='file'; inp.accept='*/*';
+            inp.style.display='none';
+            document.body.appendChild(inp);   // muss in der Seite haengen, sonst passiert nichts
             inp.onchange=function(){
               var f=inp.files&&inp.files[0]; if(!f) return;
               var leser=new FileReader();
@@ -23483,6 +23488,7 @@ function BelksZentraleView(){
               leser.readAsText(f);
             };
             inp.click();
+            setTimeout(function(){ try{ document.body.removeChild(inp); }catch(e){} }, 60000);
           }catch(e){ alert('Datei konnte nicht ge\u00f6ffnet werden.'); }
         },style:{flex:1,padding:11,borderRadius:10,border:'1.5px solid #1565c0',background:'#fff',
                  color:'#1565c0',fontWeight:800,fontSize:12,cursor:'pointer',fontFamily:'inherit'}},
