@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v205</title>
+<title>eatDeSi POS v206</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v205';",
+    "var CACHE='eatdesi-v206';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -459,7 +459,12 @@ window.belksWipeTenantData = function(newLoc){
     // v198: Nach dem Aufraeumen sind ALLE Daten wieder ungelesen.
     // Der Schutz muss deshalb komplett von vorne beginnen, sonst haelt die
     // App Vorgabewerte faelschlich fuer gueltige Daten.
-    try{ window.__belksGelesen = {}; window.__belksHydrated = false; }catch(e){}
+    try{
+      window.__belksGelesen = {}; window.__belksHydrated = false;
+      window.__belksGelesenAlles = false;                    // v206
+      setTimeout(function(){ try{ window.belksBestandLesen(); }catch(e){} }, 600);
+      setTimeout(function(){ try{ window.belksBestandFreigeben('Zeitablauf nach Wechsel'); }catch(e){} }, 8000);
+    }catch(e){}
     // Drucker-HARDWARE behalten, aber FIRMENDATEN der alten Tochter entfernen
     try{
       var pr = JSON.parse(localStorage.getItem('eatdesi_printer')||'null');
@@ -19749,7 +19754,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v205"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v206"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24682,6 +24687,25 @@ var _SCHUTZ_LEER = {
   'eatdesi_customers':1, 'eatdesi_users':1, 'eatdesi_floors':1, 'eatdesi_optiongroups':1,
   'eatdesi_reservations':1, 'eatdesi_drivers':1, 'eatdesi_inventory':1
 };
+// v206: EINSTELLUNGEN mit einem Vorgabewert, der NICHT leer ist.
+// Genau hier lag die letzte Luecke: "30 Tische" ist ein Vorgabewert,
+// aber nicht leer - der bisherige Leer-Schutz liess ihn durch.
+// Diese Werte werden gar nicht geschrieben, solange die Cloud unbekannt ist.
+var _SCHUTZ_EINSTELLUNG = {
+  'eatdesi_tablecount':1, 'eatdesi_shortname':1, 'eatdesi_cat_order':1,
+  'eatdesi_services':1, 'eatdesi_deliveryCfg':1, 'eatdesi_happyhours':1,
+  'eatdesi_loyalty_settings':1, 'eatdesi_websiteconfig':1, 'eatdesi_gutscheine':1,
+  'eatdesi_firma':1, 'eatdesi_floors':1, 'eatdesi_menu':1, 'eatdesi_optiongroups':1
+};
+// Darf dieser Schluessel jetzt geschrieben werden?
+function _darfSchreiben(key){
+  try{
+    if (!_SCHUTZ_EINSTELLUNG[key]) return true;              // nicht geschuetzt
+    if (window.__belksGelesenAlles) return true;             // Cloud ist bekannt
+    if (_schonGelesen(key)) return true;                     // dieser Schluessel wurde gelesen
+    return false;
+  }catch(e){ return true; }
+}
 // v195: lokaler Schluessel -> Cloud-Name (gleiche Regel wie im Sync)
 function _cloudNameVon(lsKey){
   try {
@@ -24720,6 +24744,13 @@ async function pushStateToSupabase(key, value) {
       console.warn('Hochladen blockiert (' + key + '): Cloud wurde noch nicht gelesen');
       return;
     }
+    // v206: Einstellungen erst hochladen, wenn die Cloud bekannt ist
+    try {
+      if (typeof _darfSchreiben === 'function' && !_darfSchreiben('eatdesi_' + key)) {
+        console.warn('Hochladen von ' + key + ' gesperrt – Cloud-Bestand unbekannt');
+        return;
+      }
+    } catch(e0) {}
     // v195: Diesen einen Schluessel nie leeren, solange er nicht gelesen wurde.
     try {
       var _leer = (value === null || value === undefined) ||
@@ -24904,6 +24935,51 @@ window.belksMarkHydrated = function(grund){
 };
 // Ohne Internet darf sofort lokal weitergearbeitet werden
 try { if (navigator && navigator.onLine === false) window.belksMarkHydrated('offline'); } catch(e){}
+
+// ═══ v206: BESTANDSAUFNAHME DER CLOUD ═══
+// Holt beim Start EINMAL die Namen aller Schluessel dieses Restaurants.
+// Erst danach darf die App Einstellungen ueberschreiben. Vorher koennten es
+// nur Vorgabewerte sein (z.B. "30 Tische"), die die echten Daten zerstoeren.
+window.__belksGelesenAlles = false;
+window.belksBestandFreigeben = function(grund){
+  if (window.__belksGelesenAlles) return;
+  window.__belksGelesenAlles = true;
+  try { console.log('Einstellungen freigegeben (' + (grund||'') + ')'); } catch(e){}
+};
+window.belksBestandLesen = function(){
+  try{
+    var loc = localStorage.getItem('eatdesi_location_id') || window.RESTAURANT.LOCATION_ID;
+    if (!loc) { window.belksBestandFreigeben('kein Restaurant'); return; }
+    if (localStorage.getItem('eatdesi_tenant_ok_' + loc) !== '1') return;   // erst nach Anmeldung
+    if (typeof fetch !== 'function') { window.belksBestandFreigeben('kein fetch'); return; }
+    var url = window.RESTAURANT.SUPA_URL + '/rest/v1/pos_state?select=key&key=like.' +
+              encodeURIComponent(loc + '_') + '*';
+    fetch(url, { headers:{ apikey: window.RESTAURANT.SUPA_KEY,
+                           Authorization: 'Bearer ' + window.RESTAURANT.SUPA_KEY } })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(rows){
+        if (rows) {
+          window.__belksGelesen = window.__belksGelesen || {};
+          rows.forEach(function(row){
+            try {
+              var suf = String(row.key).slice(loc.length + 1);
+              if (suf) window.__belksGelesen[suf] = true;
+            } catch(e){}
+          });
+          window.belksBestandFreigeben(rows.length + ' Schluessel gefunden');
+        } else {
+          window.belksBestandFreigeben('Abfrage ohne Ergebnis');
+        }
+      })
+      .catch(function(){ window.belksBestandFreigeben('Abfrage fehlgeschlagen'); });
+  }catch(e){ window.belksBestandFreigeben('Fehler'); }
+};
+try {
+  setTimeout(function(){ window.belksBestandLesen(); }, 500);
+  setTimeout(function(){ window.belksBestandLesen(); }, 2500);   // zweiter Versuch nach dem Login
+  setTimeout(function(){ window.belksBestandFreigeben('Zeitablauf'); }, 8000);
+  window.addEventListener('offline', function(){ window.belksBestandFreigeben('offline'); });
+} catch(e){}
 // Notbremse: falls die Cloud nicht antwortet, nach 10 Sek. trotzdem freigeben
 try { setTimeout(function(){ window.belksMarkHydrated('Zeitablauf'); }, 10000); } catch(e){}
 
@@ -25340,6 +25416,12 @@ localStorage.setItem = function(key, valueStr) {
     if (!window._syncWriting && _SCHUTZ_LEER[key] && _istLeer(valueStr) &&
         !(window.__belksHydrated && _schonGelesen(key))) {
       console.warn('Leeres ' + key + ' verworfen – dieser Schluessel wurde noch nicht aus der Cloud gelesen');
+      return;
+    }
+    // v206: Einstellungen mit nicht-leerem Vorgabewert (z.B. 30 Tische)
+    // duerfen erst geschrieben werden, wenn die Cloud bekannt ist.
+    if (!window._syncWriting && !_darfSchreiben(key)) {
+      console.warn(key + ' noch gesperrt – Cloud-Bestand wird geladen');
       return;
     }
   } catch(e){}
