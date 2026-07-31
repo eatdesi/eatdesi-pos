@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-31b: Tochter-Kategorien im Webshop sichtbar (auch außerhalb CAT_GROUPS) · Über-uns nie BW-Text auf Töchtern · Update 2026-07-27c: Speichern-Feedback sichtbar (Toast über Admin, Button-Bestätigung) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
+<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-31c: Kundenkonten laufen ueber Server-Funktionen (belks_kunde_bekannt / _login / _speichern / _bestellung). Die komplette Kundenliste wird NICHT mehr in den Browser geladen und nicht mehr ganz zurueckgeschrieben — kein Datenabfluss, keine verlorenen Konten bei gleichzeitigen Bestellungen. Punkte rechnet der Server. · Update 2026-07-31b: Tochter-Kategorien im Webshop sichtbar (auch außerhalb CAT_GROUPS) · Über-uns nie BW-Text auf Töchtern · Update 2026-07-27c: Speichern-Feedback sichtbar (Toast über Admin, Button-Bestätigung) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -1783,19 +1783,38 @@ async function shaHex(str){
   return Array.from(new Uint8Array(h)).map(x=>x.toString(16).padStart(2,'0')).join('');
 }
 async function custHashPw(phone,pw){ return shaHex(normPhone(phone)+':'+String(pw)); }
-async function fetchCustomers(){
+/* ===== 🔒 KUNDENKONTEN UEBER SERVER-FUNKTIONEN =====
+   Frueher lud jede Seite die KOMPLETTE Kundenliste in den Browser
+   (Namen, Nummern, Adressen, Passwort-Pruefsummen) und schrieb sie
+   ganz zurueck. Jetzt fragt die Seite nur noch nach dem EINEN eigenen
+   Konto; die Liste bleibt auf dem Server (security definer).
+   Die beiden alten Sammel-Helfer gibt es absichtlich nicht mehr. */
+async function kundeRPC(fn, body){
   try{
-    const r=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_customers&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
-    if(!r.ok) return [];
-    const j=await r.json();
-    if(j&&j[0]&&j[0].value){ try{ return JSON.parse(j[0].value)||[]; }catch(e){} }
-  }catch(e){}
-  return [];
+    const r=await fetch(SUPA_URL+'/rest/v1/rpc/'+fn,{method:'POST',
+      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify(body)});
+    if(!r.ok){ console.warn('RPC '+fn+' HTTP '+r.status); return null; }
+    return await r.json();
+  }catch(e){ console.warn('RPC '+fn, e); return null; }
 }
-async function saveCustomers(list){
-  await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
-    headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
-    body:JSON.stringify({key:LOCATION_ID+'_customers',value:JSON.stringify(list),updated_at:new Date().toISOString()})});
+// Gibt es diese Nummer? -> {bekannt, hatPasswort, name}  (mehr nicht)
+async function kundeBekannt(phone){
+  const j=await kundeRPC('belks_kunde_bekannt',{p_loc:LOCATION_ID,p_phone:String(phone||'')});
+  return j||{bekannt:false};
+}
+// Anmelden -> eigenes Konto ODER null
+async function kundeLogin(phone,hash){
+  return await kundeRPC('belks_kunde_login',{p_loc:LOCATION_ID,p_phone:String(phone||''),p_hash:String(hash||'')});
+}
+// Anlegen/aendern -> {ok:true,kunde:{...}} ODER {ok:false,grund:'...'}
+async function kundeSpeichern(phone,hash,daten){
+  return await kundeRPC('belks_kunde_speichern',{p_loc:LOCATION_ID,p_phone:String(phone||''),p_hash:String(hash||''),p_daten:daten||{}});
+}
+// Bestellung verbuchen: Besuch zaehlen, Punkte einloesen + sammeln.
+// Gerechnet wird auf dem Server, damit niemand sich Punkte schenken kann.
+async function kundeBestellung(phone,daten,total,redeem,bonNr,anlegen){
+  return await kundeRPC('belks_kunde_bestellung',{p_loc:LOCATION_ID,p_phone:String(phone||''),p_daten:daten||{},p_total:Number(total)||0,p_redeem:Math.max(0,Math.round(Number(redeem)||0)),p_bon:String(bonNr||''),p_anlegen:!!anlegen});
 }
 window.LOY={pointsPerEuro:3,redeemRate:100,active:true};
 async function loadLoyaltyCfg(){
@@ -1825,33 +1844,15 @@ function computeRedeem(sub){
 async function upsertCustomerAfterOrder(o){
   try{
     const consent = o.consent!==false;
-    const list=await fetchCustomers();
-    const np=normPhone(o.phone);
-    let k=list.find(function(c){ return normPhone(c.phone)===np || normPhone(c.kundenNr)===np; });
-    let isNew=false;
-    if(!k){
-      if(!consent) return null;
-      isNew=true;
-      k={name:o.name||'Gast',phone:o.phone,kundenNr:o.phone,points:0,visits:0,since:new Date().toISOString(),pointsHistory:[]};
-      list.push(k);
-    }
-    if(o.name && (!k.name||k.name==='Gast')) k.name=o.name;
+    const daten = {name: (o.name||'Gast')};
     if(consent){
-      if(o.email) k.email=o.email;
-      if(o.street){ k.street=o.street; k.zip=o.zip||k.zip; k.city=o.city||k.city; }
+      if(o.email) daten.email=o.email;
+      if(o.street){ daten.street=o.street; if(o.zip) daten.zip=o.zip; if(o.city) daten.city=o.city; }
     }
-    k.visits=(k.visits||0)+1;
-    k.pointsHistory=k.pointsHistory||[];
-    if(o.redeemUse>0){
-      k.points=Math.max(0,(k.points||0)-o.redeemUse);
-      k.pointsHistory.push({d:new Date().toISOString(),delta:-o.redeemUse,note:'⭐ Eingelöst · Webshop Bon '+o.bonNr});
-    }
-    if(consent && window.LOY && window.LOY.active!==false){
-      const earn=Math.floor((o.total||0)*((window.LOY.pointsPerEuro)||3));
-      if(earn>0){ k.points=(k.points||0)+earn; k.pointsHistory.push({d:new Date().toISOString(),delta:earn,note:'Webshop Bon '+o.bonNr}); }
-    }
-    await saveCustomers(list);
-    return k;
+    // anlegen = consent: OHNE Einverstaendnis wird kein neues Konto erzeugt.
+    // Besuch, Punkte einloesen und Punkte sammeln rechnet der Server.
+    const k = await kundeBestellung(o.phone, daten, o.total, o.redeemUse, o.bonNr, consent);
+    return k || null;
   }catch(e){ return null; }
 }
 function acctOverlay(html){
@@ -1888,10 +1889,9 @@ async function acctPhoneNext(){
   var err=document.getElementById('ac_err');
   if(phone.length<6){ if(err) err.textContent='Bitte gültige Handynummer eingeben.'; return; }
   if(err) err.textContent='Prüfe…';
-  var list=await fetchCustomers();
-  var found=list.find(function(k){ return normPhone(k.phone)===phone || normPhone(k.kundenNr)===phone; });
-  if(found && found.pw) return renderAcctPw(raw, found);
-  if(found) return renderAcctSetPw(raw, found, false);
+  var info=await kundeBekannt(raw);
+  if(info && info.bekannt && info.hatPasswort) return renderAcctPw(raw, {name:info.name||''});
+  if(info && info.bekannt) return renderAcctSetPw(raw, {name:info.name||''}, false);
   return renderAcctCreate(raw);
 }
 function renderAcctPw(raw, found){
@@ -1912,11 +1912,10 @@ async function acctPwLogin(np){
   var err=document.getElementById('ac_err');
   if(!pw){ if(err) err.textContent='Bitte Passwort eingeben.'; return; }
   if(err) err.textContent='Anmelden…';
-  var list=await fetchCustomers();
-  var found=list.find(function(k){ return normPhone(k.phone)===np || normPhone(k.kundenNr)===np; });
-  if(!found){ if(err) err.textContent='Konto nicht gefunden.'; return; }
   var h=await custHashPw(np, pw);
-  if(h!==found.pw){ if(err) err.textContent='❌ Falsches Passwort.'; return; }
+  var found=await kundeLogin(np, h);
+  if(!found){ if(err) err.textContent='❌ Falsches Passwort oder Konto nicht gefunden.'; return; }
+  if(found.ohnePasswort) return renderAcctSetPw(np, found, false);
   var c={phone:found.phone||np, name:found.name||'', points:(typeof found.points==='number')?found.points:null, email:found.email||'', street:found.street||'', zip:found.zip||'', city:found.city||''};
   setCust(c);
   renderAccount(c);
@@ -1941,11 +1940,10 @@ async function acctSetPw(np){
   if(p1.length<4){ if(err) err.textContent='Mindestens 4 Zeichen.'; return; }
   if(p1!==p2){ if(err) err.textContent='Passwörter stimmen nicht überein.'; return; }
   if(err) err.textContent='Speichere…';
-  var list=await fetchCustomers();
-  var found=list.find(function(k){ return normPhone(k.phone)===np || normPhone(k.kundenNr)===np; });
-  if(!found){ if(err) err.textContent='Konto nicht gefunden.'; return; }
-  found.pw=await custHashPw(np, p1);
-  await saveCustomers(list);
+  var h=await custHashPw(np, p1);
+  var res=await kundeSpeichern(np, h, {});
+  if(!res || res.ok!==true){ if(err) err.textContent='❌ '+((res&&res.grund)||'Konnte nicht speichern.'); return; }
+  var found=res.kunde||{};
   var c={phone:found.phone||np, name:found.name||'', points:(typeof found.points==='number')?found.points:null, email:found.email||'', street:found.street||'', zip:found.zip||'', city:found.city||''};
   setCust(c);
   renderAccount(c);
@@ -1978,13 +1976,14 @@ async function acctCreate(raw){
   if(p1!==p2){ if(err) err.textContent='Passwörter stimmen nicht überein.'; return; }
   if(err) err.textContent='Erstelle Konto…';
   var np=normPhone(raw);
-  var list=await fetchCustomers();
-  if(list.find(function(k){ return normPhone(k.phone)===np || normPhone(k.kundenNr)===np; })){ if(err) err.textContent='Nummer existiert schon – bitte anmelden.'; return; }
-  var neu={name:name,phone:raw,kundenNr:raw,points:0,visits:0,since:new Date().toISOString(),pointsHistory:[],pw:(await custHashPw(np,p1))};
-  if(email) neu.email=email;
-  list.push(neu);
-  await saveCustomers(list);
-  var c={phone:raw,name:name,points:0,email:email||''};
+  var info=await kundeBekannt(raw);
+  if(info && info.bekannt){ if(err) err.textContent='Nummer existiert schon – bitte anmelden.'; return; }
+  var daten={name:name,phone:raw,kundenNr:raw};
+  if(email) daten.email=email;
+  var res=await kundeSpeichern(np, (await custHashPw(np,p1)), daten);
+  if(!res || res.ok!==true){ if(err) err.textContent='❌ '+((res&&res.grund)||'Konnte nicht speichern.'); return; }
+  var kk=res.kunde||{};
+  var c={phone:kk.phone||raw,name:kk.name||name,points:(typeof kk.points==='number')?kk.points:0,email:kk.email||email||''};
   setCust(c);
   renderAccount(c);
 }
@@ -3319,13 +3318,10 @@ function aiFindItem(name){
 // Stammkunde aus Supabase (customers-State im pos_state) suchen
 async function aiLookupCustomer(num){
   try{
-    var q=String(num).replace(/\s/g,'').toLowerCase();
-    var g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_customers&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
-    if(!g.ok)return; var j=await g.json();
-    if(j&&j[0]&&j[0].value){
-      var list=JSON.parse(j[0].value);
-      var found=(list||[]).find(function(c){return String(c.phone||'').replace(/\s/g,'').toLowerCase()===q||String(c.kundenNr||'').toLowerCase()===q;});
-      if(found){ window._aiCustomer=found; toast('⭐ Willkommen zurück, '+(found.name||'Stammkunde')+'!'); }
+    var info=await kundeBekannt(num);
+    if(info && info.bekannt){
+      window._aiCustomer={name:info.name||'', phone:String(num)};
+      toast('⭐ Willkommen zurück, '+(info.name||'Stammkunde')+'!');
     }
   }catch(e){}
 }
@@ -3333,15 +3329,13 @@ async function aiLookupCustomer(num){
 async function aiRegisterCustomer(name,phone){
   if(!phone)return;
   try{
-    var g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_customers&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
-    var list=[]; if(g.ok){var j=await g.json(); if(j&&j[0]&&j[0].value){try{list=JSON.parse(j[0].value)||[];}catch(e){}}}
-    if(list.find(function(c){return String(c.phone||'')===String(phone);})){ window._aiCustomer=list.find(function(c){return String(c.phone||'')===String(phone);}); return; }
-    var neu={name:name||'Gast',phone:phone,kundenNr:phone,points:0,visits:0,since:new Date().toISOString(),pointsHistory:[]};
-    list.push(neu); window._aiCustomer=neu;
-    await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
-      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
-      body:JSON.stringify({key:LOCATION_ID+'_customers',value:JSON.stringify(list),updated_at:new Date().toISOString()})});
-    toast('✅ Registriert! Willkommen, '+(name||'Gast')+' ⭐');
+    var info=await kundeBekannt(phone);
+    if(info && info.bekannt){ window._aiCustomer={name:info.name||name||'Gast', phone:String(phone)}; return; }
+    var res=await kundeSpeichern(phone, '', {name:name||'Gast', phone:String(phone), kundenNr:String(phone)});
+    if(res && res.ok===true){
+      window._aiCustomer=res.kunde||{name:name||'Gast', phone:String(phone)};
+      toast('✅ Registriert! Willkommen, '+(name||'Gast')+' ⭐');
+    }
   }catch(e){}
 }
 function aiReply(text){
