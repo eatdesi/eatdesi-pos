@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v231</title>
+<title>eatDeSi POS v234</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v231';",
+    "var CACHE='eatdesi-v234';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -9921,6 +9921,26 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
   const totalNachRabatt = Math.max(0, total - rabattAmt - (pointsRabatt||0));
   const tg = parseFloat(trinkgeld) || 0;
   const totalWithTG = totalNachRabatt + tg;
+  /* Runde Betraege, die ein Gast typischerweise nennt: erst auf den vollen
+     Euro, danach die naechsten 5er-Schritte. Aus 76,00 wird 80 / 85 / 90,
+     aus 76,40 wird 77 / 80 / 85 / 90. */
+  const zahlVorschlaege = (() => {
+    const b = totalNachRabatt;
+    if (!(b > 0)) return [];
+    const out = [];
+    const voll = Math.ceil(b);
+    if (voll > b + 0.001) out.push(voll);
+    let f = Math.ceil(b / 5) * 5;
+    if (f <= b + 0.001) f += 5;
+    for (let i = 0; i < 3; i++) out.push(f + i * 5);
+    return out.filter((v, i, a) => a.indexOf(v) === i).slice(0, 4);
+  })();
+  const setzeZahlbetrag = (wert) => {
+    const v = parseFloat(String(wert).replace(",", "."));
+    if (!isFinite(v)) { setTrinkgeld(""); return; }
+    const diff = Math.round((v - totalNachRabatt) * 100) / 100;
+    setTrinkgeld(diff > 0 ? String(diff) : "");
+  };
   const tax7 = calcTax7(items);
   const tax19 = calcTax19(items);
   const splitRemaining = totalNachRabatt - splitPaid.reduce((s, p) => s + p.amount, 0);
@@ -10126,17 +10146,30 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
           ),
           // Trinkgeld
           /*#__PURE__*/React.createElement("div", { style:{ background:"#fffde7", border:"2px solid #f9a825", borderRadius:12, padding:12, marginBottom:14 } },
-            /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#e65100", marginBottom:8 } }, "\uD83C\uDF1F Trinkgeld"),
-            /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6, marginBottom:8, flexWrap:"wrap" } },
-              [0,1,2,3,5,10].map(t => /*#__PURE__*/React.createElement("button", { key:t,
-                onClick:()=>setTrinkgeld(t===0?"":String(t)),
-                style:{ padding:"7px 12px", borderRadius:10, border:`2px solid ${(parseFloat(trinkgeld)||0)===t?C.orange:"#ddd"}`, background:(parseFloat(trinkgeld)||0)===t?"#fff3e0":"#fff", color:(parseFloat(trinkgeld)||0)===t?C.orange:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
-              }, t===0?"Kein":t+" \u20ac"))
+            /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#e65100", marginBottom:2 } }, "\uD83C\uDF1F Wie viel zahlt der Gast?"),
+            /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, color:"#8d6e63", marginBottom:8 } },
+              "Rechnung ", fmt(totalNachRabatt), " \u2013 Gesamtbetrag eintippen, Trinkgeld rechnet sich von selbst."),
+            zahlVorschlaege.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6, marginBottom:8, flexWrap:"wrap" } },
+              /*#__PURE__*/React.createElement("button", {
+                onClick:()=>setTrinkgeld(""),
+                style:{ padding:"9px 14px", borderRadius:10, border:`2px solid ${tg===0?C.orange:"#ddd"}`, background:tg===0?"#fff3e0":"#fff", color:tg===0?C.orange:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
+              }, "Passend"),
+              zahlVorschlaege.map(v => {
+                const aktiv = Math.abs((totalNachRabatt + tg) - v) < 0.005 && tg > 0;
+                return /*#__PURE__*/React.createElement("button", { key:v,
+                  onClick:()=>setzeZahlbetrag(v),
+                  style:{ padding:"9px 14px", borderRadius:10, border:`2px solid ${aktiv?C.orange:"#ddd"}`, background:aktiv?"#fff3e0":"#fff", color:aktiv?C.orange:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
+                }, v + " \u20ac");
+              })
             ),
-            /*#__PURE__*/React.createElement("input", { type:"number", value:trinkgeld, onChange:e=>setTrinkgeld(e.target.value), placeholder:"Eigener Betrag...",
-              style:{ width:"100%", padding:9, borderRadius:8, border:"2px solid #ffe082", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", textAlign:"center" }
+            /*#__PURE__*/React.createElement("input", { type:"number", step:"0.01", inputMode:"decimal",
+              value: tg > 0 ? String(Math.round((totalNachRabatt+tg)*100)/100) : "",
+              onChange:e=>setzeZahlbetrag(e.target.value),
+              placeholder:"Gast zahlt \u2026 z.B. 80",
+              style:{ width:"100%", padding:12, borderRadius:8, border:"2px solid #ffe082", fontSize:18, fontWeight:800, fontFamily:"inherit", boxSizing:"border-box", textAlign:"center" }
             }),
-            tg > 0 && /*#__PURE__*/React.createElement("div", { style:{ textAlign:"center", marginTop:8, fontSize:14, color:C.orange, fontWeight:700 } }, "Gesamtbetrag: ", fmt(totalWithTG))
+            /*#__PURE__*/React.createElement("div", { style:{ textAlign:"center", marginTop:8, fontSize:14, fontWeight:800, color: tg > 0 ? C.orange : "#999" } },
+              tg > 0 ? ("Trinkgeld " + fmt(tg) + "  \u00B7  Gesamt " + fmt(totalWithTG)) : ("Ohne Trinkgeld \u00B7 " + fmt(totalNachRabatt)))
           ),
           // Zahlungsart
           /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#333", marginBottom:10 } }, "Zahlungsart"),
@@ -18744,6 +18777,44 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
   const [query, setQuery] = React.useState("");
   const [showNew, setShowNew] = React.useState(false);
   const [newForm, setNewForm] = React.useState({ name:"", phone:"", street:"", plz:"", city:"" });
+  const [adrText, setAdrText] = React.useState("");
+  const [adrTreffer, setAdrTreffer] = React.useState([]);
+  const [adrLaedt, setAdrLaedt] = React.useState(false);
+  const [adrManuell, setAdrManuell] = React.useState(false);
+  /* Erst tippen lassen, dann suchen. OpenStreetMap erlaubt nur eine Abfrage
+     pro Sekunde - bei jedem Tastendruck zu fragen waere unhoeflich und
+     wuerde uns gesperrt. */
+  React.useEffect(() => {
+    if(adrManuell) return;
+    const q = adrText.trim();
+    if(q.length < 4){ setAdrTreffer([]); return; }
+    let weg = false;
+    setAdrLaedt(true);
+    const t = setTimeout(async () => {
+      const res = await window.belksAdressSuche(q);
+      if(!weg){ setAdrTreffer(res); setAdrLaedt(false); }
+    }, 700);
+    return () => { weg = true; clearTimeout(t); setAdrLaedt(false); };
+  }, [adrText, adrManuell]);
+  const [adrHoert, setAdrHoert] = React.useState(false);
+  const adrDiktat = React.useRef(null);
+  const adrMikro = () => {
+    if (adrHoert) { try { adrDiktat.current && adrDiktat.current.stop(); } catch(e){} setAdrHoert(false); return; }
+    setAdrManuell(false);
+    setAdrHoert(true);
+    adrDiktat.current = window.belksDiktat({
+      sprache: 'de-DE',
+      beiText: (t) => setAdrText(t),
+      beiEnde: () => setAdrHoert(false),
+      beiFehler: (m) => { setAdrHoert(false); alert(m); }
+    });
+  };
+  React.useEffect(() => () => { try { adrDiktat.current && adrDiktat.current.stop(); } catch(e){} }, []);
+  const adrUebernehmen = (a) => {
+    setNewForm(f => ({ ...f, street:a.strasse, plz:a.plz, city:a.ort }));
+    setAdrText(a.zeile);
+    setAdrTreffer([]);
+  };
   const inp = React.useRef(null);
   React.useEffect(() => { setTimeout(() => inp.current && inp.current.focus(), 100); }, []);
 
@@ -18802,15 +18873,60 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
             /*#__PURE__*/React.createElement("div", { style:{fontSize:10,color:"#555",marginBottom:2} }, "📞 Telefon"),
             /*#__PURE__*/React.createElement("input", { type:"tel", value:newForm.phone, onChange:e=>setNewForm(f=>({...f,phone:e.target.value})), placeholder:"+49...", style:iS })
           ),
-          /*#__PURE__*/React.createElement("div", null,
-            /*#__PURE__*/React.createElement("div", { style:{fontSize:10,color:"#555",marginBottom:2} }, "🏠 Straße"),
-            /*#__PURE__*/React.createElement("input", { value:newForm.street, onChange:e=>setNewForm(f=>({...f,street:e.target.value})), placeholder:"Straße", style:iS })
-          ),
-          /*#__PURE__*/React.createElement("div", null,
-            /*#__PURE__*/React.createElement("div", { style:{fontSize:10,color:"#555",marginBottom:2} }, "📮 PLZ / Ort"),
-            /*#__PURE__*/React.createElement("div", { style:{display:"flex",gap:4} },
-              /*#__PURE__*/React.createElement("input", { value:newForm.plz, onChange:e=>setNewForm(f=>({...f,plz:e.target.value})), placeholder:"PLZ", style:{...iS,width:70} }),
+          // --- Adresse: eine Zeile, Vorschlaege waehrend des Tippens ---
+          /*#__PURE__*/React.createElement("div", { style:{ gridColumn:"1 / -1", position:"relative" } },
+            /*#__PURE__*/React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:2 } },
+              /*#__PURE__*/React.createElement("span", { style:{fontSize:10,color:"#555"} }, "\uD83D\uDCCD Adresse"),
+              /*#__PURE__*/React.createElement("button", { onClick:()=>setAdrManuell(m=>!m),
+                style:{ background:"none", border:"none", color:C.blue, fontSize:10, fontWeight:700, cursor:"pointer", fontFamily:"inherit", padding:0 }
+              }, adrManuell ? "\uD83D\uDD0D Suche benutzen" : "\u270F\uFE0F Einzeln eintippen")
+            ),
+            !adrManuell && /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6 } },
+              /*#__PURE__*/React.createElement("input", {
+                value:adrText,
+                onChange:e=>setAdrText(e.target.value),
+                placeholder: adrHoert ? "Sprechen \u2026" : "Bahnhofstra\u00dfe 5 Felsberg \u2026",
+                style:{...iS, flex:1}
+              }),
+              /*#__PURE__*/React.createElement("button", {
+                onClick: adrMikro,
+                title: "Adresse diktieren",
+                style:{ width:46, flexShrink:0, borderRadius:10, border:"2px solid "+(adrHoert?"#c62828":C.green),
+                        background: adrHoert?"#ffebee":"#fff", color: adrHoert?"#c62828":C.green,
+                        fontSize:19, cursor:"pointer", fontFamily:"inherit" }
+              }, adrHoert ? "\u23F9\uFE0F" : "\uD83C\uDFA4")
+            ),
+            adrHoert && /*#__PURE__*/React.createElement("div", { style:{fontSize:11,color:"#c62828",fontWeight:700,marginTop:3} },
+              "\uD83D\uDD34 H\u00F6re zu \u2026 z.B. \u201EBahnhofstra\u00DFe 5 Felsberg\u201C"),
+            !adrManuell && adrLaedt && /*#__PURE__*/React.createElement("div", { style:{fontSize:10,color:"#888",marginTop:3} }, "\u23F3 Suche \u2026"),
+            !adrManuell && adrTreffer.length > 0 && /*#__PURE__*/React.createElement("div", {
+              style:{ background:"#fff", border:"2px solid "+C.green, borderRadius:10, marginTop:4, maxHeight:170, overflowY:"auto" }
+            }, adrTreffer.map((a,i) => /*#__PURE__*/React.createElement("div", {
+              key:i, onClick:()=>adrUebernehmen(a),
+              style:{ padding:"9px 10px", borderBottom: i<adrTreffer.length-1?"1px solid #eee":"none", cursor:"pointer", fontSize:13 }
+            },
+              /*#__PURE__*/React.createElement("div", { style:{fontWeight:700,color:"#222"} }, a.strasse),
+              /*#__PURE__*/React.createElement("div", { style:{fontSize:11,color:"#777"} }, [a.plz, a.ort].filter(Boolean).join(" "))
+            ))),
+            !adrManuell && adrText.trim().length >= 4 && !adrLaedt && adrTreffer.length === 0 && /*#__PURE__*/React.createElement("div", {
+              style:{fontSize:10.5,color:"#e65100",marginTop:3,lineHeight:1.4}
+            }, "Nichts gefunden \u2013 mit \u201EEinzeln eintippen\u201C von Hand eingeben."),
+            // Handeingabe
+            adrManuell && /*#__PURE__*/React.createElement("div", { style:{display:"flex",gap:4,flexWrap:"wrap"} },
+              /*#__PURE__*/React.createElement("input", { value:newForm.street, onChange:e=>setNewForm(f=>({...f,street:e.target.value})), placeholder:"Stra\u00dfe + Nr.", style:{...iS,flexBasis:"100%"} }),
+              /*#__PURE__*/React.createElement("input", { value:newForm.plz, onChange:e=>setNewForm(f=>({...f,plz:e.target.value})), placeholder:"PLZ", style:{...iS,width:80} }),
               /*#__PURE__*/React.createElement("input", { value:newForm.city, onChange:e=>setNewForm(f=>({...f,city:e.target.value})), placeholder:"Ort", style:{...iS,flex:1} })
+            ),
+            // Uebernommene Adresse zur Kontrolle + Karte
+            !adrManuell && newForm.street && /*#__PURE__*/React.createElement("div", {
+              style:{ display:"flex", alignItems:"center", gap:8, marginTop:5, background:"#f1f8e9", borderRadius:8, padding:"6px 8px" }
+            },
+              /*#__PURE__*/React.createElement("div", { style:{flex:1,fontSize:11.5,color:"#33691e",fontWeight:700} },
+                "\u2705 ", newForm.street, " \u00B7 ", newForm.plz, " ", newForm.city),
+              /*#__PURE__*/React.createElement("button", {
+                onClick:()=>{ try{ window.oeffneExtern("https://www.google.com/maps/search/?api=1&query="+encodeURIComponent([newForm.street,newForm.plz,newForm.city].filter(Boolean).join(", "))); }catch(e){} },
+                style:{ background:C.blue, color:"#fff", border:"none", borderRadius:8, padding:"6px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }
+              }, "\uD83D\uDDFA\uFE0F Karte")
             )
           )
         ),
@@ -20310,7 +20426,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v231"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v234"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -23464,6 +23580,108 @@ function maybeOpenDrawer(payMethod, opts){
 }
 window.maybeOpenDrawer=maybeOpenDrawer;
 // v180: SumUp App-zu-App — oeffnet SumUp mit vorbefuelltem Betrag (Key pro Restaurant in eatdesi_firma)
+/* \uD83D\uDCCD ADRESS-SUCHE ueber OpenStreetMap (Nominatim)
+   Kostenlos und ohne Schluessel. Regeln des Dienstes: hoechstens eine Abfrage
+   pro Sekunde - deshalb wird beim Tippen gewartet (siehe Aufrufer) und das
+   Ergebnis kurz gemerkt. Ohne Internet gibt es einfach keine Vorschlaege,
+   die Handeingabe bleibt immer moeglich. */
+/* \uD83C\uDFA4 DIKTAT
+   Ein Weg fuer beide Welten: in der App das native Plugin, im Browser die
+   eingebaute Spracherkennung. Gibt ein Objekt mit stop() zurueck.
+   beiText(text, fertig) wird laufend gerufen - fertig=true beim letzten Wort. */
+window.belksDiktat = function(opt){
+  opt = opt || {};
+  var sprache = opt.sprache || 'de-DE';
+  var beiText = opt.beiText || function(){};
+  var beiEnde = opt.beiEnde || function(){};
+  var beiFehler = opt.beiFehler || function(){};
+  var beendet = false;
+
+  var cap = window.Capacitor;
+  var nativ = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
+  var Plug = cap && cap.Plugins && cap.Plugins.SpeechRecognition;
+
+  if (nativ && Plug) {
+    var stilleTimer = null, letzter = '';
+    var beenden = function(){
+      if (beendet) return; beendet = true;
+      if (stilleTimer) clearTimeout(stilleTimer);
+      try { Plug.stop(); } catch(e){}
+      try { Plug.removeAllListeners(); } catch(e){}
+      if (letzter) beiText(letzter, true);
+      beiEnde();
+    };
+    (async function(){
+      try {
+        try {
+          var perm = await Plug.checkPermissions();
+          if (!perm || perm.speechRecognition !== 'granted') await Plug.requestPermissions();
+        } catch(pe) { try { await Plug.requestPermission(); } catch(pe2){} }
+        try { await Plug.removeAllListeners(); } catch(re){}
+        Plug.addListener('partialResults', function(d){
+          var arr = d && (d.matches || d.value);
+          if (arr && arr.length) {
+            letzter = arr[0];
+            beiText(letzter, false);
+            if (stilleTimer) clearTimeout(stilleTimer);
+            // nach 1,6 s Stille ist der Satz zu Ende
+            stilleTimer = setTimeout(beenden, 1600);
+          }
+        });
+        Plug.addListener('listeningState', function(st){
+          if (st && st.status === 'stopped') beenden();
+        });
+        await Plug.start({ language: sprache, partialResults: true, popup: false, maxResults: 1 });
+      } catch(e) { beendet = true; beiFehler('Mikrofon nicht verf\u00FCgbar: ' + (e && e.message ? e.message : e)); beiEnde(); }
+    })();
+    return { stop: beenden };
+  }
+
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { beiFehler('Dieses Ger\u00E4t kann nicht diktieren.'); beiEnde(); return { stop: function(){} }; }
+  try {
+    var r = new SR();
+    r.lang = sprache; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+    r.onresult = function(ev){
+      var t = '';
+      for (var i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript;
+      beiText(t.trim(), !!(ev.results[ev.results.length-1] && ev.results[ev.results.length-1].isFinal));
+    };
+    r.onerror = function(ev){ beiFehler(ev && ev.error === 'not-allowed' ? 'Mikrofon nicht erlaubt.' : 'Diktat abgebrochen.'); };
+    r.onend = function(){ if (!beendet) { beendet = true; beiEnde(); } };
+    r.start();
+    return { stop: function(){ try { r.stop(); } catch(e){} } };
+  } catch(e) { beiFehler('Diktat nicht m\u00F6glich.'); beiEnde(); return { stop: function(){} }; }
+};
+
+window._belksAdrCache = window._belksAdrCache || {};
+window.belksAdressSuche = async function(text){
+  var q = String(text||'').trim();
+  if(q.length < 4) return [];
+  if(window._belksAdrCache[q]) return window._belksAdrCache[q];
+  try{
+    var url = 'https://nominatim.openstreetmap.org/search?format=json&addressdetails=1'
+            + '&countrycodes=de&limit=6&q=' + encodeURIComponent(q);
+    var r = await fetch(url, { headers:{ 'Accept':'application/json' } });
+    if(!r.ok) return [];
+    var j = await r.json();
+    var out = (j||[]).map(function(e){
+      var a = e.address || {};
+      var ort = a.city || a.town || a.village || a.municipality || a.suburb || '';
+      var strasse = [a.road || '', a.house_number || ''].filter(Boolean).join(' ');
+      return {
+        strasse: strasse,
+        plz: a.postcode || '',
+        ort: ort,
+        stadtteil: (a.suburb && a.suburb !== ort) ? a.suburb : '',
+        zeile: [strasse, [a.postcode||'', ort].filter(Boolean).join(' ')].filter(Boolean).join(', ')
+      };
+    }).filter(function(e){ return e.strasse && e.ort; });
+    window._belksAdrCache[q] = out;
+    return out;
+  }catch(e){ return []; }
+};
+
 window.sumupPay=function(amount, title){
   try{
     var f={}; try{ f=JSON.parse(localStorage.getItem('eatdesi_firma')||'null')||{}; }catch(e){}
