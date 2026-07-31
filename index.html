@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v226</title>
+<title>eatDeSi POS v231</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v226';",
+    "var CACHE='eatdesi-v231';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -7709,6 +7709,20 @@ function isDrink(item){
   if(item.cat && DRINK_CATS.indexOf(item.cat) !== -1) return true;
   return false;
 }
+/* \uD83D\uDDA8\uFE0F AUF WELCHEN BON GEH\u00D6RT DER ARTIKEL?
+   Frueher entschied allein isDrink() - das haengt aber an der MwSt-Einstellung.
+   Eine Schorle auf "7% Speisen" landete damit auf dem Kuechenbon.
+   Jetzt kann es pro Artikel gesetzt werden; ohne Auswahl bleibt es wie bisher.
+   Wichtig: die MwSt-Rechnung unten benutzt weiter isDrink() und bleibt
+   davon voellig unberuehrt. */
+function bonZiel(item){
+  if(!item) return 'kueche';
+  if(item.bon === 'bar') return 'bar';
+  if(item.bon === 'kueche') return 'kueche';
+  return isDrink(item) ? 'bar' : 'kueche';
+}
+function istBar(item){ return bonZiel(item) === 'bar'; }
+
 // MwSt-Betrag (herausgerechnet aus Brutto) für 7%-Speisen
 function calcTax7(items){
   const list = items || [];
@@ -8704,7 +8718,8 @@ function BonModal({
   customerPlz,
   customerCity,
   gutscheine,
-  setGutscheine
+  setGutscheine,
+  onGedruckt
 }) {
   const [printed, setPrinted] = useState({
     gast: false,
@@ -8738,8 +8753,18 @@ function BonModal({
   const totalTax = tax7 + tax19;
   const netto = (total - fee) - totalTax;
   const now = new Date();
-  const foodItems = items.filter(i => !isDrink(i));
-  const drinkItems = items.filter(i => isDrink(i));
+  const foodItems = items.filter(i => !istBar(i));
+  const drinkItems = items.filter(i => istBar(i));
+  /* \uD83D\uDD01 NACHBESTELLUNG
+     Pro Position steht in gedrucktK / gedrucktB, wie viele Stueck Kueche bzw.
+     Bar schon bekommen haben. Gedruckt wird nur die Differenz. Menge, nicht
+     Haekchen - weil eine Nachbestellung die vorhandene Zeile erhoeht
+     (2x Weizen wird zu 4x Weizen) statt eine neue anzulegen. */
+  const nurNeu = (liste, feld) => liste
+    .map(i => ({ ...i, qty: (i.qty || 0) - (i[feld] || 0) }))
+    .filter(i => i.qty > 0);
+  const neuKueche = nurNeu(foodItems, "gedrucktK");
+  const neuBar    = nurNeu(drinkItems, "gedrucktB");
   const hasDelivery = customerStreet || customerCity;
   const deliveryBlock = hasDelivery ? `
     <div class="line"></div>
@@ -8898,10 +8923,13 @@ function BonModal({
     return groups;
   };
   const printKuche = () => {
-    if (!foodItems.length) {
-      return;
+    if (!foodItems.length) return;
+    let liste = neuKueche;
+    if (!liste.length) {
+      if (!window.confirm("Die K\xFCche hat schon alles bekommen.\n\nAlles noch einmal drucken? (z.B. wenn der Bon verloren ging)")) return;
+      liste = foodItems;
     }
-    const groups = groupByCat(foodItems);
+    const groups = groupByCat(liste);
     const cats = Object.keys(groups);
     const lines = cats.map((cat, ci) =>
       `<div class="bold center" style="font-size:16px;margin:6px 0 4px">- ${cat} -</div><div>&nbsp;</div>` +
@@ -8910,16 +8938,17 @@ function BonModal({
       ).join("")
     ).join("");
     doPrint(kvBonHtml("🍳 KÜCHE — SPEISEN", lines));
-    setPrinted(p => ({
-      ...p,
-      kuche: true
-    }));
+    setPrinted(p => ({ ...p, kuche: true }));
+    if (onGedruckt) onGedruckt("K");
   };
   const printBar = () => {
-    if (!drinkItems.length) {
-      return;
+    if (!drinkItems.length) return;
+    let liste = neuBar;
+    if (!liste.length) {
+      if (!window.confirm("Die Bar hat schon alles bekommen.\n\nAlles noch einmal drucken? (z.B. wenn der Bon verloren ging)")) return;
+      liste = drinkItems;
     }
-    const groups = groupByCat(drinkItems);
+    const groups = groupByCat(liste);
     const cats = Object.keys(groups);
     const lines = cats.map((cat, ci) =>
       `<div class="bold center" style="font-size:16px;margin:6px 0 4px">- ${cat} -</div><div>&nbsp;</div>` +
@@ -8928,10 +8957,8 @@ function BonModal({
       ).join("")
     ).join("");
     doPrint(kvBonHtml("🍺 BAR — GETRÄNKE", lines));
-    setPrinted(p => ({
-      ...p,
-      bar: true
-    }));
+    setPrinted(p => ({ ...p, bar: true }));
+    if (onGedruckt) onGedruckt("B");
   };
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -9175,7 +9202,9 @@ function BonModal({
       fontSize: 11,
       textAlign: "center"
     }
-  }, "\uD83C\uDF73", /*#__PURE__*/React.createElement("br", null), "K\xFCche", printed.kuche && " ✓"), drinkItems.length > 0 && /*#__PURE__*/React.createElement("button", {
+  }, "\uD83C\uDF73", /*#__PURE__*/React.createElement("br", null), "K\xFCche",
+     neuKueche.length ? (" +" + neuKueche.reduce((a,i)=>a+i.qty,0)) : (printed.kuche || foodItems.length ? " ✓" : "")),
+     drinkItems.length > 0 && /*#__PURE__*/React.createElement("button", {
     onClick: printBar,
     style: {
       padding: "10px 6px",
@@ -9189,7 +9218,8 @@ function BonModal({
       fontSize: 11,
       textAlign: "center"
     }
-  }, "\uD83C\uDF7A", /*#__PURE__*/React.createElement("br", null), "Bar", printed.bar && " ✓")), /*#__PURE__*/React.createElement("button", {
+  }, "\uD83C\uDF7A", /*#__PURE__*/React.createElement("br", null), "Bar",
+     neuBar.length ? (" +" + neuBar.reduce((a,i)=>a+i.qty,0)) : " ✓")), /*#__PURE__*/React.createElement("button", {
     onClick: onPay,
     style: {
       padding: 13,
@@ -9624,6 +9654,17 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
       selItems.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ background:gastColor+"15", borderRadius:8, padding:"10px 12px", marginBottom:10, display:"flex", justifyContent:"space-between", fontWeight:700, color:gastColor, fontSize:15 } },
         /*#__PURE__*/React.createElement("span", null, "Gast ", gastNr+1, " gesamt"),
         /*#__PURE__*/React.createElement("span", null, fmt(selTotal))
+      ),
+      /* \u26A0\uFE0F LETZTE ZAHLUNG
+         Alle uebrigen Artikel sind ausgewaehlt -> danach ist der Tisch zu.
+         Hier faellt Gaesten erfahrungsgemaess noch etwas ein. */
+      selItems.length > 0 && selItems.length === items.length && /*#__PURE__*/React.createElement("div", {
+        style:{ background:"#fff3e0", border:"2px solid "+C.orange, borderRadius:10, padding:"10px 12px", marginBottom:10 }
+      },
+        /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:13.5, color:"#e65100" } },
+          "\u26A0\uFE0F Letzte Zahlung \u2013 danach ist Tisch ", String(label||"").replace(/^Tisch\s*/,""), " abgeschlossen"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#8d6e63", marginTop:4, lineHeight:1.5 } },
+          "Fehlt noch etwas? Bitte JETZT fragen \u2013 nach dem Buchen kann nichts mehr nachgetragen werden.")
       ),
       // Trinkgeld
       selItems.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6, marginBottom:10, alignItems:"center" } },
@@ -10307,7 +10348,9 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
               /*#__PURE__*/React.createElement("span", { style:{ fontSize:28 } }, "\uD83D\uDCB3"),
               /*#__PURE__*/React.createElement("span", null, "SumUp \xF6ffnen \u2014 ", fmt(totalWithTG))
             ),
-            /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#aaa", marginBottom:16 } }, "SumUp App \xF6ffnet automatisch \u2022 Card bezahlen \u2022 Zur\xFCck zur POS")
+            /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#e65100", fontWeight:700, marginBottom:4, lineHeight:1.5 } },
+              "\u2139\uFE0F Nach der Kartenzahlung mit der Zur\u00FCck-Taste \u25C0 in die Kasse zur\u00FCck \u2013 dann hier \u201EKarte\u201C buchen."),
+            /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#aaa", marginBottom:16 } }, "Der Tisch wird erst frei, wenn die Zahlung hier gebucht ist.")
           ),
           // Other device: show amount, manual confirm
           sumupMode === "other" && /*#__PURE__*/React.createElement(React.Fragment, null,
@@ -11275,8 +11318,8 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
     try {
       var addr = printerSettings?.btAddress;
       if (!addr || !BTPrint.isNative()) return; // kein Drucker → still überspringen
-      var speisen = items.filter(function(i){ return !isDrink(i); });
-      var getraenke = items.filter(function(i){ return isDrink(i); });
+      var speisen = items.filter(function(i){ return !istBar(i); });
+      var getraenke = items.filter(function(i){ return istBar(i); });
       var mkLines = function(list){ return list.map(function(i){
         return `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.name}</div><div>&nbsp;</div>`;
       }).join(""); };
@@ -12356,7 +12399,7 @@ function KitchenView({
   takeaway,
   onMarkDone
 }) {
-  const isFood = item => !isDrink(item);
+  const isFood = item => !istBar(item);
   // Only show items that haven't been sent to kitchen yet (_kitchenSent not set)
   const all = [...Object.entries(orders).filter(([, o]) => o?.items?.length > 0).map(([id, o]) => ({
     oid: id,
@@ -12506,13 +12549,13 @@ function BarView({
   const all = [...Object.entries(orders).filter(([, o]) => o?.items?.length > 0).map(([id, o]) => ({
     oid: id,
     label: `Tisch ${id}`,
-    items: o.items.filter(i => isDrink(i) && !i._barSent),
+    items: o.items.filter(i => istBar(i) && !i._barSent),
     time: o.time || new Date(),
     barDone: o.barDone
   })), ...takeaway.filter(t => t.items?.length > 0 && !t.done).map(t => ({
     oid: `ta_${t.id}`,
     label: `🥡 Takeaway #${t.id}`,
-    items: t.items.filter(i => isDrink(i) && !i._barSent),
+    items: t.items.filter(i => istBar(i) && !i._barSent),
     time: t.time,
     barDone: t.barDone
   }))].filter(o => o.items.length > 0);
@@ -14618,7 +14661,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
   var [showForm, setShowForm] = R.useState(false);
   var [newCat, setNewCat] = R.useState('');
   var [showNewCat, setShowNewCat] = R.useState(false);
-  var [form, setForm] = R.useState({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',channel:'both',options:[],selectedGroups:[]});
+  var [form, setForm] = R.useState({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});
   var [showGroupForm, setShowGroupForm] = R.useState(false);
   var [editingGroup, setEditingGroup] = R.useState(null);
   var [groupForm, setGroupForm] = R.useState({name:'',required:false,multiple:false,choices:[{name:'',price:''}]});
@@ -14667,21 +14710,21 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
     });
     var item={id:(editing!==null&&menuData[activeCat]&&menuData[activeCat][editing])?menuData[activeCat][editing].id:Date.now(),
       nr:form.nr,name:form.name,price:parseFloat(form.price)||0,
-      veg:form.veg,vegan:form.vegan,taxRate:form.taxRate||'food',channel:form.channel||'both',
+      veg:form.veg,vegan:form.vegan,taxRate:form.taxRate||'food',channel:form.channel||'both',bon:form.bon||'auto',
       options:cleanOpts,
       selectedGroups:form.selectedGroups||[]};
     var u=Object.assign({},menuData);
     if(editing!==null){u[activeCat]=u[activeCat].map(function(x,i){return i===editing?Object.assign({},x,item,{id:x.id}):x;});}
     else{u[activeCat]=(u[activeCat]||[]).concat([item]);}
     onUpdate(u);
-    setForm({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',channel:'both',options:[],selectedGroups:[]});
+    setForm({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});
     setEditing(null);setShowForm(false);
   };
 
   var deleteItem=function(i){var u=Object.assign({},menuData);u[activeCat]=u[activeCat].filter(function(_,j){return j!==i;});onUpdate(u);};
 
   var startEdit=function(item,i){
-    setForm({nr:item.nr||'',name:item.name||'',price:String(item.price||''),veg:item.veg||false,vegan:item.vegan||false,taxRate:item.taxRate||'food',channel:item.channel||'both',options:item.options||[],selectedGroups:item.selectedGroups||[]});
+    setForm({nr:item.nr||'',name:item.name||'',price:String(item.price||''),veg:item.veg||false,vegan:item.vegan||false,taxRate:item.taxRate||'food',channel:item.channel||'both',bon:item.bon||'auto',options:item.options||[],selectedGroups:item.selectedGroups||[]});
     setEditing(i);setShowForm(true);
   };
 
@@ -14784,7 +14827,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
               activeCat,' ',R.createElement('span',{style:{fontSize:12,color:'#888',fontWeight:400}},'('+(menuData[activeCat]||[]).length+' Artikel)')
             ),
             R.createElement('div',{style:{display:'flex',gap:6}},
-              R.createElement('button',{onClick:function(){setEditing(null);setForm({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',channel:'both',options:[],selectedGroups:[]});setShowForm(true);},style:bS(C.green)},'+ Artikel'),
+              R.createElement('button',{onClick:function(){setEditing(null);setForm({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});setShowForm(true);},style:bS(C.green)},'+ Artikel'),
               R.createElement('button',{onClick:function(){deleteCat(activeCat);},style:{padding:'8px 10px',borderRadius:8,border:'none',background:'#ffebee',color:C.red,fontWeight:700,cursor:'pointer',fontSize:13}},'Loeschen')
             )
           ),
@@ -14831,6 +14874,22 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                 })
               ),
               R.createElement('div',{style:{fontSize:11,color:'#999',marginTop:5}},'Getr\xE4nke wie Cocktails/Bier ggf. auf \u201ENur im Haus\u201C stellen \u2013 erscheinen dann nicht im Webshop.')
+            ),
+            // --- Auf welchen Bon? Kueche oder Bar ---
+            R.createElement('div',{style:{marginBottom:12}},
+              R.createElement('div',{style:{fontSize:12,fontWeight:700,color:'#555',marginBottom:6}},'\uD83D\uDDA8\uFE0F Bon-Drucker'),
+              R.createElement('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
+                [['auto','\u2699\uFE0F Automatisch'],['kueche','\uD83C\uDF73 K\xFCche'],['bar','\uD83C\uDF7A Bar']].map(function(opt){
+                  var active=(form.bon||'auto')===opt[0];
+                  return R.createElement('button',{key:opt[0],type:'button',
+                    onClick:function(){setForm(Object.assign({},form,{bon:opt[0]}));},
+                    style:{flex:'1 1 30%',minWidth:96,padding:'9px 8px',borderRadius:8,fontSize:12.5,fontWeight:700,cursor:'pointer',fontFamily:'inherit',
+                      border:active?('2px solid '+C.green):'1.5px solid #ddd',
+                      background:active?C.green:'#fff',color:active?'#fff':'#555'}},opt[1]);
+                })
+              ),
+              R.createElement('div',{style:{fontSize:11,color:'#999',marginTop:5}},
+                'Automatisch = nach MwSt: 19% Getr\xE4nke gehen an die Bar, alles andere in die K\xFCche. Bei einer Schorle mit 7% w\xE4re das falsch \u2013 dann hier \u201EBar\u201C w\xE4hlen.')
             ),
             // --- Artikel-Optionen ---
             R.createElement('div',{style:{marginTop:12,borderTop:'1px dashed #ddd',paddingTop:10}},
@@ -15943,6 +16002,7 @@ function PrinterSettingsView({
 function MarketingView({ printerSettings, setPrinterSettings }) {
   const [qrCanvas, setQrCanvas] = React.useState(null);
   const canvasRef = React.useRef(null);
+  const [qrMsg, setQrMsg] = React.useState("");
   const [saved, setSaved] = React.useState(false);
   const [savedQR, setSavedQR] = React.useState(() => LS.get("eatdesi_qr_image", null));
   const [showQrUpload, setShowQrUpload] = React.useState(false);
@@ -15957,19 +16017,70 @@ function MarketingView({ printerSettings, setPrinterSettings }) {
 
   React.useEffect(() => {
     if (!canvasRef.current || !reviewPageUrl) return;
-    if (typeof QRCode === "undefined") return;
-    QRCode.toCanvas(canvasRef.current, reviewPageUrl, {
-      width: 200, margin: 2,
-      color: { dark: "#1b5e20", light: "#ffffff" }
-    }, err => { if (!err) setQrCanvas(true); });
+    let weg = false;
+    const zeichne = () => {
+      if (weg || !canvasRef.current) return;
+      try {
+        QRCode.toCanvas(canvasRef.current, reviewPageUrl, {
+          width: 200, margin: 2,
+          color: { dark: "#1b5e20", light: "#ffffff" }
+        }, err => {
+          if (err) { setQrMsg("\u274C QR konnte nicht erzeugt werden: " + (err.message || err)); }
+          else { setQrCanvas(true); setQrMsg(""); }
+        });
+      } catch (e) { setQrMsg("\u274C QR-Fehler: " + e.message); }
+    };
+    if (typeof QRCode !== "undefined") { zeichne(); return () => { weg = true; }; }
+    /* Die Bibliothek kommt aus dem Netz. Fehlt sie (kein Netz, CDN blockiert),
+       brach der Code bisher stumm ab - man sah nur ein leeres Feld.
+       Jetzt: nachladen, zweite Quelle als Ersatz, und im Zweifel sagen warum. */
+    setQrMsg("\u23F3 QR-Bibliothek wird geladen \u2026");
+    const quellen = [
+      "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js",
+      "https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js"
+    ];
+    let i = 0;
+    const laden = () => {
+      if (weg) return;
+      if (i >= quellen.length) {
+        setQrMsg("\u274C QR-Bibliothek nicht erreichbar. Bitte einmal mit Internet \u00F6ffnen \u2013 danach geht es auch offline.");
+        return;
+      }
+      const sc = document.createElement("script");
+      sc.src = quellen[i++];
+      sc.onload = () => { setQrMsg(""); zeichne(); };
+      sc.onerror = laden;
+      document.head.appendChild(sc);
+    };
+    laden();
+    return () => { weg = true; };
   }, [reviewPageUrl, printerSettings]);
 
-  const downloadQR = () => {
-    if (!canvasRef.current) return;
-    const a = document.createElement("a");
-    a.href = canvasRef.current.toDataURL("image/png");
-    a.download = "eatDeSi_Bewertung_QR.png";
-    a.click();
+  const downloadQR = async () => {
+    if (!canvasRef.current) { setQrMsg("\u274C Der QR Code ist noch nicht fertig."); return; }
+    let daten;
+    try { daten = canvasRef.current.toDataURL("image/png"); }
+    catch (e) { setQrMsg("\u274C Bild konnte nicht erzeugt werden."); return; }
+    const name = "QR_Bewertung.png";
+    /* In der Android-App gibt es keinen Download-Manager: <a download> tut dort
+       schlicht nichts. Deshalb erst der native Weg (speichern + teilen). */
+    try {
+      const Plug = (window.Capacitor && window.Capacitor.Plugins) || {};
+      if (Plug.Filesystem && Plug.Share) {
+        setQrMsg("\u23F3 QR wird vorbereitet \u2026");
+        await Plug.Filesystem.writeFile({ path: name, data: daten.split(",")[1], directory: "CACHE" });
+        const ort = await Plug.Filesystem.getUri({ path: name, directory: "CACHE" });
+        await Plug.Share.share({ title: "QR Code Bewertung", url: ort.uri });
+        setQrMsg("");
+        return;
+      }
+    } catch (e) { /* faellt unten auf den Browser-Weg zurueck */ }
+    try {
+      const a = document.createElement("a");
+      a.href = daten; a.download = name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setQrMsg("");
+    } catch (e) { setQrMsg("\u274C Speichern nicht m\u00F6glich \u2013 QR bitte abfotografieren."); }
   };
 
   const printQR = () => {
@@ -16151,6 +16262,8 @@ function MarketingView({ printerSettings, setPrinterSettings }) {
       React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:C.green, marginBottom:10 } }, "📱 Auto QR Code (aus Link)"),
       React.createElement("canvas", { ref:canvasRef, style:{ borderRadius:12, border:"3px solid #e8f5e9" } }),
       React.createElement("div", { style:{ fontSize:11, color:"#888", marginTop:8 } }, "Scannt zu: ", reviewPageUrl.slice(0,40)+"..."),
+      qrMsg ? React.createElement("div", { style:{ fontSize:12, fontWeight:700, marginTop:6, lineHeight:1.45,
+        color: qrMsg.indexOf("\u274C")===0 ? "#c62828" : "#555" } }, qrMsg) : null,
       React.createElement("div", { style:{ display:"flex", gap:10, marginTop:12 } },
         React.createElement("button", { onClick:downloadQR, style:{ flex:1, padding:11, borderRadius:10, border:"2px solid "+C.green, background:"#e8f5e9", color:C.green, cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 } }, "⬇️ Download"),
         React.createElement("button", { onClick:printQR, style:{ flex:1, padding:11, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 } }, "🖨️ Print A4")
@@ -20197,7 +20310,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v226"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v231"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21020,6 +21133,19 @@ function App() {
       total,
       bonNr
     });
+    }
+  };
+  /* Haelt fest, wie viel Kueche/Bar bereits bekommen haben.
+     Wird direkt nach dem Druck aufgerufen - danach zaehlt nur noch,
+     was der Gast NEU dazubestellt. */
+  const markiereGedruckt = (tid, feld) => {
+    const key = feld === "K" ? "gedrucktK" : "gedrucktB";
+    const setzen = (liste) => (liste || []).map(i => ({ ...i, [key]: i.qty || 0 }));
+    if (String(tid).startsWith("ta_")) {
+      const taId = parseInt(String(tid).replace("ta_", ""));
+      setTakeaway(t => t.map(x => x.id === taId ? { ...x, items: setzen(x.items) } : x));
+    } else {
+      setTableOrders(p => p[tid] ? { ...p, [tid]: { ...p[tid], items: setzen(p[tid].items) } } : p);
     }
   };
   const startPay = (tid, items, total, directSplit = false) => {
@@ -22402,6 +22528,7 @@ function App() {
     }, "Später")
   )),
   bonModal && /*#__PURE__*/React.createElement(BonModal, _extends({}, bonModal, {
+    onGedruckt: (feld) => markiereGedruckt(bonModal.tableId, feld),
     printerSettings: printerSettings,
     onClose: () => setBonModal(null),
     onPay: () => startPay(bonModal.tableId, bonModal.items, bonModal.total),
@@ -23343,10 +23470,16 @@ window.sumupPay=function(amount, title){
     var key=String(f.sumupKey||'').trim();
     if(!key){ window.alert('\uD83D\uDCB3 SumUp: Erst Affiliate-Key in Einstellungen \u2192 \uD83D\uDCB3 SumUp speichern (developer.sumup.com).'); return; }
     var amt=(Math.round(Number(amount||0)*100)/100).toFixed(2);
+    /* KEIN callback! Eine https-Adresse als Rueckweg landet in Android immer
+       beim Standard-Browser, nicht in dieser App. Chrome hat einen eigenen
+       Speicher: dort ist weder das Restaurant angemeldet noch der Tisch offen
+       (beobachtet: nach der Zahlung stand dort ein fremdes Restaurant).
+       Ohne callback bleibt SumUp in seiner App, und die Zurueck-Taste fuehrt
+       zurueck in die Kasse - selbe App, selber Tisch, alles wie vorher.
+       Ein echter Ruecksprung braucht ein eigenes Schema in der APK. */
     var url='sumupmerchant://pay/1.0?affiliate-key='+encodeURIComponent(key)
       +'&app-id=com.eatdesi.pos&total='+amt+'&currency=EUR'
-      +'&title='+encodeURIComponent(String(title||'Belks POS'))
-      +'&callback='+encodeURIComponent('https://eatdesi.github.io/eatdesi-pos/');
+      +'&title='+encodeURIComponent(String(title||'Belks POS'));
     location.href=url;
   }catch(e){ window.alert('SumUp-Start fehlgeschlagen: '+e); }
 };
