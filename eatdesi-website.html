@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-31c: Kundenkonten laufen ueber Server-Funktionen (belks_kunde_bekannt / _login / _speichern / _bestellung). Die komplette Kundenliste wird NICHT mehr in den Browser geladen und nicht mehr ganz zurueckgeschrieben — kein Datenabfluss, keine verlorenen Konten bei gleichzeitigen Bestellungen. Punkte rechnet der Server. · Update 2026-07-31b: Tochter-Kategorien im Webshop sichtbar (auch außerhalb CAT_GROUPS) · Über-uns nie BW-Text auf Töchtern · Update 2026-07-27c: Speichern-Feedback sichtbar (Toast über Admin, Button-Bestätigung) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
+<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-31e: Bestellungen abgesichert. Live-Status und eigene Bestellungen laufen ueber belks_bestellstatus / belks_meine_bestellungen — die Seite laedt keine fremden Bestellungen mehr. Bestellung als reines INSERT (anon braucht kein UPDATE). Reports im Web-Admin entfernt (Zahlen stehen im POS). · Update 2026-07-31d: Wartezeit lesbar — bei Vorbestellungen steht jetzt der Zeitpunkt ("gegen 14:15 Uhr" / "01.08. um 14:15 Uhr") statt "ca. 2159 Min". Im Kundenkonto werden [FERTIG] und [GELIEFERT] richtig angezeigt statt dauerhaft "In Arbeit". · Update 2026-07-31c: Kundenkonten laufen ueber Server-Funktionen (belks_kunde_bekannt / _login / _speichern / _bestellung). Die komplette Kundenliste wird NICHT mehr in den Browser geladen und nicht mehr ganz zurueckgeschrieben — kein Datenabfluss, keine verlorenen Konten bei gleichzeitigen Bestellungen. Punkte rechnet der Server. · Update 2026-07-31b: Tochter-Kategorien im Webshop sichtbar (auch außerhalb CAT_GROUPS) · Über-uns nie BW-Text auf Töchtern · Update 2026-07-27c: Speichern-Feedback sichtbar (Toast über Admin, Button-Bestätigung) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -764,7 +764,6 @@ footer .fl:hover{color:var(--gold)}
   </div>
   <div class="admin-tabs" id="adminTabs" style="display:none">
     <button data-at="status" class="on" onclick="adminTab('status')">🟢 Status</button>
-    <button data-at="reports" onclick="adminTab('reports')">📊 Reports</button>
     <button data-at="requests" onclick="adminTab('requests')">📬 Anfragen</button>
     <button data-at="zones" onclick="adminTab('zones')">🛵 Liefergebiete</button>
     <button data-at="hours" onclick="adminTab('hours')">🕐 Öffnungszeiten</button>
@@ -1439,8 +1438,8 @@ async function placeOrder(){
     customer_email:email||null,
     customer_street:addr||null,note:orderNote,source:'WEBSHOP',created_at:new Date().toISOString(),storniert:false};
   try{
-    const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr',{method:'POST',
-      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
+    const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders',{method:'POST',
+      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(r.ok||r.status===201||r.status===409){
       var consent=true; try{ var cb=document.getElementById('f_saveacct'); if(cb) consent=!!cb.checked; }catch(e){}
       cart=[];updateCart();window._redeemWanted=false;showDone(bonNr,total,isDeliv);
@@ -1458,8 +1457,8 @@ async function placeOrder(){
   }catch(e){btn.disabled=false;btn.textContent='Erneut absenden';toast('⚠️ Senden fehlgeschlagen');console.warn(e);}
 }
 async function retryMinimal(bonNr,tableId,items,total,pay,name,phone,note){
-  try{const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr',{method:'POST',
-    headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
+  try{const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders',{method:'POST',
+    headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
     body:JSON.stringify({location_id:LOCATION_ID,bon_nr:bonNr,table_id:tableId+' · '+note,items:JSON.stringify(items),total,payment:pay,customer_name:name,customer_phone:phone,source:'WEBSHOP',created_at:new Date().toISOString(),storniert:false})});
     return r.ok||r.status===201||r.status===409;}catch(e){return false;}
 }
@@ -1483,16 +1482,44 @@ function showDone(bonNr,total,isDeliv){
    ==================================================================== */
 let _statusTimer=null;
 let _trackBon=null, _trackDeliv=false, _trackDine=false;
+let _trackCreated=null;   // Zeitpunkt der Bestellung – Grundlage fuer die Zeitrechnung
 function stopStatusTracking(){ if(_statusTimer){clearInterval(_statusTimer);_statusTimer=null;} }
+
+/* ⏱️ WARTEZEIT LESBAR MACHEN
+   Der POS schreibt [OK:min]. Bei einer Vorbestellung auf einen spaeteren Tag
+   rechnet er die Minuten bis zur Wunschzeit aus – dann steht dort z.B. 2159.
+   "ca. 2159 Min" sagt einem Gast nichts. Bis 2 Stunden sind Minuten am
+   verstaendlichsten, danach nennen wir den Zeitpunkt. */
+function wartezeitText(prepMin, basisISO){
+  var m = parseInt(prepMin, 10);
+  if(!m || isNaN(m) || m < 1) return '';
+  if(m <= 120) return 'ca. ' + m + ' Min';
+  var basis = basisISO ? new Date(basisISO) : null;
+  if(basis && !isNaN(basis.getTime())){
+    var ziel = new Date(basis.getTime() + m*60000);
+    var uhr  = ziel.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+    if(ziel.toDateString() === new Date().toDateString()) return 'gegen ' + uhr + ' Uhr';
+    return ziel.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'}) + ' um ' + uhr + ' Uhr';
+  }
+  var std = Math.round(m/60);
+  return (std < 48) ? ('ca. ' + std + ' Std') : ('ca. ' + Math.round(std/24) + ' Tage');
+}
+// "in ca. 30 Min" vs. "gegen 14:15 Uhr" – das "in" passt nur bei Minuten.
+function wartezeitSatz(prepMin, basisISO){
+  var t = wartezeitText(prepMin, basisISO);
+  if(!t) return '';
+  return (t.indexOf('ca.') === 0) ? ('in ' + t) : t;
+}
 
 // Banner unten aktualisieren
 function renderTrackBanner(stage, prepMin){
   const bar=document.getElementById('orderTrack'); if(!bar) return;
   const ic={pruefen:'⏳',ok:'✅',kocht:'👨‍🍳',fertig:(_trackDeliv?'🛵':'🍽️'),ende:'🎉',abgelehnt:'😔'}[stage]||'⏳';
   const wayWord=_trackDeliv?'geliefert':(_trackDine?'serviert':'abholbereit');
+  const _zt=wartezeitText(prepMin,_trackCreated);
   const txt={
     pruefen:'Wird geprüft…',
-    ok:'Bestätigt'+(prepMin?(' · ca. '+prepMin+' Min'):''),
+    ok:'Bestätigt'+(_zt?(' · '+_zt):''),
     kocht:'Wird zubereitet 👨‍🍳',
     fertig:(_trackDeliv?'Unterwegs zu dir 🛵':'Fertig – bitte abholen'),
     ende:(_trackDeliv?'Geliefert ✓':'Abgeschlossen ✓'),
@@ -1526,9 +1553,10 @@ function renderStatus(stage, prepMin, isDeliv, isDine){
   // Falls Warenkorb-Statusansicht offen ist, auch dort die Schritte zeichnen
   const el=document.getElementById('liveStatus'); if(!el) return;
   const wayWord=isDeliv?'geliefert':(isDine?'serviert':'abholbereit');
+  const _zs=wartezeitSatz(prepMin,_trackCreated);
   const steps=[
     {k:'pruefen', ic:'⏳', t:'Wird geprüft…'},
-    {k:'ok',      ic:'✅', t:'Bestätigt'+(prepMin?(' · in ca. '+prepMin+' Min '+wayWord):'')},
+    {k:'ok',      ic:'✅', t:'Bestätigt'+(_zs?(' · '+_zs+' '+wayWord):'')},
     {k:'kocht',   ic:'👨‍🍳', t:'Wird zubereitet'},
     {k:'fertig',  ic:'🍽️', t:(isDeliv?'Unterwegs zu dir':'Fertig – '+(isDine?'wird serviert':'bitte abholen'))},
   ];
@@ -1567,11 +1595,10 @@ function stageFromNote(note){
 }
 async function pollStatus(bonNr, isDeliv, isDine){
   try{
-    const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders?location_id=eq.'+LOCATION_ID+'&bon_nr=eq.'+encodeURIComponent(bonNr)+'&select=note&limit=1',
-      {headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
-    if(!r.ok) return;
-    const arr=await r.json();
+    const eintrag=await bestellStatus(bonNr);
+    const arr = eintrag ? [eintrag] : [];
     if(arr&&arr[0]){
+      _trackCreated=arr[0].created_at||_trackCreated;
       const s=stageFromNote(arr[0].note);
       renderStatus(s.stage,s.prepMin,isDeliv,isDine);
       // Endzustände: Polling stoppen, Banner nach kurzer Zeit ausblenden
@@ -1811,6 +1838,15 @@ async function kundeLogin(phone,hash){
 async function kundeSpeichern(phone,hash,daten){
   return await kundeRPC('belks_kunde_speichern',{p_loc:LOCATION_ID,p_phone:String(phone||''),p_hash:String(hash||''),p_daten:daten||{}});
 }
+// Status EINER Bestellung – gibt nur Marker und Zeit zurueck, keine Namen.
+async function bestellStatus(bonNr){
+  return await kundeRPC('belks_bestellstatus',{p_loc:LOCATION_ID,p_bon:String(bonNr||'')});
+}
+// Eigene Bestellungen – nur mit dem eigenen Passwort. Frueher lud die Seite
+// 200 fremde Bestellungen samt Telefonnummern und sortierte im Browser.
+async function meineBestellungen(phone,hash){
+  return await kundeRPC('belks_meine_bestellungen',{p_loc:LOCATION_ID,p_phone:String(phone||''),p_hash:String(hash||'')});
+}
 // Bestellung verbuchen: Besuch zaehlen, Punkte einloesen + sammeln.
 // Gerechnet wird auf dem Server, damit niemand sich Punkte schenken kann.
 async function kundeBestellung(phone,daten,total,redeem,bonNr,anlegen){
@@ -1916,7 +1952,7 @@ async function acctPwLogin(np){
   var found=await kundeLogin(np, h);
   if(!found){ if(err) err.textContent='❌ Falsches Passwort oder Konto nicht gefunden.'; return; }
   if(found.ohnePasswort) return renderAcctSetPw(np, found, false);
-  var c={phone:found.phone||np, name:found.name||'', points:(typeof found.points==='number')?found.points:null, email:found.email||'', street:found.street||'', zip:found.zip||'', city:found.city||''};
+  var c={phone:found.phone||np, name:found.name||'', points:(typeof found.points==='number')?found.points:null, email:found.email||'', street:found.street||'', zip:found.zip||'', city:found.city||'', sess:h};
   setCust(c);
   renderAccount(c);
 }
@@ -1944,7 +1980,7 @@ async function acctSetPw(np){
   var res=await kundeSpeichern(np, h, {});
   if(!res || res.ok!==true){ if(err) err.textContent='❌ '+((res&&res.grund)||'Konnte nicht speichern.'); return; }
   var found=res.kunde||{};
-  var c={phone:found.phone||np, name:found.name||'', points:(typeof found.points==='number')?found.points:null, email:found.email||'', street:found.street||'', zip:found.zip||'', city:found.city||''};
+  var c={phone:found.phone||np, name:found.name||'', points:(typeof found.points==='number')?found.points:null, email:found.email||'', street:found.street||'', zip:found.zip||'', city:found.city||'', sess:h};
   setCust(c);
   renderAccount(c);
 }
@@ -1980,19 +2016,28 @@ async function acctCreate(raw){
   if(info && info.bekannt){ if(err) err.textContent='Nummer existiert schon – bitte anmelden.'; return; }
   var daten={name:name,phone:raw,kundenNr:raw};
   if(email) daten.email=email;
-  var res=await kundeSpeichern(np, (await custHashPw(np,p1)), daten);
+  var _h=await custHashPw(np,p1);
+  var res=await kundeSpeichern(np, _h, daten);
   if(!res || res.ok!==true){ if(err) err.textContent='❌ '+((res&&res.grund)||'Konnte nicht speichern.'); return; }
   var kk=res.kunde||{};
-  var c={phone:kk.phone||raw,name:kk.name||name,points:(typeof kk.points==='number')?kk.points:0,email:kk.email||email||''};
+  var c={phone:kk.phone||raw,name:kk.name||name,points:(typeof kk.points==='number')?kk.points:0,email:kk.email||email||'',sess:_h};
   setCust(c);
   renderAccount(c);
 }
 function acctStatusLabel(o){
   var n=String(o.note||'');
   if(o.storniert || n.indexOf('[ABGELEHNT]')>=0) return {t:'❌ Storniert', c:'#c62828'};
-  if(n.indexOf('[NEU]')>=0) return {t:'🕐 Eingegangen', c:'#f57c00'};
+  // Endstufen zuerst – [OK:min] bleibt in der note stehen und wuerde sonst
+  // eine laengst fertige Bestellung weiter als "In Arbeit" anzeigen.
+  if(n.indexOf('[GELIEFERT]')>=0) return {t:'✅ Abgeschlossen', c:'#2e7d32'};
+  if(n.indexOf('[FERTIG]')>=0)    return {t:'🛎️ Fertig', c:'#2e7d32'};
+  if(n.indexOf('[NEU]')>=0)       return {t:'🕐 Eingegangen', c:'#f57c00'};
   var m=n.match(/\[OK:(\d+)\]/);
-  if(m) return {t:'👨‍🍳 In Arbeit (ca. '+m[1]+' Min)', c:'#1565c0'};
+  if(m){
+    var kopf = (n.indexOf('[KOCHT]')>=0) ? '👨‍🍳 In Arbeit' : '✅ Bestätigt';
+    var zt   = wartezeitText(m[1], o.created_at);
+    return {t: kopf + (zt ? (' · ' + zt) : ''), c:'#1565c0'};
+  }
   return {t:'✅ Abgeschlossen', c:'#2e7d32'};
 }
 async function renderAccount(c){
@@ -2014,12 +2059,12 @@ async function renderAccount(c){
   var box=document.getElementById('ac_orders');
   try{
     var phone=normPhone(c.phone);
-    var r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders?location_id=eq.'+LOCATION_ID+'&customer_phone=not.is.null&order=created_at.desc&limit=200&select=bon_nr,created_at,total,note,storniert,customer_phone',
-      {headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    var all=await r.json();
-    var mine=(all||[]).filter(function(o){ return normPhone(o.customer_phone)===phone; }).slice(0,15);
+    // Der Server gibt NUR die eigenen Bestellungen heraus – und nur gegen das
+    // eigene Passwort. c.sess ist die Pruefsumme aus der Anmeldung.
+    if(!c.sess){ if(box) box.innerHTML='Bitte einmal neu anmelden, dann erscheinen deine Bestellungen hier.'; return; }
+    var mine=await meineBestellungen(c.phone, c.sess);
     if(!box) return;
+    if(mine===null){ box.innerHTML='Bitte einmal neu anmelden, dann erscheinen deine Bestellungen hier.'; return; }
     if(!mine.length){ box.innerHTML='Noch keine Bestellungen mit dieser Nummer. Bei deiner nächsten Bestellung einfach dieselbe Handynummer angeben. 😊'; return; }
     box.innerHTML='<div style="font-weight:800;color:#333;margin-bottom:6px">🧾 Deine letzten Bestellungen</div>'+mine.map(function(o){
       var d=new Date(o.created_at);
@@ -2625,7 +2670,7 @@ function checkPin(){
 }
 
 function adminTab(t){adminTabCur=t;document.querySelectorAll('#adminTabs button').forEach(b=>b.classList.toggle('on',b.dataset.at===t));
-  if(t==='status')drawStatus();else if(t==='reports')drawReports();else if(t==='requests')drawRequests();else if(t==='zones')drawZones();
+  if(t==='status')drawStatus();else if(t==='requests')drawRequests();else if(t==='zones')drawZones();
   else if(t==='hours')drawHours();else if(t==='offers')drawOffers();else if(t==='events')drawEvents();else if(t==='ai')drawAI();else if(t==='company')drawCompany();else if(t==='menuinfo')drawMenuInfo();else if(t==='gallery')drawGallery();}
 
 /* ---- STATUS / SERVICE-SCHALTER ---- */
@@ -2678,9 +2723,13 @@ async function drawReports(){
     <div id="repContent"><p style="color:var(--paper-2)">Lädt Bestelldaten…</p></div>`;
   const since=new Date(); if(repPeriod==='today')since.setHours(0,0,0,0);
   else if(repPeriod==='week')since.setDate(since.getDate()-7); else since.setDate(since.getDate()-30);
+  // Diese Auswertung ist bewusst abgeschaltet: sie lud bis zu 2000 vollstaendige
+  // Bestellungen mit Namen, Adressen und Telefonnummern in den Browser, und der
+  // PIN davor wurde nur im Browser geprueft – also gar kein Schutz.
+  // Die Zahlen stehen im POS unter Berichte, dort getrennt nach Online und Haus.
   let orders=[];
-  try{const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders?location_id=eq.'+LOCATION_ID+'&created_at=gte.'+since.toISOString()+'&order=created_at.desc&limit=2000',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
-    if(r.ok)orders=await r.json();}catch(e){}
+  $('#repContent').innerHTML='<p style="color:var(--paper-2)">📊 Die Auswertung findest du im Kassensystem unter <b>Berichte</b> – dort sind Online-Bestellungen getrennt ausgewiesen.</p>';
+  return;
   orders=orders.filter(o=>!o.storniert);
   const total=orders.reduce((s,o)=>s+(parseFloat(o.total)||0),0);
   const count=orders.length, avg=count?total/count:0;
