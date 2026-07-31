@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v219</title>
+<title>eatDeSi POS v221</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v219';",
+    "var CACHE='eatdesi-v221';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -16557,6 +16557,81 @@ function LoyaltyView({ customers, onUpdate, loyaltySettings, setLoyaltySettings 
   );
 }
 
+/* ===== \uD83D\uDCE9 WEB-ANFRAGEN (Catering / Buffet / Feier / Reservierung) =====
+   Kommen von der Website in pos_state <code>_webrequests.
+   Frueher nur als Pop-up sichtbar - hier ist die dauerhafte Liste. */
+function AnfragenView({ anfragen, onStatus, onPrint }) {
+  const [filter, setFilter] = useState("offen");   // offen | alle | erledigt
+  const [busy, setBusy] = useState(null);
+
+  const typLabel = (t) => ({ catering:"\uD83C\uDF7D\uFE0F Catering", buffet:"\uD83C\uDF71 Buffet", feier:"\uD83C\uDF89 Feier", reservierung:"\uD83D\uDCC5 Reservierung" }[t] || "\uD83D\uDCE9 Anfrage");
+  const istOffen  = (r) => !r.status || r.status === "neu";
+  const istFertig = (r) => r.status === "erledigt" || r.status === "abgelehnt";
+
+  // Nach Veranstaltungsdatum sortieren - was zuerst stattfindet, steht oben.
+  const sortiert = [...(anfragen || [])].sort((a, b) => String(a.date || "9999").localeCompare(String(b.date || "9999")));
+  const liste = sortiert.filter(r => filter === "alle" ? true : (filter === "offen" ? !istFertig(r) : istFertig(r)));
+  const offen = (anfragen || []).filter(istOffen).length;
+
+  const setz = async (r, status) => {
+    setBusy(r.id + status);
+    await onStatus(r, status);
+    setBusy(null);
+  };
+
+  const knopf = (text, farbe, hg, onClick, aktiv) => /*#__PURE__*/React.createElement("button", {
+    onClick: onClick, disabled: !!aktiv,
+    style: { padding: "8px 12px", borderRadius: 9, border: "none", background: hg, color: farbe,
+             fontFamily: "inherit", fontWeight: 700, fontSize: 12.5, cursor: "pointer", opacity: aktiv ? 0.5 : 1 }
+  }, text);
+
+  return /*#__PURE__*/React.createElement("div", { style: { padding: 14, maxWidth: 820, margin: "0 auto" } },
+    /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" } },
+      [["offen", "\uD83D\uDD34 Offen" + (offen ? " (" + offen + ")" : "")], ["erledigt", "\u2714\uFE0F Erledigt"], ["alle", "Alle"]].map(([v, l]) =>
+        /*#__PURE__*/React.createElement("button", {
+          key: v, onClick: () => setFilter(v),
+          style: { padding: "9px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit",
+                   fontWeight: 700, fontSize: 13, background: filter === v ? "#333" : "#eee", color: filter === v ? "#fff" : "#555" }
+        }, l))
+    ),
+    liste.length === 0
+      ? /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", color: "#999", padding: "50px 20px", fontSize: 14 } },
+          "Keine Anfragen in dieser Ansicht.")
+      : liste.map((r, i) => /*#__PURE__*/React.createElement("div", {
+          key: r.id || i,
+          style: { background: "#fff", borderRadius: 12, padding: 14, marginBottom: 10,
+                   border: istOffen(r) ? "2px solid #C84B31" : "1px solid #e0e0e0" }
+        },
+          /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", flexWrap: "wrap" } },
+            /*#__PURE__*/React.createElement("div", null,
+              /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 15.5, color: "#222" } }, r.name || "Ohne Namen"),
+              /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: "#666", marginTop: 2 } }, typLabel(r.type))
+            ),
+            /*#__PURE__*/React.createElement("div", {
+              style: { fontSize: 11.5, fontWeight: 800, padding: "4px 10px", borderRadius: 20,
+                       background: istOffen(r) ? "#ffebee" : (r.status === "abgelehnt" ? "#eee" : "#e8f5e9"),
+                       color: istOffen(r) ? "#C84B31" : (r.status === "abgelehnt" ? "#777" : "#2e7d32") }
+            }, istOffen(r) ? "NEU" : String(r.status || "").toUpperCase())
+          ),
+          /*#__PURE__*/React.createElement("div", { style: { marginTop: 10, fontSize: 13.5, color: "#333", lineHeight: 1.65 } },
+            /*#__PURE__*/React.createElement("div", null, "\uD83D\uDCC5 ", /*#__PURE__*/React.createElement("b", null, r.date || "\u2014"), r.guests ? (" \u00B7 \uD83D\uDC65 " + r.guests + " Personen") : ""),
+            r.phone ? /*#__PURE__*/React.createElement("div", null, "\uD83D\uDCDE ",
+              /*#__PURE__*/React.createElement("a", { href: "tel:" + r.phone, style: { color: "#1565c0", fontWeight: 700, textDecoration: "none" } }, r.phone)) : null,
+            r.email ? /*#__PURE__*/React.createElement("div", { style: { wordBreak: "break-all" } }, "\u2709\uFE0F ", r.email) : null,
+            r.message ? /*#__PURE__*/React.createElement("div", { style: { marginTop: 6, background: "#faf7f2", borderRadius: 8, padding: "8px 10px", fontSize: 13 } }, r.message) : null,
+            /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#999", marginTop: 6 } },
+              "Eingegangen: ", r.created_at ? new Date(r.created_at).toLocaleString("de-DE") : "\u2014")
+          ),
+          /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" } },
+            istOffen(r) ? knopf("\u2705 Annehmen", "#fff", "#2e7d32", () => setz(r, "akzeptiert"), busy === r.id + "akzeptiert") : null,
+            knopf("\uD83D\uDDA8\uFE0F Bon", "#333", "#eee", () => onPrint(r)),
+            !istFertig(r) ? knopf("\u2714\uFE0F Erledigt", "#fff", "#555", () => setz(r, "erledigt"), busy === r.id + "erledigt") : null,
+            !istFertig(r) ? knopf("\u274C Absagen", "#C84B31", "#ffebee", () => setz(r, "abgelehnt"), busy === r.id + "abgelehnt") : null
+          )
+        ))
+  );
+}
+
 function CustomersView({
   customers,
   completedOrders,
@@ -16577,6 +16652,9 @@ function CustomersView({
   const [editIdx, setEditIdx] = useState(null);
   const [detailIdx, setDetailIdx] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
+  // Rueckmeldung zum Passwort-Zuruecksetzen, an den Kunden gebunden:
+  // sonst sieht man bei Kunde B noch die Meldung von Kunde A.
+  const [pwMsg, setPwMsg] = useState({ idx: null, text: "" });
 
   // Match orders to customer by phone
   const getCustomerOrders = customer => completedOrders.filter(o => o.customerPhone === customer.phone || o.customerName === customer.name);
@@ -16836,9 +16914,51 @@ function CustomersView({
     style: {
       padding: "0 14px 16px",
       display: "flex",
+      flexWrap: "wrap",
       gap: 10
     }
-  }, /*#__PURE__*/React.createElement("button", {
+  },
+  /* \uD83D\uDD11 WEBSITE-PASSWORT ZURUECKSETZEN
+     Loescht nur das Passwort, nicht das Konto: Punkte, Adresse und
+     Bestellhistorie bleiben. Der Gast vergibt beim naechsten Anmelden
+     auf der Website selbst ein neues. Der Server prueft dabei, ob dieses
+     Restaurant ueberhaupt zu diesem Geraet gehoert. */
+  /*#__PURE__*/React.createElement("button", {
+    onClick: async () => {
+      const k = customers[detailIdx] || {};
+      const tel = String(k.phone || k.kundenNr || "").trim();
+      if (!tel) { setPwMsg({ idx: detailIdx, text: "Dieser Kunde hat keine Handynummer \u2013 ohne Nummer gibt es kein Website-Konto." }); return; }
+      if (!window.confirm("Website-Passwort von " + (k.name || "diesem Kunden") + " zur\xFCcksetzen?\n\nPunkte und Daten bleiben. Der Gast vergibt beim n\xE4chsten Anmelden selbst ein neues Passwort.")) return;
+      setPwMsg({ idx: detailIdx, text: "Setze zur\xFCck \u2026" });
+      try {
+        const r = await fetch(window.RESTAURANT.SUPA_URL + "/rest/v1/rpc/belks_kunde_pw_reset", {
+          method: "POST",
+          headers: { "apikey": window.RESTAURANT.SUPA_KEY, "Authorization": "Bearer " + window.RESTAURANT.SUPA_KEY, "Content-Type": "application/json" },
+          body: JSON.stringify({ p_loc: window.RESTAURANT.LOCATION_ID, p_phone: tel })
+        });
+        if (!r.ok) { setPwMsg({ idx: detailIdx, text: "\u274C Nicht erlaubt \u2013 bitte pr\xFCfen, ob die Anmeldung aktiv ist (\u25CF Online)." }); return; }
+        const j = await r.json();
+        if (j && j.ok) setPwMsg({ idx: detailIdx, text: "\u2705 Passwort gel\xF6scht. Der Gast vergibt beim n\xE4chsten Anmelden ein neues." });
+        else setPwMsg({ idx: detailIdx, text: "\u274C " + ((j && j.grund) || "Hat nicht geklappt.") });
+      } catch (e) { setPwMsg({ idx: detailIdx, text: "\u274C Keine Verbindung zum Server." }); }
+    },
+    style: {
+      flexBasis: "100%",
+      padding: 11,
+      borderRadius: 10,
+      border: "2px solid #ffe0b2",
+      background: "#fff8e1",
+      color: "#e65100",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      fontWeight: 700,
+      fontSize: 13
+    }
+  }, "\uD83D\uDD11 Website-Passwort zur\xFCcksetzen"),
+  (pwMsg.idx === detailIdx && pwMsg.text) ? /*#__PURE__*/React.createElement("div", {
+    style: { flexBasis: "100%", fontSize: 12, color: "#555", lineHeight: 1.45, padding: "0 2px" }
+  }, pwMsg.text) : null,
+  /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       setForm({
         name: customers[detailIdx].name,
@@ -17415,6 +17535,7 @@ var ALL_PERMISSION_VIEWS = [
   { id:"orders", l:"Bestellungen", i:"📋" },
   { id:"reports", l:"Berichte", i:"📈" },
   { id:"expenses", l:"Ausgaben", i:"💸" },
+  { id:"anfragen", l:"Anfragen", i:"📩" },
   { id:"customers", l:"Kunden", i:"👥" },
   { id:"menu_mgmt", l:"Menu Management", i:"🍽️" },
   { id:"happyhour", l:"Happy Hour", i:"🔖" },
@@ -19962,7 +20083,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v219"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v221"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -20360,23 +20481,30 @@ function App() {
   const [now, setNow] = useState(new Date());
   // ===== ANFRAGE: Akzeptieren (Status -> akzeptiert, lokal + Cloud) =====
   const anfrageTypLabel = (t) => ({ catering:"🍽️ Catering", buffet:"🍱 Buffet", feier:"🎉 Feier", reservierung:"📅 Reservierung" }[t] || "📩 Anfrage");
-  const acceptAnfrage = React.useCallback((req) => {
-    if (!req) return;
+  // Status EINER Anfrage aendern.
+  // Frueher wurde die KOMPLETTE Liste zurueckgeschrieben - kam in derselben
+  // Sekunde eine neue Anfrage von der Website herein, war sie weg.
+  // Jetzt aendert der Server nur diesen einen Eintrag.
+  const setAnfrageStatus = React.useCallback(async (req, status) => {
+    if (!req) return false;
     setWebRequests(prev => {
-      const next = (prev||[]).map(r => r && r.id === req.id ? { ...r, status: 'akzeptiert' } : r);
+      const next = (prev||[]).map(r => r && r.id === req.id ? { ...r, status: status } : r);
       try { LS.set("eatdesi_webrequests", next); } catch(e){}
-      // Cloud aktualisieren
-      try {
-        fetch(SUPA_URL + '/rest/v1/pos_state?on_conflict=key', {
-          method:'POST',
-          headers:{ 'apikey':SUPA_KEY, 'Authorization':'Bearer '+SUPA_KEY, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates' },
-          body: JSON.stringify({ key: LOCATION_ID+'_webrequests', value: JSON.stringify(next), updated_at: new Date().toISOString() })
-        }).catch(()=>{});
-      } catch(e){}
       return next;
     });
-    setPendingAnfragePopup(null);
+    try {
+      const r = await fetch(SUPA_URL + '/rest/v1/rpc/belks_anfrage_status', {
+        method: 'POST',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_loc: LOCATION_ID, p_id: String(req.id||''), p_status: status })
+      });
+      return r.ok;
+    } catch(e) { return false; }
   }, []);
+  const acceptAnfrage = React.useCallback((req) => {
+    setAnfrageStatus(req, 'akzeptiert');
+    setPendingAnfragePopup(null);
+  }, [setAnfrageStatus]);
   // ===== ANFRAGE: Bon drucken =====
   const printAnfrageBon = React.useCallback((req) => {
     if (!req) return;
@@ -21987,6 +22115,10 @@ function App() {
     onUpdate: (idx, c) => setCustomers(p => p.map((x,i) => i===idx?c:x)),
     loyaltySettings: loyaltySettings,
     setLoyaltySettings: setLoyaltySettings
+  }), view === "anfragen" && /*#__PURE__*/React.createElement(AnfragenView, {
+    anfragen: webRequests,
+    onStatus: setAnfrageStatus,
+    onPrint: printAnfrageBon
   }), view === "customers" && /*#__PURE__*/React.createElement(CustomersView, {
     completedOrders: completedOrders,
     customers: customers,
