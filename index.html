@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v221</title>
+<title>eatDeSi POS v222</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v221';",
+    "var CACHE='eatdesi-v222';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -8635,6 +8635,41 @@ function sendConfirmEmail(order, prepMin, cfg) {
   } catch(e){ console.warn('sendConfirmEmail Fehler:', e.message); }
 }
 
+/* \uD83D\uDCF1 TELEFONNUMMER FUER WHATSAPP
+   wa.me braucht die Laendervorwahl OHNE Plus und OHNE fuehrende Null.
+   "0151 7515 4464" -> "4915175154464".
+   openConfirmWhatsApp rechnete das schon richtig um, drei andere Stellen
+   schickten die rohe Nummer - WhatsApp meldete dann "Nummer nicht gefunden".
+   Deshalb jetzt EIN Ort statt vier. */
+function waNummer(phone) {
+  var p = String(phone || '').replace(/[^\d+]/g, '');
+  if (!p) return '';
+  if (p.indexOf('+') === 0) p = p.slice(1);
+  if (p.indexOf('00') === 0) p = p.slice(2);
+  if (p.indexOf('0') === 0) p = '49' + p.slice(1);   // deutsche Nummer
+  return p;
+}
+window.waNummer = waNummer;
+
+/* \uD83D\uDD17 LINK OEFFNEN
+   In der Android-App verschluckt window.open alles, was nicht http ist -
+   mailto: und tel: passierten einfach gar nichts. Fuer diese Faelle muss
+   die Adresse direkt gesetzt werden, dann uebernimmt Android. */
+function oeffneExtern(url) {
+  try {
+    if (/^https?:/i.test(url)) {
+      var a = document.createElement('a');
+      a.href = url; a.target = '_blank'; a.rel = 'noopener';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    } else {
+      window.location.href = url;
+    }
+  } catch (e) {
+    try { window.location.href = url; } catch (e2) { console.warn('Link', e2); }
+  }
+}
+window.oeffneExtern = oeffneExtern;
+
 // WhatsApp via wa.me: öffnet WhatsApp mit vorgefertigter Nachricht (Kunde-Nr aus Bestellung)
 function openConfirmWhatsApp(order, prepMin, cfg) {
   try {
@@ -12441,7 +12476,7 @@ function KitchenView({
       const taId = parseInt(order.oid.replace("ta_",""));
       const ta = takeaway.find(t=>t.id===taId);
       return ta?.customerPhone ? /*#__PURE__*/React.createElement("a", {
-        href: `https://wa.me/${ta.customerPhone.replace(/[^0-9+]/g,"")}?text=${encodeURIComponent(`🍽️ Ihre Bestellung #${taId} ist fertig und wartet auf Abholung! eatDeSi`)}`,
+        href: `https://wa.me/${waNummer(ta.customerPhone)}?text=${encodeURIComponent(`🍽️ Ihre Bestellung #${taId} ist fertig und wartet auf Abholung! eatDeSi`)}`,
         target: "_blank",
         style: { display:"block", width:"100%", padding:9, borderRadius:10, border:"none", background:"#25d366", color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12, textAlign:"center", textDecoration:"none", marginBottom:8 }
       }, "📱 WhatsApp: Bestellung fertig!") : null;
@@ -16213,12 +16248,14 @@ function KundenkontakteView({ completedOrders, customers, printerSettings }) {
   const defaultEmailMsg = `Hallo,\n\nvielen Dank für Ihren Besuch bei ${_restName}!\n\nWir würden uns sehr über Ihre Bewertung freuen:\n⭐⭐⭐⭐⭐ ${printerSettings?.googleLink||"[Google Link]"}\n\n📸 Instagram: ${printerSettings?.instagramLink||""}\n💬 WhatsApp: wa.me/${(printerSettings?.firmaPhone||"").replace(/[^0-9]/g,"")}\n\nMit freundlichen Grüßen\n${_restName}${_slogan}\n${printerSettings?.firmaStrasse||""},\n${printerSettings?.firmaPlzOrt||""}`;
 
   const sendWhatsApp = (phone, msg) => {
-    const clean = phone.replace(/[^0-9+]/g,"");
-    window.open(`https://wa.me/${clean}?text=${encodeURIComponent(msg)}`, "_blank");
+    const clean = waNummer(phone);
+    if (!clean) { alert("Diese Nummer kann nicht f\xFCr WhatsApp benutzt werden."); return; }
+    oeffneExtern(`https://wa.me/${clean}?text=${encodeURIComponent(msg)}`);
   };
 
   const sendEmail = (email, subject, body) => {
-    window.open(`mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, "_blank");
+    if (!email) { alert("Dieser Kunde hat keine E-Mail-Adresse hinterlegt."); return; }
+    oeffneExtern(`mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
   };
 
   const sendAll = () => {
@@ -16234,7 +16271,7 @@ function KundenkontakteView({ completedOrders, customers, printerSettings }) {
       if (emails.length === 0) return;
       const subj = emailSubject || `Herzlichen Dank für Ihren Besuch bei ${printerSettings?.firmaName||"eatDeSi"}! ⭐`;
       const body = emailMsg || defaultEmailMsg;
-      window.open(`mailto:?bcc=${emails.join(",")}&subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`, "_blank");
+      oeffneExtern(`mailto:?bcc=${emails.join(",")}&subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`);
     } else if (sendMode === "api") {
       // WhatsApp Business API
       const token = printerSettings?.waApiToken;
@@ -16386,7 +16423,7 @@ function KundenkontakteView({ completedOrders, customers, printerSettings }) {
           // WhatsApp + Email buttons
           React.createElement("div", { style:{ display:"flex", gap:5, flexShrink:0 } },
             /*#__PURE__*/React.createElement("a", {
-              href: `https://wa.me/${c.phone.replace(/[^0-9+]/g,"")}?text=${encodeURIComponent((whatsappMsg||defaultMsg).replace("[Name]",c.name))}`,
+              href: `https://wa.me/${waNummer(c.phone)}?text=${encodeURIComponent((whatsappMsg||defaultMsg).replace("[Name]",c.name))}`,
               target: "_blank",
               onClick: e => e.stopPropagation(),
               style:{ background:"#25d366", color:"#fff", borderRadius:8, padding:"6px 8px", fontSize:13, textDecoration:"none", fontWeight:700 }
@@ -20083,7 +20120,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v221"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v222"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21189,6 +21226,10 @@ function App() {
     id: "expenses",
     l: "Expenses",
     i: "💸"
+  }, {
+    id: "anfragen",
+    l: "Anfragen (Web)",
+    i: "📩"
   }, {
     id: "reservations",
     l: "Reservierungen",
