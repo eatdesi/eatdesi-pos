@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v225</title>
+<title>eatDeSi POS v226</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v225';",
+    "var CACHE='eatdesi-v226';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -20197,7 +20197,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v225"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v226"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22863,7 +22863,9 @@ function MenuImportExportView({ menuData, onUpdate }) {
         setMsg('Nativer Datei-Dialog nicht verfuegbar (Plugin fehlt) - unten JSON-Text einfuegen.');
         return;
       }
-      P.FilePicker.pickFiles({ types:['application/json'], readData:true }).then(function(res){
+      // Ohne Typ-Filter: mit 'application/json' zeigten manche Android-Dateimanager
+      // ueberhaupt keine Dateien an.
+      P.FilePicker.pickFiles({ readData:true }).then(function(res){
         try{
           var f = res && res.files && res.files[0];
           if(!f) return;
@@ -23785,9 +23787,33 @@ function BelksZentraleView(){
         style:{position:'absolute',left:-9999,width:1,height:1,opacity:0}}),
       R.createElement('div',{style:{display:'flex',gap:8,marginBottom:8}},
         R.createElement('button',{onClick:function(){
+          /* In der Android-App blockiert die WebView das HTML-Dateifeld.
+             Die App hat aber das FilePicker-Plugin an Bord - der Men\u00FC-Import
+             benutzt es schon. Also: erst nativ fragen, sonst Browser-Weg.
+             Kein Typ-Filter, sonst zeigen manche Dateimanager gar nichts an. */
           try{
-            if(dateiFeld.current){ dateiFeld.current.click(); }
-            else { setKarteInfo('\u274C Dateiauswahl nicht verf\u00FCgbar \u2013 bitte Text einf\u00FCgen'); }
+            var Plug = (window.Capacitor && window.Capacitor.Plugins) || {};
+            if(Plug.FilePicker && Plug.FilePicker.pickFiles){
+              setKarteInfo('\u23F3 Dateiauswahl \u00F6ffnet \u2026');
+              Plug.FilePicker.pickFiles({ readData:true }).then(function(res){
+                var f = res && res.files && res.files[0];
+                if(!f){ setKarteInfo(''); return; }
+                if(!f.data){ setKarteInfo('\u274C Datei konnte nicht gelesen werden \u2013 bitte Text einf\u00FCgen'); return; }
+                var txt='';
+                try{ txt = decodeURIComponent(escape(atob(f.data))); }
+                catch(e2){ setKarteInfo('\u274C Datei ist nicht lesbar (kein Text)'); return; }
+                setKarteText(txt);
+                try{
+                  var k=JSON.parse(txt);
+                  var n=Object.keys(k||{}).reduce(function(a,c){ return a+(((k[c]||[]).length)||0); },0);
+                  setKarteInfo(n>0 ? ('\u2705 '+(f.name||'Datei')+': '+Object.keys(k).length+' Kategorien, '+n+' Artikel')
+                                   : '\u274C Keine Artikel gefunden');
+                }catch(e3){ setKarteInfo('\u274C '+(f.name||'Datei')+' ist kein g\u00FCltiges Men\u00FC (JSON)'); }
+              }).catch(function(){ setKarteInfo(''); });
+              return;
+            }
+            if(dateiFeld.current){ dateiFeld.current.click(); return; }
+            setKarteInfo('\u274C Dateiauswahl nicht verf\u00FCgbar \u2013 bitte Text einf\u00FCgen');
           }catch(e){ setKarteInfo('\u274C Dateiauswahl nicht verf\u00FCgbar \u2013 bitte Text einf\u00FCgen'); }
         },style:{flex:1,padding:11,borderRadius:10,border:'1.5px solid #1565c0',background:'#fff',
                  color:'#1565c0',fontWeight:800,fontSize:12,cursor:'pointer',fontFamily:'inherit'}},
