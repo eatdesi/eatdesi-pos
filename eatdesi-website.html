@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-31e: Bestellungen abgesichert. Live-Status und eigene Bestellungen laufen ueber belks_bestellstatus / belks_meine_bestellungen — die Seite laedt keine fremden Bestellungen mehr. Bestellung als reines INSERT (anon braucht kein UPDATE). Reports im Web-Admin entfernt (Zahlen stehen im POS). · Update 2026-07-31d: Wartezeit lesbar — bei Vorbestellungen steht jetzt der Zeitpunkt ("gegen 14:15 Uhr" / "01.08. um 14:15 Uhr") statt "ca. 2159 Min". Im Kundenkonto werden [FERTIG] und [GELIEFERT] richtig angezeigt statt dauerhaft "In Arbeit". · Update 2026-07-31c: Kundenkonten laufen ueber Server-Funktionen (belks_kunde_bekannt / _login / _speichern / _bestellung). Die komplette Kundenliste wird NICHT mehr in den Browser geladen und nicht mehr ganz zurueckgeschrieben — kein Datenabfluss, keine verlorenen Konten bei gleichzeitigen Bestellungen. Punkte rechnet der Server. · Update 2026-07-31b: Tochter-Kategorien im Webshop sichtbar (auch außerhalb CAT_GROUPS) · Über-uns nie BW-Text auf Töchtern · Update 2026-07-27c: Speichern-Feedback sichtbar (Toast über Admin, Button-Bestätigung) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
+<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-31f: Anfragen stehen jetzt im Kassensystem (Web-Admin-Tab entfernt). Anfragen werden ueber belks_anfrage_neu angehaengt statt die ganze Liste zurueckzuschreiben — es kann keine Anfrage mehr verloren gehen, wenn das Kassensystem gleichzeitig einen Status aendert. · Update 2026-07-31e: Bestellungen abgesichert. Live-Status und eigene Bestellungen laufen ueber belks_bestellstatus / belks_meine_bestellungen — die Seite laedt keine fremden Bestellungen mehr. Bestellung als reines INSERT (anon braucht kein UPDATE). Reports im Web-Admin entfernt (Zahlen stehen im POS). · Update 2026-07-31d: Wartezeit lesbar — bei Vorbestellungen steht jetzt der Zeitpunkt ("gegen 14:15 Uhr" / "01.08. um 14:15 Uhr") statt "ca. 2159 Min". Im Kundenkonto werden [FERTIG] und [GELIEFERT] richtig angezeigt statt dauerhaft "In Arbeit". · Update 2026-07-31c: Kundenkonten laufen ueber Server-Funktionen (belks_kunde_bekannt / _login / _speichern / _bestellung). Die komplette Kundenliste wird NICHT mehr in den Browser geladen und nicht mehr ganz zurueckgeschrieben — kein Datenabfluss, keine verlorenen Konten bei gleichzeitigen Bestellungen. Punkte rechnet der Server. · Update 2026-07-31b: Tochter-Kategorien im Webshop sichtbar (auch außerhalb CAT_GROUPS) · Über-uns nie BW-Text auf Töchtern · Update 2026-07-27c: Speichern-Feedback sichtbar (Toast über Admin, Button-Bestätigung) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -764,7 +764,6 @@ footer .fl:hover{color:var(--gold)}
   </div>
   <div class="admin-tabs" id="adminTabs" style="display:none">
     <button data-at="status" class="on" onclick="adminTab('status')">🟢 Status</button>
-    <button data-at="requests" onclick="adminTab('requests')">📬 Anfragen</button>
     <button data-at="zones" onclick="adminTab('zones')">🛵 Liefergebiete</button>
     <button data-at="hours" onclick="adminTab('hours')">🕐 Öffnungszeiten</button>
     <button data-at="offers" onclick="adminTab('offers')">🎁 Angebote</button>
@@ -1675,18 +1674,15 @@ async function sendReq(){
   }
   else{btn.disabled=false;btn.textContent='Erneut senden';toast('⚠️ Senden fehlgeschlagen');}
 }
-// Anfragen sammeln wir in pos_state unter key eatdesi-bw_webrequests (Array)
+/* Anfrage anhaengen. Frueher wurde die ganze Liste gelesen, ergaenzt und
+   komplett zurueckgeschrieben. Aendert im selben Moment das Kassensystem einen
+   Status, ueberschreibt einer den anderen und eine Anfrage geht verloren.
+   Jetzt haengt der Server nur diesen einen Eintrag an. */
 async function pushRequest(p){
   try{
-    let list=[];
-    try{const g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_webrequests&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
-      if(g.ok){const j=await g.json(); if(j&&j[0]&&j[0].value){list=JSON.parse(j[0].value);}}}catch(e){}
-    list.unshift(p); if(list.length>200)list=list.slice(0,200);
-    const r=await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
-      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
-      body:JSON.stringify({key:LOCATION_ID+'_webrequests',value:JSON.stringify(list),updated_at:new Date().toISOString()})});
-    return r.ok||r.status===201||r.status===409;
-  }catch(e){console.warn('req push',e);return false;}
+    const j=await kundeRPC('belks_anfrage_neu',{p_loc:LOCATION_ID,p_daten:p});
+    return !!(j && j.ok);
+  }catch(e){ console.warn('req push',e); return false; }
 }
 
 /* ====================================================================
@@ -2670,7 +2666,7 @@ function checkPin(){
 }
 
 function adminTab(t){adminTabCur=t;document.querySelectorAll('#adminTabs button').forEach(b=>b.classList.toggle('on',b.dataset.at===t));
-  if(t==='status')drawStatus();else if(t==='requests')drawRequests();else if(t==='zones')drawZones();
+  if(t==='status')drawStatus();else if(t==='zones')drawZones();
   else if(t==='hours')drawHours();else if(t==='offers')drawOffers();else if(t==='events')drawEvents();else if(t==='ai')drawAI();else if(t==='company')drawCompany();else if(t==='menuinfo')drawMenuInfo();else if(t==='gallery')drawGallery();}
 
 /* ---- STATUS / SERVICE-SCHALTER ---- */
@@ -2754,10 +2750,12 @@ function setRep(p){repPeriod=p;drawReports();}
 
 /* ---- REQUESTS ---- */
 async function drawRequests(){
-  $('#adminBody').innerHTML=`<div id="reqList"><p style="color:var(--paper-2)">Lädt Anfragen…</p></div>`;
+  // Bewusst abgeschaltet: die Liste enthaelt Namen, Telefonnummern und E-Mails,
+  // und der PIN davor wurde nur im Browser geprueft – also gar kein Schutz.
+  // Anfragen stehen jetzt im Kassensystem unter 📩 Anfragen.
+  $('#adminBody').innerHTML='<div class="acard"><p style="color:var(--paper-2);margin:0">📩 Anfragen findest du im Kassensystem unter <b>Anfragen</b> – mit Annehmen, Bon drucken und Erledigt.</p></div>';
+  return;
   let list=[];
-  try{const r=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_webrequests&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
-    if(r.ok){const j=await r.json();if(j&&j[0]&&j[0].value)list=JSON.parse(j[0].value);}}catch(e){}
   window._reqList=list;
   const icons={catering:'🍽️',buffet:'🥘',feier:'🎉',reservierung:'📅'};
   if(!list.length){$('#reqList').innerHTML='<div class="acard"><p style="color:var(--paper-2);margin:0">Noch keine Anfragen eingegangen.</p></div>';return;}
@@ -2769,14 +2767,9 @@ async function drawRequests(){
         <span class="rstat ${r.status==='erledigt'?'done':''}">${r.status||'neu'}</span>
         <button onclick="toggleReqStatus(${i})" style="font-size:11px;color:var(--gold);font-weight:600">${r.status==='erledigt'?'↩ offen':'✓ erledigt'}</button></div></div>`).join('')}</div>`;
 }
-async function toggleReqStatus(i){
-  const list=window._reqList||[];if(!list[i])return;
-  list[i].status=list[i].status==='erledigt'?'neu':'erledigt';
-  try{await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
-    headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
-    body:JSON.stringify({key:LOCATION_ID+'_webrequests',value:JSON.stringify(list),updated_at:new Date().toISOString()})});
-    drawRequests();}catch(e){toast('⚠️ Fehler');}
-}
+// Nicht mehr erreichbar: Anfragen werden im Kassensystem bearbeitet.
+// Der alte Weg schrieb die ganze Liste zurueck und konnte Anfragen loeschen.
+async function toggleReqStatus(i){ toast('ℹ️ Anfragen werden im Kassensystem bearbeitet.'); }
 
 /* ---- ZONES ---- */
 function drawZones(){
