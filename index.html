@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v237</title>
+<title>eatDeSi POS v239</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v237';",
+    "var CACHE='eatdesi-v239';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -9935,12 +9935,21 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
     for (let i = 0; i < 3; i++) out.push(f + i * 5);
     return out.filter((v, i, a) => a.indexOf(v) === i).slice(0, 4);
   })();
+  /* Was im Feld steht, waehrend getippt wird. Muss getrennt vom Trinkgeld
+     gehalten werden: sonst loescht sich "5" (auf dem Weg zu "50") selbst,
+     weil 5 kleiner als die Rechnung ist und damit kein Trinkgeld ergibt. */
+  const [zahlText, setZahlText] = React.useState("");
   const setzeZahlbetrag = (wert) => {
-    const v = parseFloat(String(wert).replace(",", "."));
+    const roh = String(wert);
+    setZahlText(roh);
+    const v = parseFloat(roh.replace(",", "."));
     if (!isFinite(v)) { setTrinkgeld(""); return; }
     const diff = Math.round((v - totalNachRabatt) * 100) / 100;
     setTrinkgeld(diff > 0 ? String(diff) : "");
   };
+  // Knopf gedrueckt -> Feld soll den Betrag zeigen
+  const waehleBetrag = (v) => setzeZahlbetrag(String(v));
+  const leereBetrag = () => { setZahlText(""); setTrinkgeld(""); };
   const tax7 = calcTax7(items);
   const tax19 = calcTax19(items);
   const splitRemaining = totalNachRabatt - splitPaid.reduce((s, p) => s + p.amount, 0);
@@ -10151,25 +10160,30 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
               "Rechnung ", fmt(totalNachRabatt), " \u2013 Gesamtbetrag eintippen, Trinkgeld rechnet sich von selbst."),
             zahlVorschlaege.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6, marginBottom:8, flexWrap:"wrap" } },
               /*#__PURE__*/React.createElement("button", {
-                onClick:()=>setTrinkgeld(""),
+                onClick:leereBetrag,
                 style:{ padding:"9px 14px", borderRadius:10, border:`2px solid ${tg===0?C.orange:"#ddd"}`, background:tg===0?"#fff3e0":"#fff", color:tg===0?C.orange:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
               }, "Passend"),
               zahlVorschlaege.map(v => {
                 const aktiv = Math.abs((totalNachRabatt + tg) - v) < 0.005 && tg > 0;
                 return /*#__PURE__*/React.createElement("button", { key:v,
-                  onClick:()=>setzeZahlbetrag(v),
+                  onClick:()=>waehleBetrag(v),
                   style:{ padding:"9px 14px", borderRadius:10, border:`2px solid ${aktiv?C.orange:"#ddd"}`, background:aktiv?"#fff3e0":"#fff", color:aktiv?C.orange:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
                 }, v + " \u20ac");
               })
             ),
-            /*#__PURE__*/React.createElement("input", { type:"number", step:"0.01", inputMode:"decimal",
-              value: tg > 0 ? String(Math.round((totalNachRabatt+tg)*100)/100) : "",
+            /*#__PURE__*/React.createElement("input", { type:"text", inputMode:"decimal",
+              value: zahlText,
               onChange:e=>setzeZahlbetrag(e.target.value),
-              placeholder:"Gast zahlt \u2026 z.B. 80",
+              onFocus:e=>{ try{ e.target.select(); }catch(err){} },
+              placeholder:"Gast zahlt \u2026 z.B. " + Math.ceil(totalNachRabatt/5)*5,
               style:{ width:"100%", padding:12, borderRadius:8, border:"2px solid #ffe082", fontSize:18, fontWeight:800, fontFamily:"inherit", boxSizing:"border-box", textAlign:"center" }
             }),
-            /*#__PURE__*/React.createElement("div", { style:{ textAlign:"center", marginTop:8, fontSize:14, fontWeight:800, color: tg > 0 ? C.orange : "#999" } },
-              tg > 0 ? ("Trinkgeld " + fmt(tg) + "  \u00B7  Gesamt " + fmt(totalWithTG)) : ("Ohne Trinkgeld \u00B7 " + fmt(totalNachRabatt)))
+            /*#__PURE__*/React.createElement("div", { style:{ textAlign:"center", marginTop:8, fontSize:14, fontWeight:800,
+              color: tg > 0 ? C.orange : (zahlText && parseFloat(zahlText.replace(",",".")) < totalNachRabatt ? "#c62828" : "#999") } },
+              tg > 0 ? ("Trinkgeld " + fmt(tg) + "  \u00B7  Gesamt " + fmt(totalWithTG))
+              : (zahlText && isFinite(parseFloat(zahlText.replace(",","."))) && parseFloat(zahlText.replace(",",".")) < totalNachRabatt)
+                ? ("\u26A0\uFE0F Weniger als die Rechnung \u2013 es werden " + fmt(totalNachRabatt) + " gebucht")
+                : ("Ohne Trinkgeld \u00B7 " + fmt(totalNachRabatt)))
           ),
           // Zahlungsart
           /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#333", marginBottom:10 } }, "Zahlungsart"),
@@ -20383,6 +20397,11 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
 
 
 function DashboardView({ completedOrders, tableOrders, takeaway, floors, expenses, setView, openTable, setShowTaCustomerSearch, loggedInUser, deleteTakeaway, inventory, happyHours, onChannelOrder, pendingOnlineOrders }) {
+  /* Loeschen entfernt Umsatz aus dem Tag - das ist Chefsache.
+     Ein Fahrer, der versehentlich (oder absichtlich) eine Lieferung loescht,
+     nimmt Geld mit, das nirgends auftaucht. */
+  const darfLoeschen = ["Admin", "Manager", "Chef"].indexOf((loggedInUser && loggedInUser.role) || "") !== -1;
+  const [taFilter, setTaFilter] = React.useState("offen");   // offen | geliefert | alle
   const [showTaList, setShowTaList] = React.useState(false);
   const C2 = { red:"#C84B31", gold:"#D4A017", green:"#2e7d32", blue:"#1565c0", purple:"#6a1b9a", bg:"#f5f5f5" };
   const isAdmin = loggedInUser && (loggedInUser.role === "Admin" || loggedInUser.role === "Manager");
@@ -20481,16 +20500,42 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
               onClick:()=>{ setShowTaList(false); if(onChannelOrder) onChannelOrder("UBEREATS"); },
               style:{ flex:1, padding:10, borderRadius:10, border:"2px solid #06c167", background:"#ecfff5", color:"#06914c", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5 }
             }, "🚗 Uber Eats")
+          ),
+          // Filter: was soll gezeigt werden?
+          React.createElement("div", { style:{ display:"flex", gap:6, marginTop:10 } },
+            [["offen","\uD83D\uDFE0 Offen"],["geliefert","\uD83D\uDCE6 Geliefert"],["alle","Alle"]].map(function(o){
+              var aktiv = taFilter === o[0];
+              return React.createElement("button", { key:o[0], onClick:function(){ setTaFilter(o[0]); },
+                style:{ flex:1, padding:"8px 6px", borderRadius:9, border:"none", cursor:"pointer",
+                        fontFamily:"inherit", fontWeight:700, fontSize:12,
+                        background: aktiv ? "#333" : "#f0f0f0", color: aktiv ? "#fff" : "#666" }
+              }, o[1]);
+            })
           )
         ),
         // Liste aller Takeaways
         React.createElement("div", { style:{ padding:"10px 14px" } },
           // Offene
-          (takeaway||[]).filter(t=>!t.done && !t.bezahlt).length > 0 && React.createElement("div", { style:{ fontWeight:700, fontSize:11, color:"#888", textTransform:"uppercase", marginBottom:6 } }, "🟠 Offen"),
-          (takeaway||[]).filter(t=>!t.done && !t.bezahlt).map(ta =>
+          (function(){
+            var roh = (takeaway||[]).filter(function(t){ return !t.done && !t.bezahlt; });
+            var sichtbar = roh.filter(function(t){
+              if(taFilter === "offen") return !t.geliefert;
+              if(taFilter === "geliefert") return !!t.geliefert;
+              return true;
+            });
+            var offenAnz = roh.filter(function(t){ return !t.geliefert; }).length;
+            var geliefertAnz = roh.length - offenAnz;
+            return [
+              React.createElement("div", { key:"kopf", style:{ fontWeight:700, fontSize:11, color:"#888", textTransform:"uppercase", marginBottom:6 } },
+                taFilter === "geliefert" ? ("\uD83D\uDCE6 Geliefert \u2013 noch nicht gebucht (" + geliefertAnz + ")")
+                : taFilter === "alle" ? ("Alle laufenden (" + roh.length + ")")
+                : ("\uD83D\uDFE0 Offen (" + offenAnz + ")")),
+              sichtbar.length === 0 && React.createElement("div", { key:"leer", style:{ color:"#aaa", fontSize:13, padding:"14px 2px" } },
+                taFilter === "geliefert" ? "Nichts geliefert und noch offen." : "Keine offenen Bestellungen."),
+              sichtbar.map(ta =>
             React.createElement("div", {
               key: ta.id,
-              style:{ background:"#fff8e1", border:"2px solid #f57f17", borderRadius:12, padding:"11px 14px", marginBottom:8, display:"flex", alignItems:"center", gap:10 }
+              style:{ background: ta.geliefert ? "#e8f5e9" : "#fff8e1", border:"2px solid " + (ta.geliefert ? "#2e7d32" : "#f57f17"), borderRadius:12, padding:"11px 14px", marginBottom:8, display:"flex", alignItems:"center", gap:10 }
             },
               React.createElement("div", { onClick:()=>{ setShowTaList(false); openTable("ta_"+ta.id); }, style:{ fontSize:22, cursor:"pointer" } }, "🥡"),
               React.createElement("div", { onClick:()=>{ setShowTaList(false); openTable("ta_"+ta.id); }, style:{ flex:1, cursor:"pointer" } },
@@ -20499,18 +20544,26 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
                   (ta.items||[]).length + " Artikel · " +
                   (ta.items||[]).reduce((s,i)=>s+i.finalPrice*i.qty,0).toFixed(2).replace(".",",") + " €"
                 ),
-                ta.customerPhone && React.createElement("div", { style:{ fontSize:11, color:"#666" } }, "📞 " + ta.customerPhone)
+                ta.customerPhone && React.createElement("div", { style:{ fontSize:11, color:"#666" } }, "📞 " + ta.customerPhone),
+                ta.geliefert && React.createElement("div", { style:{ fontSize:11, color:"#2e7d32", fontWeight:700, marginTop:2 } },
+                  "\uD83D\uDEF5 " + (ta.geliefert.von || "Fahrer") +
+                  ((Number(ta.geliefert.bar)||0) > 0 ? (" \u00B7 Bar " + Number(ta.geliefert.bar).toFixed(2).replace(".",",") + " \u20AC") : " \u00B7 bezahlt") +
+                  " \u00B7 " + new Date(ta.geliefert.zeit).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}))
               ),
-              React.createElement("span", { onClick:()=>{ setShowTaList(false); openTable("ta_"+ta.id); }, style:{ background:"#ff6d00", color:"#fff", borderRadius:8, padding:"3px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } }, "Offen"),
-              React.createElement("button", {
+              React.createElement("span", { onClick:()=>{ setShowTaList(false); openTable("ta_"+ta.id); },
+                style:{ background: ta.geliefert ? "#2e7d32" : "#ff6d00", color:"#fff", borderRadius:8, padding:"3px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } },
+                ta.geliefert ? "Kassieren" : "Offen"),
+              darfLoeschen ? React.createElement("button", {
                 onClick: e => {
                   e.stopPropagation();
+                  if(!window.confirm("Bestellung #" + ta.id + " wirklich l\u00F6schen?\n\nSie verschwindet aus dem Tagesumsatz.")) return;
                   deleteTakeaway(ta.id); setShowTaList(false);
                 },
                 style:{ background:"#ffebee", color:"#c62828", border:"none", borderRadius:8, padding:"6px 9px", cursor:"pointer", fontSize:16, flexShrink:0 }
-              }, "✕")
+              }, "\u2715") : null
             )
-          ),
+          )];
+          })(),
           // Abgeschlossene (heute)
           (takeaway||[]).filter(t=>t.done && new Date(t.time).toLocaleDateString("de-DE")===new Date().toLocaleDateString("de-DE")).length > 0 &&
             React.createElement("div", { style:{ fontWeight:700, fontSize:11, color:"#888", textTransform:"uppercase", margin:"10px 0 6px" } }, "✅ Heute abgeschlossen"),
@@ -20540,7 +20593,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v237"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v239"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
