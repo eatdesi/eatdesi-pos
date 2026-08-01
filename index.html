@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v234</title>
+<title>eatDeSi POS v237</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v234';",
+    "var CACHE='eatdesi-v237';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -17803,7 +17803,7 @@ var ALL_PERMISSION_VIEWS = [
   { id:"loyalty", l:"Treue", i:"⭐" },
   { id:"inventory", l:"Lager", i:"📦" },
   { id:"delivery", l:"Lieferung", i:"🚴" },
-  { id:"lieferfahrer", l:"Fahrer", i:"🚴" },
+  { id:"fahrer", l:"Fahrer-Ansicht", i:"🛵" },
   { id:"floors", l:"Bereiche", i:"🏢" },
   { id:"rezeptkosten", l:"Rezeptkosten", i:"💰" },
   { id:"personalplanung", l:"Personalplanung", i:"👥" },
@@ -18772,6 +18772,117 @@ function FloorsView({ floors, onSave }) {
   );
 }
 
+/* ===== \uD83D\uDEF5 FAHRER-ANSICHT =====
+   Fuer das eigene Handy des Fahrers. Zeigt alle offenen Lieferungen. */
+function FahrerView({ takeaway, setTakeaway, loggedInUser, printerSettings }) {
+  const ich = (loggedInUser && loggedInUser.name) || "Fahrer";
+  const [nurMeine, setNurMeine] = React.useState(false);
+
+  const adresse = (t) => [t.customerStreet, [t.customerPlz, t.customerCity].filter(Boolean).join(" ")]
+    .filter(Boolean).join(", ");
+  const summe = (t) => (t.items || []).reduce((s, i) => s + (i.finalPrice || i.price || 0) * (i.qty || 0), 0);
+
+  // Offene Lieferungen: haben eine Adresse und sind noch nicht abgeschlossen
+  const alle = (takeaway || []).filter(t => t && !t.done && (t.items || []).length > 0 && adresse(t));
+  const offen = alle.filter(t => !t.geliefert);
+  const liste = (nurMeine ? offen.filter(t => t.fahrer === ich) : offen)
+    .sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
+  const meineFertig = alle.filter(t => t.geliefert && t.geliefert.von === ich);
+  const meineKasse = meineFertig.reduce((s, t) => s + (Number(t.geliefert.bar) || 0), 0);
+
+  const uebernehmen = (id) => setTakeaway(p => p.map(t => t.id === id
+    ? { ...t, fahrer: t.fahrer === ich ? null : ich, fahrerZeit: new Date().toISOString() } : t));
+
+  const geliefert = (t) => {
+    const vorschlag = summe(t).toFixed(2);
+    const ein = window.prompt(
+      "Geliefert an " + (t.customerName || "Gast") + "\n\nWie viel wurde BAR kassiert?\n(0 eingeben, wenn schon bezahlt)",
+      vorschlag);
+    if (ein === null) return;
+    const bar = Math.max(0, parseFloat(String(ein).replace(",", ".")) || 0);
+    setTakeaway(p => p.map(x => x.id === t.id
+      ? { ...x, geliefert: { von: ich, zeit: new Date().toISOString(), bar: bar } } : x));
+  };
+
+  const knopf = (text, hg, farbe, onClick) => /*#__PURE__*/React.createElement("button", {
+    onClick: onClick,
+    style: { flex: 1, padding: "11px 6px", borderRadius: 10, border: "none", background: hg, color: farbe,
+             fontFamily: "inherit", fontWeight: 800, fontSize: 13, cursor: "pointer" }
+  }, text);
+
+  return /*#__PURE__*/React.createElement("div", { style: { padding: 12, maxWidth: 720, margin: "0 auto" } },
+    /*#__PURE__*/React.createElement("div", {
+      style: { background: C.green, color: "#fff", borderRadius: 12, padding: "12px 14px", marginBottom: 12,
+               display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }
+    },
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 15 } }, "\uD83D\uDEF5 ", ich),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, opacity: 0.9 } },
+          meineFertig.length, " geliefert \u00B7 Bar kassiert ", fmt(meineKasse))
+      ),
+      /*#__PURE__*/React.createElement("button", { onClick: () => setNurMeine(m => !m),
+        style: { padding: "8px 12px", borderRadius: 20, border: "2px solid rgba(255,255,255,0.6)",
+                 background: nurMeine ? "#fff" : "transparent", color: nurMeine ? C.green : "#fff",
+                 fontFamily: "inherit", fontWeight: 700, fontSize: 12, cursor: "pointer" }
+      }, nurMeine ? "Nur meine" : "Alle")
+    ),
+
+    liste.length === 0 && /*#__PURE__*/React.createElement("div", {
+      style: { textAlign: "center", color: "#999", padding: "50px 20px", fontSize: 14 }
+    }, "\uD83C\uDF89 Keine offenen Lieferungen."),
+
+    liste.map(t => {
+      const adr = adresse(t);
+      const meins = t.fahrer === ich;
+      const fremd = t.fahrer && !meins;
+      return /*#__PURE__*/React.createElement("div", {
+        key: t.id,
+        style: { background: "#fff", borderRadius: 12, padding: 13, marginBottom: 10,
+                 border: meins ? "2px solid " + C.green : "1px solid #e0e0e0", opacity: fremd ? 0.55 : 1 }
+      },
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8 } },
+          /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 15.5 } }, t.customerName || "Gast"),
+          /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 15.5, color: C.green } }, fmt(summe(t)))
+        ),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 13.5, color: "#333", marginTop: 4, lineHeight: 1.5 } }, "\uD83D\uDCCD ", adr),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#888", marginTop: 2 } },
+          "#", t.id, " \u00B7 ", (t.items || []).reduce((s, i) => s + (i.qty || 0), 0), " Artikel \u00B7 ",
+          t.time ? new Date(t.time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "",
+          fremd ? (" \u00B7 \uD83D\uDEF5 " + t.fahrer) : ""),
+
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 7, marginTop: 11 } },
+          knopf("\uD83E\uDDED Navi", "#1565c0", "#fff", () => window.belksNavi(adr)),
+          t.customerPhone ? knopf("\uD83D\uDCDE Anruf", "#eee", "#333",
+            () => { try { window.oeffneExtern("tel:" + t.customerPhone); } catch (e) {} }) : null
+        ),
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 7, marginTop: 7 } },
+          knopf(meins ? "\u21A9\uFE0F Abgeben" : "\u270B \u00DCbernehmen", meins ? "#fff3e0" : "#e8f5e9",
+                meins ? "#e65100" : C.green, () => uebernehmen(t.id)),
+          knopf("\uD83D\uDCE6 Geliefert", C.green, "#fff", () => geliefert(t))
+        )
+      );
+    }),
+
+    meineFertig.length > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 18 } },
+      /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 13, color: "#555", marginBottom: 8 } },
+        "\u2705 Heute geliefert"),
+      meineFertig.map(t => /*#__PURE__*/React.createElement("div", {
+        key: t.id,
+        style: { background: "#f5f5f5", borderRadius: 10, padding: "9px 12px", marginBottom: 6,
+                 display: "flex", justifyContent: "space-between", fontSize: 13 }
+      },
+        /*#__PURE__*/React.createElement("span", null, "#", t.id, " ", t.customerName || "Gast"),
+        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: C.green } },
+          (Number(t.geliefert.bar) || 0) > 0 ? ("Bar " + fmt(t.geliefert.bar)) : "bezahlt")
+      )),
+      /*#__PURE__*/React.createElement("div", {
+        style: { background: "#fff8e1", border: "2px solid #ffc107", borderRadius: 10, padding: "10px 12px",
+                 marginTop: 8, fontSize: 12.5, color: "#795548", lineHeight: 1.5 }
+      }, "\u2139\uFE0F Das Geld an der Kasse abgeben \u2013 dort werden die Bestellungen abgeschlossen und gebucht.")
+    )
+  );
+}
+
 // --- Takeaway Schnellsuche Modal (Didan-style) ----------------------------
 function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, onClose, onAddCustomer }) {
   const [query, setQuery] = React.useState("");
@@ -18906,7 +19017,10 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
               style:{ padding:"9px 10px", borderBottom: i<adrTreffer.length-1?"1px solid #eee":"none", cursor:"pointer", fontSize:13 }
             },
               /*#__PURE__*/React.createElement("div", { style:{fontWeight:700,color:"#222"} }, a.strasse),
-              /*#__PURE__*/React.createElement("div", { style:{fontSize:11,color:"#777"} }, [a.plz, a.ort].filter(Boolean).join(" "))
+              /*#__PURE__*/React.createElement("div", { style:{fontSize:11,color:"#777"} },
+                [a.plz, a.ort].filter(Boolean).join(" "),
+                (a.km != null) ? /*#__PURE__*/React.createElement("span", { style:{color:C.green,fontWeight:700} },
+                  "  \u00B7 " + (a.km < 1 ? Math.round(a.km*1000)+" m" : a.km.toFixed(1).replace(".",",")+" km")) : null)
             ))),
             !adrManuell && adrText.trim().length >= 4 && !adrLaedt && adrTreffer.length === 0 && /*#__PURE__*/React.createElement("div", {
               style:{fontSize:10.5,color:"#e65100",marginTop:3,lineHeight:1.4}
@@ -20426,7 +20540,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v234"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v237"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21546,8 +21660,12 @@ function App() {
     l: "Reservierungen",
     i: "📅"
   }, {
+    id: "fahrer",
+    l: "Meine Touren (Fahrer)",
+    i: "🛵"
+  }, {
     id: "delivery",
-    l: "Delivery Person",
+    l: "Lieferung verwalten",
     i: "🚴"
   }, {
     id: "floors",
@@ -21617,8 +21735,6 @@ function App() {
     id: "ai_marketing", l: "AI Marketing", i: "📢"
   }, {
     id: "kds_pro", l: "KDS Pro", i: "🍳"
-  }, {
-    id: "lieferfahrer", l: "Fahrer", i: "🚴"
   }, {
     id: "rezeptkosten", l: "Rezeptkosten", i: "💰"
   }, {
@@ -22428,6 +22544,11 @@ function App() {
     reservations: reservations,
     onAdd: r => setReservations(p => [...p, r]),
     onDelete: id => setReservations(p => p.filter(r => r.id !== id))
+  }), view === "fahrer" && /*#__PURE__*/React.createElement(FahrerView, {
+    takeaway: takeaway,
+    setTakeaway: setTakeaway,
+    loggedInUser: loggedInUser,
+    printerSettings: printerSettings
   }), view === "delivery" && /*#__PURE__*/React.createElement(DeliveryPersonView, {
     drivers: drivers,
     takeaway: takeaway,
@@ -23655,28 +23776,105 @@ window.belksDiktat = function(opt){
 };
 
 window._belksAdrCache = window._belksAdrCache || {};
+/* Eigener Standort - einmal ermitteln, dann gemerkt.
+   Er dient nur als Hinweis fuer die Suche ("in dieser Gegend zuerst"). */
+/* \uD83E\uDDED NAVIGATION STARTEN
+   google.navigation:q= startet die Zielfuehrung sofort (nur Android-App).
+   Im Browser gibt es das nicht - dort oeffnet die normale Karten-Adresse. */
+window.belksNavi = function(adresse){
+  var ziel = String(adresse||'').trim();
+  if(!ziel){ alert('Keine Adresse hinterlegt.'); return; }
+  var cap = window.Capacitor;
+  var nativ = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
+  try{
+    if(nativ){ window.location.href = 'google.navigation:q=' + encodeURIComponent(ziel); return; }
+  }catch(e){}
+  try{ window.oeffneExtern('https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(ziel)); }
+  catch(e){ window.open('https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(ziel), '_blank'); }
+};
+
+window.belksHeimat = async function(){
+  var loc = 'eatdesi-bw';
+  try{ loc = localStorage.getItem('eatdesi_location_id') || loc; }catch(e){}
+  var key = 'eatdesi_heimat_' + loc;
+  try{
+    var c = JSON.parse(localStorage.getItem(key) || 'null');
+    if(c && c.lat) return c;
+  }catch(e){}
+  var f = {};
+  try{ f = JSON.parse(localStorage.getItem('eatdesi_firma') || 'null') || {}; }catch(e){}
+  var adr = [f.firmaStrasse || f.street || '', f.firmaPlzOrt || [f.plz||'', f.city||''].filter(Boolean).join(' ')]
+              .filter(Boolean).join(', ').trim();
+  if(!adr) return null;
+  try{
+    var r = await fetch('https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=de&limit=1&q='
+                        + encodeURIComponent(adr), { headers:{ 'Accept':'application/json' } });
+    if(!r.ok) return null;
+    var j = await r.json();
+    if(!j || !j[0]) return null;
+    var a = j[0].address || {};
+    var heim = {
+      lat: parseFloat(j[0].lat), lon: parseFloat(j[0].lon),
+      plz: a.postcode || '', ort: a.city || a.town || a.village || ''
+    };
+    try{ localStorage.setItem(key, JSON.stringify(heim)); }catch(e){}
+    return heim;
+  }catch(e){ return null; }
+};
+
 window.belksAdressSuche = async function(text){
   var q = String(text||'').trim();
   if(q.length < 4) return [];
   if(window._belksAdrCache[q]) return window._belksAdrCache[q];
-  try{
+
+  var heim = null;
+  try{ heim = await window.belksHeimat(); }catch(e){}
+
+  var hole = async function(frage){
     var url = 'https://nominatim.openstreetmap.org/search?format=json&addressdetails=1'
-            + '&countrycodes=de&limit=6&q=' + encodeURIComponent(q);
+            + '&countrycodes=de&limit=8&q=' + encodeURIComponent(frage);
+    /* viewbox OHNE bounded=1: das eigene Gebiet wird bevorzugt, weiter entfernte
+       Adressen verschwinden aber nicht - ein Gast kann auch von ausserhalb
+       bestellen. Rund 0,35 Grad sind etwa 25-35 km. */
+    if(heim && heim.lat){
+      var d = 0.35;
+      url += '&viewbox=' + (heim.lon-d) + ',' + (heim.lat+d) + ',' + (heim.lon+d) + ',' + (heim.lat-d);
+    }
     var r = await fetch(url, { headers:{ 'Accept':'application/json' } });
     if(!r.ok) return [];
-    var j = await r.json();
+    return await r.json();
+  };
+
+  try{
+    var j = await hole(q);
+    // Nichts gefunden und kein Ort genannt? Dann mit dem eigenen Ort versuchen.
+    if((!j || !j.length) && heim && heim.ort && !/\d{5}/.test(q) && q.toLowerCase().indexOf(heim.ort.toLowerCase()) === -1){
+      j = await hole(q + ', ' + heim.ort);
+    }
     var out = (j||[]).map(function(e){
       var a = e.address || {};
       var ort = a.city || a.town || a.village || a.municipality || a.suburb || '';
       var strasse = [a.road || '', a.house_number || ''].filter(Boolean).join(' ');
+      var km = null;
+      if(heim && heim.lat && e.lat){
+        // grobe Luftlinie - reicht zum Sortieren
+        var dx = (parseFloat(e.lon) - heim.lon) * 71, dy = (parseFloat(e.lat) - heim.lat) * 111;
+        km = Math.sqrt(dx*dx + dy*dy);
+      }
       return {
         strasse: strasse,
         plz: a.postcode || '',
         ort: ort,
-        stadtteil: (a.suburb && a.suburb !== ort) ? a.suburb : '',
+        km: km,
         zeile: [strasse, [a.postcode||'', ort].filter(Boolean).join(' ')].filter(Boolean).join(', ')
       };
     }).filter(function(e){ return e.strasse && e.ort; });
+    // Naechste zuerst - wie in Karten-Apps
+    out.sort(function(x,y){
+      if(x.km == null || y.km == null) return 0;
+      return x.km - y.km;
+    });
+    out = out.slice(0, 6);
     window._belksAdrCache[q] = out;
     return out;
   }catch(e){ return []; }
