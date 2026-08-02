@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v251</title>
+<title>eatDeSi POS v253</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v251';",
+    "var CACHE='eatdesi-v253';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -7424,11 +7424,32 @@ const BTPrint = {
   connect: function(address){
     var P=this._plugin();
     var self=this;
-    if(!P) return Promise.reject(new Error('Drucker-Plugin nicht verfügbar'));
-    return P.connect({ address: address }).then(function(dev){
-      self._connectedAddr = address;
-      return dev;
-    });
+    if(!P) return Promise.reject(new Error('Drucker-Plugin nicht verf\u00fcgbar'));
+    /* Bluetooth braucht manchmal einen zweiten Anlauf: der Drucker war eben
+       noch mit einem anderen Geraet verbunden, ist im Stromsparmodus oder
+       gerade erst eingeschaltet worden. Ein einziger Versuch meldet dann
+       "Printer is not connected", obwohl es beim naechsten Mal klappt.
+       Deshalb bis zu drei Versuche mit kurzer Pause. */
+    var versuch = 0;
+    var machen = function(){
+      versuch++;
+      return P.connect({ address: address }).then(function(dev){
+        self._connectedAddr = address;
+        try { console.log('Drucker verbunden (Versuch ' + versuch + ')'); } catch(e){}
+        return dev;
+      }).catch(function(e){
+        if (versuch >= 3) {
+          self._connectedAddr = null;
+          var m = (e && e.message) ? e.message : String(e);
+          throw new Error('Drucker antwortet nicht (' + versuch + ' Versuche). '
+            + 'Bitte pr\u00fcfen: eingeschaltet? Papier drin? Ist ein anderes Ger\u00e4t gerade verbunden? \u2013 ' + m);
+        }
+        return new Promise(function(r){ setTimeout(r, 900); }).then(function(){
+          if (self.freigeben) return self.freigeben().catch(function(){});
+        }).then(machen);
+      });
+    };
+    return machen();
   },
   // Umlaute/Sonderzeichen -> ASCII (Drucker kann kein UTF-8)
   _toAscii: function(str){
@@ -7617,8 +7638,11 @@ const BTPrint = {
     };
     if(self._connectedAddr === address){
       return doPrint().then(danach).catch(function(e){
+        // Verbindung war tot -> loslassen, neu aufbauen, nochmal drucken
         self._connectedAddr = null;
-        return self.connect(address).then(doPrint).then(danach).catch(fehler);
+        return self.freigeben().catch(function(){})
+          .then(function(){ return self.connect(address); })
+          .then(doPrint).then(danach).catch(fehler);
       });
     }
     return self.connect(address).then(doPrint).then(danach).catch(fehler);
@@ -20893,7 +20917,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v251"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v253"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22680,7 +22704,12 @@ function App() {
             if (btn) { btn.style.transition = 'transform .3s ease'; btn.style.transform = 'rotate(0deg)'; }
           };
           startDrehen();
+          var _vorher = '';
+          try { _vorher = JSON.stringify(LS.get("eatdesi_tableorders", {})); } catch(e){}
+          var _fertig = false;
           var doReload = function(){
+            if (_fertig) return;   // Notbremse und Promise nicht doppelt
+            _fertig = true;
             stopDrehen();
             // Nach dem Sync alle wichtigen States frisch aus localStorage laden,
             // damit Aenderungen sofort sichtbar sind (ohne App neu zu starten)
@@ -22693,6 +22722,17 @@ function App() {
             try { var _m=LS.get("eatdesi_menu", null); if(_m){ window._menuHydrated=true; setMenuData(_m); } } catch(e){}
             try { setUsers(LS.get("eatdesi_users", [])); } catch(e){}
             setNow(new Date());
+            /* Sichtbare Rueckmeldung: ohne sie sieht der Knopf immer gleich aus,
+               egal ob der Abgleich lief, nichts zu tun war oder das Netz fehlte. */
+            try {
+              var _nachher = JSON.stringify(LS.get("eatdesi_tableorders", {}));
+              var _off = Object.keys(LS.get("eatdesi_tableorders", {})).length;
+              var _txt;
+              if (window.__syncFehler) { _txt = "\u26A0\uFE0F Keine Verbindung \u2013 sp\u00e4ter nochmal"; window.__syncFehler = null; }
+              else if (_nachher !== _vorher) _txt = "\u2705 Aktualisiert \u00b7 " + _off + " Tische offen";
+              else _txt = "\u2714\uFE0F Schon aktuell \u00b7 " + _off + " Tische offen";
+              if (typeof toast === 'function') toast(_txt); else window.alert(_txt);
+            } catch(e){}
           };
           if (typeof window.runSyncJetzt === 'function') {
             Promise.resolve(window.runSyncJetzt()).then(doReload).catch(doReload);
@@ -27175,7 +27215,17 @@ async function runSync() {
       return;
     }
   } catch(e) {}
-  if (_syncRunning) return;
+  /* WACHHUND
+     _syncRunning wird am Ende wieder auf false gesetzt - aber nur, wenn die
+     Funktion ueberhaupt ans Ende kommt. Bleibt ein fetch haengen (auf dem
+     Handynetz keine Seltenheit), steht die Sperre fuer immer. Danach tut
+     weder der Knopf noch der 5-Sekunden-Abgleich irgendetwas, ohne dass man
+     es sieht. Nach 25 Sekunden gilt ein Lauf deshalb als verloren. */
+  if (_syncRunning) {
+    if (!window.__syncStart || (Date.now() - window.__syncStart) < 25000) return;
+    try { console.warn('Sync haengt seit ' + Math.round((Date.now()-window.__syncStart)/1000) + 's - Sperre wird geloest'); } catch(e){}
+  }
+  window.__syncStart = Date.now();
   _syncRunning = true;
   updateSyncBadge('syncing');
   try {
@@ -27187,8 +27237,11 @@ async function runSync() {
     updateSyncBadge('ok');
   } catch(e) {
     updateSyncBadge('error');
+    window.__syncFehler = (e && e.message) ? e.message : String(e);
   }
   _syncRunning = false;
+  window.__syncStart = 0;
+  window.__syncFertig = Date.now();
 }
 window.runSync = runSync;
 
