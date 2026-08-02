@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v249</title>
+<title>eatDeSi POS v251</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v249';",
+    "var CACHE='eatdesi-v251';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -12124,14 +12124,29 @@ function OrderView({
   const total = itemsTotal + lieferFee;
   const cats = Object.keys(MENU_LIVE);
   // Findet die Kategorie eines Artikels (fuer Bon-Gruppierung nach Kategorie)
-  const findCat = (item) => {
-    if (item.cat) return item.cat;
+  /* Kategorie bestimmen.
+     Frueher wurde ueber die id gesucht:
+         MENU_LIVE[c].some(x => x.id === item.id)
+     Haben mehrere Artikel dieselbe id - oder gar keine, was in gepflegten
+     Karten staendig vorkommt - trifft das die ERSTE Kategorie mit dieser id.
+     Ergebnis: auf dem Kuechenbon stand ueber jedem Gericht "- Bier -".
+     Die angezeigte Kategorie ist beim Antippen ohnehin bekannt; nur wenn
+     die fehlt, wird noch gesucht - dann aber ueber die Objekt-Identitaet
+     und den Namen, nicht ueber die id. */
+  const findCat = (item, catHint) => {
+    if (item && item.cat) return item.cat;
+    if (catHint) return catHint;
     for (const c of cats) {
-      if ((MENU_LIVE[c]||[]).some(x => x.id === item.id)) return c;
+      const liste = MENU_LIVE[c] || [];
+      if (liste.some(x => x === item)) return c;
+    }
+    for (const c of cats) {
+      const liste = MENU_LIVE[c] || [];
+      if (liste.some(x => x && item && x.name === item.name && x.price === item.price)) return c;
     }
     return "";
   };
-  const handleClick = item => {
+  const handleClick = (item, catHint) => {
     // Resolve option groups for this item
     const groups = (item.selectedGroups||[])
       .map(gid => (optionGroups||[]).find(g=>g.id===gid))
@@ -12140,9 +12155,9 @@ function OrderView({
     const hasOpts = (item.options?.length > 0) || groups.length > 0;
     if (hasOpts) {
       // Build enriched item with resolved groups + Kategorie
-      setOptItem({ ...item, cat: findCat(item), _resolvedGroups: groups });
+      setOptItem({ ...item, cat: findCat(item, catHint), _resolvedGroups: groups });
     } else {
-      addItem({ ...item, cat: findCat(item) }, item.price, "");
+      addItem({ ...item, cat: findCat(item, catHint) }, item.price, "");
     }
   };
   const addItem = (item, finalPrice, note) => {
@@ -12485,7 +12500,7 @@ function OrderView({
     }
   }, MENU_LIVE[activeCat] && (MENU_LIVE[activeCat]).map((item, idx) => /*#__PURE__*/React.createElement("div", {
     key: item.id,
-    onClick: () => handleClick(item),
+    onClick: () => handleClick(item, activeCat),
     style: {
       display: "flex",
       alignItems: "center",
@@ -12539,7 +12554,7 @@ function OrderView({
   }, item.options?.some(o => o.priced) ? "ab " : "", item.price ? fmt(item.price) : fmt(item.options?.find(o => o.priced)?.choices?.[0]?.price || 0)), /*#__PURE__*/React.createElement("button", {
     onClick: e => {
       e.stopPropagation();
-      handleClick(item);
+      handleClick(item, activeCat);
     },
     style: {
       width: 28,
@@ -20878,7 +20893,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v249"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v251"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26696,7 +26711,12 @@ try { setTimeout(function(){ window.belksMarkHydrated('Zeitablauf'); }, 10000); 
 // Jetzt bekommt JEDER Tisch einen eigenen Zeitstempel, geloeschte Tische
 // eine Loeschmarke (sonst holt ein anderes Geraet sie wieder zurueck).
 var TO_META = 'eatdesi_to_meta';           // { ts:{Tisch:ms}, del:{Tisch:ms} }
-var TO_TOMB_MS = 24*60*60*1000;            // Loeschmarken 24 Std. behalten
+/* Loeschmarken 7 Tage behalten (vorher 24 Std.).
+   Ein Geraet, das ueber Nacht aus war oder abgemeldet wurde, brachte am
+   naechsten Tag seinen alten Stand mit. War die Loeschmarke bis dahin
+   verfallen, galt der alte Tisch wieder als gueltig - ein bezahlter Tisch
+   stand wieder offen da. Sieben Tage decken Ruhetage und Urlaub ab. */
+var TO_TOMB_MS = 7*24*60*60*1000;
 
 function toMetaRead(){
   try { var m = JSON.parse(localStorage.getItem(TO_META)||'{}'); return { ts:m.ts||{}, del:m.del||{} }; }
@@ -26744,12 +26764,40 @@ function toMerge(local, lmeta, remote, rmeta){
       return;
     }
     if (best===ld || best===rd){ meta.del[k]=best; return; }   // geloescht gewinnt
+    /* Zusaetzliche Sicherung: Wurde fuer diesen Tisch bereits eine Rechnung
+       abgeschlossen, NACHDEM der hier vorliegende Stand entstanden ist, dann
+       ist der Tisch bezahlt - er darf nicht zurueckkommen, auch wenn die
+       Loeschmarke fehlt (altes Geraet, verfallene Marke, geleerter Speicher). */
+    try {
+      var bezahltAm = window.belksTischBezahltAm ? window.belksTischBezahltAm(k) : 0;
+      if (bezahltAm && bezahltAm >= best) { meta.del[k] = bezahltAm; return; }
+    } catch(e) {}
     if (best===lt && (k in local)){ out[k]=local[k];  meta.ts[k]=lt; return; }
     if (k in remote){ out[k]=remote[k]; meta.ts[k]=rt; }
   });
   return { tables: out, meta: toMetaPurge(meta) };
 }
 window.__toMerge = toMerge;   // fuer Tests
+
+/* Wann wurde fuer diesen Tisch zuletzt eine Rechnung abgeschlossen?
+   Quelle sind die fertigen Bestellungen - die werden nie geloescht und
+   sind damit die verlaesslichste Auskunft darueber, ob ein Tisch bezahlt
+   ist. Gibt 0 zurueck, wenn nichts gefunden wurde. */
+window.belksTischBezahltAm = function(tischId){
+  try {
+    var alle = JSON.parse(localStorage.getItem('eatdesi_orders') || '[]');
+    var id = String(tischId);
+    var neuste = 0;
+    for (var i = alle.length - 1; i >= 0 && i > alle.length - 400; i--) {
+      var o = alle[i];
+      if (!o || o.storniert) continue;
+      if (String(o.tableId) !== id) continue;
+      var t = new Date(o.time || o.date || 0).getTime();
+      if (t > neuste) neuste = t;
+    }
+    return neuste;
+  } catch(e) { return 0; }
+};
 
 // ═══ v211: CLOUD ZUERST ═══
 // Holt beim Start ALLE Daten dieses Restaurants aus der Cloud, BEVOR die App
@@ -27176,6 +27224,16 @@ LS.set = function(key, value) {
     }
   }
   if (key === 'eatdesi_tableorders') {
+    /* Nicht hochladen, solange die Cloud noch nicht gelesen wurde.
+       syncTableOrders haelt sich an diese Sperre - dieser Weg hier bisher
+       nicht. Dadurch konnte ein Geraet direkt nach dem Start seinen alten
+       Stand hochschieben, BEVOR es den aktuellen kannte: ein bereits
+       bezahlter Tisch tauchte wieder als offen auf. */
+    if (!window.__belksHydrated) {
+      try { console.warn('Tische nicht hochgeladen - Cloud noch nicht gelesen'); } catch(e){}
+      try { _toVorher = JSON.parse(JSON.stringify(value||{})); } catch(e){ _toVorher = {}; }
+      return;
+    }
     // eigenen Zeitstempel JETZT setzen, damit der eigene Push nicht zurueckgeholt wird
     _setLocalStamp('tableOrders', Date.now());
     // v190: geaenderte/geloeschte Tische einzeln markieren
