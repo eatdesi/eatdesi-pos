@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v247</title>
+<title>eatDeSi POS v248</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v247';",
+    "var CACHE='eatdesi-v248';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -11088,16 +11088,6 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
   ];
 
   const geminiKey = printerSettings?.geminiKey || "";
-  // Neu zeichnen, wenn Tischanzahl oder Plan sich aendern
-  const [, _tischStand] = React.useReducer(x => x + 1, 0);
-  const [planEdit, setPlanEdit] = React.useState(false);
-  const [planWahl, setPlanWahl] = React.useState(null);
-  React.useEffect(() => {
-    const h = () => _tischStand();
-    window.addEventListener('belks_tische_neu', h);
-    window.addEventListener('belks_plan_neu', h);
-    return () => { window.removeEventListener('belks_tische_neu', h); window.removeEventListener('belks_plan_neu', h); };
-  }, []);
   const allTables = TABLES.map(function(t){return t.id;});
   const floorTables = (floors||[]).flatMap(f=>(f.tables||[]).filter(t=>!(f.hidden||[]).includes(t)));
 
@@ -11912,6 +11902,18 @@ function TableView({
   floors,
   reservations
 }) {
+  /* Zustand fuer den Tischplan. Muss HIER stehen - in v241 war er
+     versehentlich in einer anderen Ansicht gelandet, dadurch kannte der
+     Plan die Variablen nicht und die App zeigte einen weissen Bildschirm. */
+  const [, _tischStand] = React.useReducer(x => x + 1, 0);
+  const [planEdit, setPlanEdit] = React.useState(false);
+  const [planWahl, setPlanWahl] = React.useState(null);
+  React.useEffect(() => {
+    const h = () => _tischStand();
+    window.addEventListener('belks_tische_neu', h);
+    window.addEventListener('belks_plan_neu', h);
+    return () => { window.removeEventListener('belks_tische_neu', h); window.removeEventListener('belks_plan_neu', h); };
+  }, []);
   const todayIso = new Date().toISOString().slice(0, 10);
   const todayRes = (reservations || []).filter(r => r.date === todayIso);
   const [viewMode, setViewMode] = React.useState("grid"); // grid | map
@@ -20839,7 +20841,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v247"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v248"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
