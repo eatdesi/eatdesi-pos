@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v239</title>
+<title>eatDeSi POS v247</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v239';",
+    "var CACHE='eatdesi-v247';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -659,6 +659,7 @@ window.belksVorgabeBenutzerAufraeumen = function(){
 // Damit ist die Arbeit unabhaengig von Cloud und App-Version gesichert.
 window.BELKS_SICHERUNG_KEYS = [
   'eatdesi_floors',      // Tisch-Bereiche
+  'eatdesi_tischplan',   // Anordnung im Tischplan
   'eatdesi_firma',       // Firmendaten
   'eatdesi_printer',     // Drucker + Kassenschublade
   'eatdesi_menu',        // Speisekarte
@@ -7137,6 +7138,58 @@ function getTableCount(){
   return 30;
 }
 function _buildTables(n){ return Array.from({length:n},function(_,i){return {id:i+1};}); }
+
+/* ===== \uD83D\uDDFA\uFE0F TISCHPLAN =====
+   Eine Zeile ist entweder eine Reihe Tische oder ein Durchgang.
+   Gespeichert als Liste von Listen; null bedeutet freier Platz,
+   eine Zeile nur aus null ist ein Durchgang. */
+function planVorgabe(ids){
+  var reihen = [], i = 0;
+  while(i < ids.length){
+    reihen.push(ids.slice(i, i+5));
+    i += 5;
+    // nach je zwei Reihen ein Durchgang, aber nicht am Ende
+    if(reihen.filter(function(r){ return r[0] !== null; }).length % 2 === 0 && i < ids.length){
+      reihen.push([null,null,null,null,null]);
+    }
+  }
+  return reihen.length ? reihen : [[null]];
+}
+function planLesen(){
+  var ids = TABLES.map(function(t){ return t.id; });
+  var plan = null;
+  try{ plan = JSON.parse(localStorage.getItem('eatdesi_tischplan') || 'null'); }catch(e){}
+  if(!Array.isArray(plan) || !plan.length) return planVorgabe(ids);
+  // Nur Zeilen behalten, die auch Zeilen sind
+  plan = plan.filter(function(r){ return Array.isArray(r); });
+  // Tische, die es nicht mehr gibt, verschwinden; neue kommen hinten dazu.
+  var drin = {};
+  plan = plan.map(function(r){
+    return r.map(function(v){
+      if(v === null || v === undefined) return null;
+      if(ids.indexOf(v) === -1 || drin[v]) return null;
+      drin[v] = 1; return v;
+    });
+  });
+  var fehlen = ids.filter(function(id){ return !drin[id]; });
+  if(fehlen.length){
+    // erst freie Plaetze fuellen
+    for(var r = 0; r < plan.length && fehlen.length; r++){
+      if(plan[r].every(function(v){ return v === null; })) continue;   // Durchgang lassen
+      for(var c = 0; c < plan[r].length && fehlen.length; c++){
+        if(plan[r][c] === null) plan[r][c] = fehlen.shift();
+      }
+    }
+    // Rest als neue Reihen anhaengen
+    while(fehlen.length) plan.push(fehlen.splice(0, 5));
+  }
+  return plan;
+}
+function planSpeichern(plan){
+  try{ localStorage.setItem('eatdesi_tischplan', JSON.stringify(plan)); }catch(e){}
+  try{ window.dispatchEvent(new CustomEvent('belks_plan_neu')); }catch(e){}
+}
+window.planLesen = planLesen; window.planSpeichern = planSpeichern;
 var TABLES = _buildTables(getTableCount());
 function applyTableCount(n){
   n=parseInt(n,10);
@@ -7153,7 +7206,13 @@ function setTableCount(n){
 window.getTableCount=getTableCount; window.setTableCount=setTableCount;
 // Live-Update, wenn ein anderes Geraet desselben Restaurants die Anzahl aendert
 try{
-  window.addEventListener('eatdesi_tablecount_synced', function(){ applyTableCount(getTableCount()); });
+  /* TABLES ist eine einfache Variable - React merkt von allein nichts davon.
+     Aendert ein anderes Geraet die Anzahl, wird die Liste zwar neu gebaut,
+     die Ansicht zeigt aber weiter die alte. Deshalb Bescheid geben. */
+  window.addEventListener('eatdesi_tablecount_synced', function(){
+    applyTableCount(getTableCount());
+    try{ window.dispatchEvent(new CustomEvent('belks_tische_neu')); }catch(e){}
+  });
   window.addEventListener('eatdesi_state_synced', function(ev){ if(ev&&ev.detail&&ev.detail.key==='eatdesi_tablecount') applyTableCount(getTableCount()); });
 }catch(e){}
 
@@ -7346,6 +7405,22 @@ const BTPrint = {
     });
   },
   _connectedAddr: null,
+  /* \uD83D\uDD13 VERBINDUNG FREIGEBEN
+     Bluetooth Classic erlaubt nur EINE Verbindung zum Drucker. Solange
+     dieses Geraet sie haelt, bekommt jedes andere "Printer is not connected".
+     Nach dem Druck also loslassen. Wer nur ein Geraet benutzt, kann das
+     in den Einstellungen abschalten - dann druckt es etwas schneller. */
+  _freigebenAn: function(){
+    try{ return localStorage.getItem('eatdesi_bt_freigeben') !== '0'; }catch(e){ return true; }
+  },
+  freigeben: function(){
+    var P=this._plugin(); var self=this;
+    if(!P){ self._connectedAddr=null; return Promise.resolve(); }
+    return Promise.resolve()
+      .then(function(){ if(P.disconnect) return P.disconnect(); })
+      .catch(function(){})
+      .then(function(){ self._connectedAddr=null; });
+  },
   connect: function(address){
     var P=this._plugin();
     var self=this;
@@ -7489,8 +7564,14 @@ const BTPrint = {
         //   ESC E 0  = fett aus
         //   GS ! n   = Schriftgröße (0x00=normal 12pt, 0x01=hoch 14pt, 0x11=hoch+breit)
         var ESC='\x1B', GS='\x1D';
-        var fontPrefix = ESC+'E'+'\x00' + GS+'!'+String.fromCharCode(fc||0);
-        var fontReset  = GS+'!'+'\x00';   // vor Feed/Cut zurück auf normal
+        /* ESC E 1 = fett ein, ESC E 0 = fett aus.
+           Kueche, Bar und Webshop (fc=0x01) werden fett gedruckt: die Bons
+           werden im Betrieb aus Entfernung und in Eile gelesen.
+           Kunden- und Bewirtungsbeleg (fc=0x00) bleiben normal - dort zaehlt
+           ein sauberes, ruhiges Schriftbild. */
+        var fett = (fc ? '\x01' : '\x00');
+        var fontPrefix = ESC+'E'+fett + GS+'!'+String.fromCharCode(fc||0);
+        var fontReset  = ESC+'E'+'\x00' + GS+'!'+'\x00';   // vor Feed/Cut alles zurueck
         if(typeof b.align === 'function') b = b.align('left');
         b = b.text(fontPrefix + text + '\n');
         if(qrUrl && typeof b.qr === 'function'){
@@ -7507,22 +7588,33 @@ const BTPrint = {
       }
       // Fallback: ältere API mit Einzelaufrufen (Objekt-Parameter)
       var ESC2='\x1B', GS2='\x1D';
-      var fontPrefix2 = ESC2+'E'+'\x00' + GS2+'!'+String.fromCharCode(fc||0);
+      var fett2 = (fc ? '\x01' : '\x00');
+      var fontPrefix2 = ESC2+'E'+fett2 + GS2+'!'+String.fromCharCode(fc||0);
       return Promise.resolve()
         .then(function(){ return P.begin ? P.begin() : null; })
         .then(function(){ return P.text ? P.text({ text: fontPrefix2 + text + '\n' }) : null; })
         .then(function(){ if(qrUrl && P.qr) return P.qr({ value: qrUrl }); })
-        .then(function(){ return P.text ? P.text({ text: GS2+'!'+'\x00' + '\n\n\n\n' }) : null; })
+        .then(function(){ return P.text ? P.text({ text: ESC2+'E'+'\x00' + GS2+'!'+'\x00' + '\n\n\n\n' }) : null; })
         .then(function(){ return P.cutPaper ? P.cutPaper() : null; })
         .then(function(){ return P.write ? P.write() : null; });
     };
+    // Nach dem Druck die Verbindung freigeben, damit auch das zweite
+    // Geraet drucken kann (Bluetooth erlaubt nur eine Verbindung).
+    var danach = function(erg){
+      if(!self._freigebenAn()) return erg;
+      return self.freigeben().then(function(){ return erg; });
+    };
+    var fehler = function(e){
+      if(!self._freigebenAn()) throw e;
+      return self.freigeben().then(function(){ throw e; });
+    };
     if(self._connectedAddr === address){
-      return doPrint().catch(function(e){
+      return doPrint().then(danach).catch(function(e){
         self._connectedAddr = null;
-        return self.connect(address).then(doPrint);
+        return self.connect(address).then(doPrint).then(danach).catch(fehler);
       });
     }
-    return self.connect(address).then(doPrint);
+    return self.connect(address).then(doPrint).then(danach).catch(fehler);
   },
   // v166: Kassenschublade — ESC p 0 25 250 (Kick-Impuls) an den Drucker senden
   openDrawer: function(address){
@@ -9493,6 +9585,32 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
   const selTotal = selItems.reduce((s,i)=>s+i.finalPrice*i.qty,0);
   const tgVal = parseFloat(tg)||0;
   const totalWithTG = selTotal + tgVal;
+  /* Wie im Hauptfenster: der Gast nennt den Gesamtbetrag, nicht das
+     Trinkgeld. zahlText haelt fest, was gerade getippt wird - sonst
+     loescht sich "5" auf dem Weg zu "50" selbst. */
+  const [zahlText, setZahlText] = React.useState("");
+  const zahlVorschlaege = (() => {
+    const b = selTotal;
+    if (!(b > 0)) return [];
+    const out = [];
+    const voll = Math.ceil(b);
+    if (voll > b + 0.001) out.push(voll);
+    let f = Math.ceil(b / 5) * 5;
+    if (f <= b + 0.001) f += 5;
+    for (let i = 0; i < 3; i++) out.push(f + i * 5);
+    return out.filter((v, i, a) => a.indexOf(v) === i).slice(0, 4);
+  })();
+  const setzeZahlbetrag = (wert) => {
+    const roh = String(wert);
+    setZahlText(roh);
+    const v = parseFloat(roh.replace(",", "."));
+    if (!isFinite(v)) { setTg(""); return; }
+    const diff = Math.round((v - selTotal) * 100) / 100;
+    setTg(diff > 0 ? String(diff) : "");
+  };
+  const leereBetrag = () => { setZahlText(""); setTg(""); };
+  // Beim Wechsel zum naechsten Gast das Feld leeren
+  React.useEffect(() => { setZahlText(""); }, [gastNr]);
   const cashChange = (parseFloat(cashGiven)||0) - totalWithTG;
   const gastColor = PCOLORS[gastNr % PCOLORS.length];
 
@@ -9666,15 +9784,36 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
         /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#8d6e63", marginTop:4, lineHeight:1.5 } },
           "Fehlt noch etwas? Bitte JETZT fragen \u2013 nach dem Buchen kann nichts mehr nachgetragen werden.")
       ),
-      // Trinkgeld
-      selItems.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6, marginBottom:10, alignItems:"center" } },
-        /*#__PURE__*/React.createElement("span", { style:{ fontSize:11, color:"#888", fontWeight:700, flexShrink:0 } }, "TG:"),
-        [0,1,2,3,5].map(t => /*#__PURE__*/React.createElement("button", { key:t, onClick:()=>setTg(t===0?"":String(t)),
-          style:{ flex:1, padding:"6px 0", borderRadius:8, border:`2px solid ${(parseFloat(tg)||0)===t&&t>0?C.orange:"#ddd"}`, background:(parseFloat(tg)||0)===t&&t>0?"#fff3e0":"#fff", color:(parseFloat(tg)||0)===t&&t>0?C.orange:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:11 }
-        }, t===0?"0":"€"+t)),
-        /*#__PURE__*/React.createElement("input", { type:"number", value:tg, onChange:e=>setTg(e.target.value), placeholder:"TG",
-          style:{ width:52, padding:"6px 8px", borderRadius:8, border:"2px solid #ffe082", fontSize:13, fontFamily:"inherit", textAlign:"center" }
-        })
+      // Trinkgeld ueber den Gesamtbetrag - wie im Hauptfenster
+      selItems.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ background:"#fffde7", border:"2px solid #ffe082", borderRadius:10, padding:"10px 11px", marginBottom:10 } },
+        /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:12.5, color:"#e65100" } },
+          "\uD83C\uDF1F Wie viel zahlt Gast ", gastNr+1, "?"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#8d6e63", marginBottom:7 } },
+          "Anteil ", fmt(selTotal), " \u2013 Gesamtbetrag eintippen."),
+        zahlVorschlaege.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6, marginBottom:7, flexWrap:"wrap" } },
+          /*#__PURE__*/React.createElement("button", { onClick:leereBetrag,
+            style:{ padding:"8px 12px", borderRadius:9, border:`2px solid ${tgVal===0?C.orange:"#ddd"}`, background:tgVal===0?"#fff3e0":"#fff", color:tgVal===0?C.orange:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
+          }, "Passend"),
+          zahlVorschlaege.map(v => {
+            const aktiv = Math.abs((selTotal + tgVal) - v) < 0.005 && tgVal > 0;
+            return /*#__PURE__*/React.createElement("button", { key:v, onClick:()=>setzeZahlbetrag(String(v)),
+              style:{ padding:"8px 12px", borderRadius:9, border:`2px solid ${aktiv?C.orange:"#ddd"}`, background:aktiv?"#fff3e0":"#fff", color:aktiv?C.orange:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
+            }, v + " \u20ac");
+          })
+        ),
+        /*#__PURE__*/React.createElement("input", { type:"text", inputMode:"decimal",
+          value: zahlText,
+          onChange:e=>setzeZahlbetrag(e.target.value),
+          onFocus:e=>{ try{ e.target.select(); }catch(err){} },
+          placeholder:"Gast zahlt \u2026 z.B. " + Math.ceil(selTotal/5)*5,
+          style:{ width:"100%", padding:11, borderRadius:8, border:"2px solid #ffe082", fontSize:17, fontWeight:800, fontFamily:"inherit", boxSizing:"border-box", textAlign:"center" }
+        }),
+        /*#__PURE__*/React.createElement("div", { style:{ textAlign:"center", marginTop:6, fontSize:13, fontWeight:800,
+          color: tgVal > 0 ? C.orange : (zahlText && parseFloat(zahlText.replace(",",".")) < selTotal ? "#c62828" : "#999") } },
+          tgVal > 0 ? ("Trinkgeld " + fmt(tgVal) + "  \u00B7  Gesamt " + fmt(totalWithTG))
+          : (zahlText && isFinite(parseFloat(zahlText.replace(",","."))) && parseFloat(zahlText.replace(",",".")) < selTotal)
+            ? ("\u26A0\uFE0F Weniger als der Anteil \u2013 es werden " + fmt(selTotal) + " gebucht")
+            : ("Ohne Trinkgeld \u00B7 " + fmt(selTotal)))
       ),
       // Payment buttons
       selItems.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 } },
@@ -10949,6 +11088,16 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
   ];
 
   const geminiKey = printerSettings?.geminiKey || "";
+  // Neu zeichnen, wenn Tischanzahl oder Plan sich aendern
+  const [, _tischStand] = React.useReducer(x => x + 1, 0);
+  const [planEdit, setPlanEdit] = React.useState(false);
+  const [planWahl, setPlanWahl] = React.useState(null);
+  React.useEffect(() => {
+    const h = () => _tischStand();
+    window.addEventListener('belks_tische_neu', h);
+    window.addEventListener('belks_plan_neu', h);
+    return () => { window.removeEventListener('belks_tische_neu', h); window.removeEventListener('belks_plan_neu', h); };
+  }, []);
   const allTables = TABLES.map(function(t){return t.id;});
   const floorTables = (floors||[]).flatMap(f=>(f.tables||[]).filter(t=>!(f.hidden||[]).includes(t)));
 
@@ -11581,7 +11730,8 @@ function ReservationView({ floors, reservations, onAdd, onDelete }) {
         (f.tables || []).filter(tNum => !(f.hidden||[]).includes(tNum))
           .map(tNum => ({ id: tNum, nr: tNum, floorName: f.name }))
       )
-    : Array.from({ length: 30 }, (_, i) => ({ id: i+1, nr: i+1, floorName: "Tische" }));
+    // Ohne Bereiche: alle eingestellten Tische, nicht fest 30
+    : TABLES.map(t => ({ id: t.id, nr: t.id, floorName: "Tische" }));
 
   // Days: today + unlimited (365 days)
   const days = Array.from({ length: 365 }, (_, i) => {
@@ -11794,19 +11944,39 @@ function TableView({
     ) : tableRes.length === 0 && /*#__PURE__*/React.createElement("div", { style: { color: "#ccc", fontSize: 9, marginTop: 3 } }, "frei"));
   };
 
-  // Map view - 5x6 grid visually representing restaurant layout
+  // Map view - Anordnung kommt aus dem gespeicherten Plan
   const renderMapView = () => {
-    const rows = [
-      [1,2,3,4,5],
-      [6,7,8,9,10],
-      [null,null,null,null,null], // Durchgang
-      [11,12,13,14,15],
-      [16,17,18,19,20],
-      [null,null,null,null,null],
-      [21,22,23,24,25],
-      [26,27,28,29,30],
-    ];
+    const rows = planLesen();
+    const tausche = (ri, ci) => {
+      const p = planLesen().map(r => r.slice());
+      if(!planWahl){ if(p[ri][ci] !== null) setPlanWahl({ri, ci}); return; }
+      if(planWahl.ri === ri && planWahl.ci === ci){ setPlanWahl(null); return; }
+      const a = p[planWahl.ri][planWahl.ci];
+      p[planWahl.ri][planWahl.ci] = p[ri][ci];
+      p[ri][ci] = a;
+      planSpeichern(p); setPlanWahl(null);
+    };
     return React.createElement("div", { style:{ padding:8 } },
+      // ---- Bearbeiten-Leiste ----
+      React.createElement("div", { style:{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap", alignItems:"center" } },
+        React.createElement("button", { onClick:()=>{ setPlanEdit(e=>!e); setPlanWahl(null); },
+          style:{ padding:"8px 14px", borderRadius:9, border:"none", cursor:"pointer", fontFamily:"inherit",
+                  fontWeight:700, fontSize:12.5, background: planEdit ? C.green : "#eee", color: planEdit ? "#fff" : "#555" }
+        }, planEdit ? "\u2705 Fertig" : "\u270F\uFE0F Plan bearbeiten"),
+        planEdit && React.createElement("button", { onClick:()=>{ const p=planLesen().map(r=>r.slice()); p.push([null,null,null,null,null]); planSpeichern(p); },
+          style:{ padding:"8px 12px", borderRadius:9, border:"1.5px solid #ddd", background:"#fff", color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
+        }, "\u2795 Durchgang"),
+        planEdit && React.createElement("button", { onClick:()=>{ const p=planLesen().map(r=>r.slice()); p.push([null,null,null,null,null]); planSpeichern(p); },
+          style:{ padding:"8px 12px", borderRadius:9, border:"1.5px solid #ddd", background:"#fff", color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
+        }, "\u2795 Reihe"),
+        planEdit && React.createElement("button", { onClick:()=>{ if(window.confirm("Plan auf die Vorgabe zur\u00FCcksetzen?\nAlle Tische, f\u00FCnf pro Reihe.")){ try{ localStorage.removeItem('eatdesi_tischplan'); }catch(e){} try{ window.dispatchEvent(new CustomEvent('belks_plan_neu')); }catch(e){} setPlanWahl(null); } },
+          style:{ padding:"8px 12px", borderRadius:9, border:"1.5px solid #ffcdd2", background:"#fff", color:"#c62828", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
+        }, "\u21BA Vorgabe")
+      ),
+      planEdit && React.createElement("div", { style:{ background:"#e3f2fd", border:"2px solid #1565c0", borderRadius:10, padding:"9px 12px", marginBottom:10, fontSize:12.5, color:"#0d47a1", lineHeight:1.5 } },
+        planWahl
+          ? "\uD83D\uDC46 Jetzt das Ziel antippen \u2013 die beiden tauschen den Platz. (Leerer Platz = dorthin schieben)"
+          : "Tisch antippen, dann das Ziel antippen. Mit \u2795 Reihe / Durchgang wird der Raum nachgebaut."),
       // Legend
       React.createElement("div", { style:{ display:"flex", gap:8, marginBottom:10, flexWrap:"wrap" } },
         [["#fff","#ddd","Frei"],["#fce4ec",C.pink,"Belegt"],["#e8f5e9",C.green,"BON"],["#fff8e1",C.orange,"Reserviert"]].map(([bg,border,label]) =>
@@ -11819,12 +11989,25 @@ function TableView({
       React.createElement("div", { style:{ background:"#f5f0e8", borderRadius:12, padding:10, border:"2px solid #d7ccc8" } },
         React.createElement("div", { style:{ textAlign:"center", fontSize:10, color:"#a1887f", fontWeight:700, marginBottom:8, letterSpacing:2 } }, "🚪 EINGANG"),
         rows.map((row, ri) =>
-          React.createElement("div", { key:ri, style:{ display:"flex", gap:6, marginBottom:6, justifyContent:"center" } },
-            row[0] === null
+          React.createElement("div", { key:ri, style:{ display:"flex", gap:6, marginBottom:6, justifyContent:"center", flexWrap:"wrap" } },
+            (row.every(v => v === null) && !planEdit)
               ? React.createElement("div", { style:{ height:8, width:"100%", background:"rgba(0,0,0,.05)", borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center" } },
                   React.createElement("span", { style:{ fontSize:8, color:"#bbb" } }, "— Durchgang —")
                 )
-              : row.map(tid => {
+              : row.map((tid, ci) => {
+                if (tid === null) {
+                  // Leerer Platz: im Bearbeiten-Modus antippbar, sonst nur Luecke
+                  return React.createElement("div", {
+                    key:"l"+ci,
+                    onClick: planEdit ? (()=>tausche(ri, ci)) : undefined,
+                    style:{ width:52, height:planEdit?52:8, borderRadius:8,
+                            border: planEdit ? "2px dashed #bbb" : "none",
+                            background: planEdit ? "rgba(0,0,0,.02)" : "transparent",
+                            cursor: planEdit ? "pointer" : "default",
+                            display:"flex", alignItems:"center", justifyContent:"center",
+                            fontSize:10, color:"#bbb" }
+                  }, planEdit ? "+" : null);
+                }
                 const t = TABLES.find(x=>x.id===tid);
                 if (!t) return null;
                 const order = orders[t.id];
@@ -11832,10 +12015,11 @@ function TableView({
                 const saved = order?.saved;
                 const res = todayRes.filter(r=>String(r.tableId)===String(t.id));
                 const total = has ? order.items.reduce((s,i)=>s+i.finalPrice*i.qty,0) : 0;
+                const gewaehlt = planEdit && planWahl && planWahl.ri === ri && planWahl.ci === ci;
                 return React.createElement("div", {
-                  key:tid, onClick:()=>onSelect(t.id),
-                  style:{ width:52, height:52, background:saved?"#e8f5e9":has?"#fce4ec":res.length>0?"#fff8e1":"#fff",
-                    border:`2px solid ${saved?C.green:has?C.pink:res.length>0?C.orange:"#d7ccc8"}`,
+                  key:tid, onClick:()=> planEdit ? tausche(ri, ci) : onSelect(t.id),
+                  style:{ width:52, height:52, background: gewaehlt ? "#e3f2fd" : (saved?"#e8f5e9":has?"#fce4ec":res.length>0?"#fff8e1":"#fff"),
+                    border:`${gewaehlt?3:2}px solid ${gewaehlt?"#1565c0":(saved?C.green:has?C.pink:res.length>0?C.orange:"#d7ccc8")}`,
                     borderRadius:8, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
                     boxShadow:"0 1px 3px #0002", fontSize:10
                   }
@@ -13736,9 +13920,7 @@ function OrderListView({
       overflowY: "auto",
       marginBottom: 14
     }
-  }, Array.from({
-    length: 30
-  }, (_, i) => i + 1).map(tid => {
+  }, TABLES.map(t => t.id).map(tid => {
     const hasOrder = tableOrders[tid]?.items?.length > 0;
     return /*#__PURE__*/React.createElement("button", {
       key: tid,
@@ -15953,6 +16135,45 @@ function PrinterSettingsView({
     /*#__PURE__*/React.createElement("div",{style:{display:"flex",gap:8}},
       /*#__PURE__*/React.createElement("button",{onClick:()=>{try{var v=String((document.getElementById('sumupKeyInp')||{}).value||'').trim();var f={};try{f=JSON.parse(localStorage.getItem('eatdesi_firma')||'null')||{};}catch(e){}f.sumupKey=v;localStorage.setItem('eatdesi_firma',JSON.stringify(f));window.alert('\u2705 SumUp-Key gespeichert (synct in die Cloud).');}catch(e){}},style:{flex:1,padding:10,borderRadius:8,border:"none",background:"#1565c0",color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"inherit"}},"\uD83D\uDCBE Key speichern"),
       /*#__PURE__*/React.createElement("button",{onClick:()=>{try{window.sumupPay(1.00,"Test Belks POS");}catch(e){}},style:{flex:1,padding:10,borderRadius:8,border:"none",background:"#2e7d32",color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"inherit"}},"\uD83D\uDCB3 Test 1,00 \u20ac")
+    ),
+    /* Drucker teilen - wichtig, wenn zwei Ger\u00e4te denselben Drucker benutzen */
+    /*#__PURE__*/React.createElement("div",{style:{background:"#f3e5f5",borderRadius:12,padding:14,marginBottom:16}},
+      /*#__PURE__*/React.createElement("div",{style:{fontWeight:700,color:"#6a1b9a",fontSize:14,marginBottom:4}},"\uD83D\uDDA8\uFE0F Drucker mit mehreren Ger\u00e4ten teilen"),
+      /*#__PURE__*/React.createElement("div",{style:{fontSize:11,color:"#777",marginBottom:8,lineHeight:1.5}},
+        "Bluetooth l\u00e4sst nur EINE Verbindung zum Drucker zu. Bleibt ein Ger\u00e4t dauerhaft verbunden, meldet das andere \u201EPrinter is not connected\u201C. Mit \u201ETeilen\u201C wird die Verbindung nach jedem Druck freigegeben \u2013 der n\u00e4chste Druck dauert daf\u00fcr 1\u20132 Sekunden l\u00e4nger."),
+      /*#__PURE__*/React.createElement("div",{style:{display:"flex",gap:8}},
+        [["1","\u2705 Teilen (2+ Ger\u00e4te)"],["0","\u26A1 Verbunden lassen (1 Ger\u00e4t)"]].map(function(o){
+          var jetzt='1'; try{ jetzt = localStorage.getItem('eatdesi_bt_freigeben')==='0' ? '0' : '1'; }catch(e){}
+          var aktiv = jetzt===o[0];
+          return /*#__PURE__*/React.createElement("button",{key:o[0],
+            onClick:function(){ try{ localStorage.setItem('eatdesi_bt_freigeben',o[0]); }catch(e){}
+              if(o[0]==='1'){ try{ BTPrint.freigeben(); }catch(e){} }
+              window.alert(o[0]==='1'
+                ? "\u2705 Drucker wird nach jedem Druck freigegeben.\n\nJetzt am ANDEREN Ger\u00e4t einen Testdruck machen."
+                : "\u26A1 Verbindung bleibt bestehen.\n\nNur benutzen, wenn dieser Drucker von genau EINEM Ger\u00e4t bedient wird."); },
+            style:{flex:1,padding:"10px 8px",borderRadius:8,fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+              border: aktiv ? "2px solid #6a1b9a" : "1.5px solid #ddd",
+              background: aktiv ? "#6a1b9a" : "#fff", color: aktiv ? "#fff" : "#555"}},o[1]);
+        })
+      )
+    ),
+    /* Rueckweg nach der Zahlung - nur aendern, wenn die SumUp-App Probleme macht */
+    /*#__PURE__*/React.createElement("div",{style:{marginTop:12,paddingTop:10,borderTop:"1px solid #bbdefb"}},
+      /*#__PURE__*/React.createElement("div",{style:{fontSize:12,fontWeight:700,color:"#1565c0",marginBottom:4}},"R\u00fcckweg nach der Zahlung"),
+      /*#__PURE__*/React.createElement("div",{style:{fontSize:11,color:"#777",marginBottom:7,lineHeight:1.5}},
+        "Nur \u00e4ndern, wenn die SumUp-App abst\u00fcrzt oder nicht zur\u00fcckkehrt. Nach dem Umstellen einmal mit \u201eTest 1,00 \u20ac\u201c pr\u00fcfen."),
+      /*#__PURE__*/React.createElement("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
+        [["aus","Ohne (empfohlen)"],["https","Web-Adresse"],["app","App-Adresse"]].map(function(o){
+          var jetzt='aus'; try{ jetzt=localStorage.getItem('eatdesi_sumup_rueckweg')||'aus'; }catch(e){}
+          var aktiv = jetzt===o[0];
+          return /*#__PURE__*/React.createElement("button",{key:o[0],
+            onClick:function(){ try{ localStorage.setItem('eatdesi_sumup_rueckweg',o[0]); }catch(e){}
+              window.alert("R\u00fcckweg: "+o[1]+"\n\nJetzt \u201eTest 1,00 \u20ac\u201c dr\u00fccken und schauen, ob SumUp sauber l\u00e4uft."); },
+            style:{flex:"1 1 30%",minWidth:100,padding:"9px 6px",borderRadius:8,fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+              border: aktiv ? "2px solid #1565c0" : "1.5px solid #ddd",
+              background: aktiv ? "#1565c0" : "#fff", color: aktiv ? "#fff" : "#555"}},o[1]);
+        })
+      )
     )
   ),
   /* v166: Kassenschublade */
@@ -18945,12 +19166,24 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
 
   const getLastOrder = c => completedOrders.filter(o => o.customerPhone === c.phone || o.customerName === c.name).slice(-1)[0];
 
-  const found = query.length >= 2 ? customers.filter(c =>
-    (c.phone || "").includes(query) ||
-    (c.name || "").toLowerCase().includes(query.toLowerCase())
-  ) : [];
+  /* Gesucht wird in Name, Telefon UND Adresse: am Telefon nennt ein
+     Stammgast oft die Strasse, nicht den Namen. Nummern werden dabei
+     vereinheitlicht, damit "0151 123" auch "0151123" findet. */
+  const _nurZiffern = (t) => String(t || "").replace(/[^0-9]/g, "");
+  const found = query.trim().length >= 2 ? customers.filter(c => {
+    const q = query.trim().toLowerCase();
+    const qz = _nurZiffern(q);
+    if (qz.length >= 2) {
+      if (_nurZiffern(c.phone).includes(qz)) return true;
+      if (_nurZiffern(c.kundenNr).includes(qz)) return true;
+    }
+    const text = [c.name, c.street, c.plz, c.city, c.email]
+      .filter(Boolean).join(" ").toLowerCase();
+    return text.includes(q);
+  }) : [];
 
   const addrLine = c => [c.street, [c.plz, c.city].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  const suchHinweis = query.trim().length >= 2 && found.length === 0;
 
   const handleAddNew = () => {
     if (!newForm.name && !newForm.phone) return;
@@ -18976,8 +19209,14 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
       /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
         /*#__PURE__*/React.createElement("input", {
           ref: inp,
-          type: "tel",
-          placeholder: "📞 Telefonnummer oder Name...",
+          // KEIN type="tel": damit zeigt Android nur Ziffern und man kann
+          // keinen Namen eintippen. "text" laesst beides zu.
+          type: "text",
+          inputMode: "text",
+          autoComplete: "off",
+          autoCorrect: "off",
+          autoCapitalize: "words",
+          placeholder: "Name, Telefon oder Stra\u00dfe \u2026",
           value: query,
           onChange: e => { setQuery(e.target.value); setShowNew(false); },
           style: { flex:1, padding: "12px 14px", borderRadius: 10, border: "2px solid " + C.green, fontSize: 15, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }
@@ -19149,23 +19388,23 @@ function _bewHtml(items, total, label, fmt80, F) {
   var t7r4   = tax7  > 0 ? '<tr><td>zzgl. 7% MwSt.</td><td style="text-align:right">'  + tax7.toFixed(2)  + ' \u20ac</td></tr>' : '';
   var t19r4  = tax19 > 0 ? '<tr><td>zzgl. 19% MwSt.</td><td style="text-align:right">' + tax19.toFixed(2) + ' \u20ac</td></tr>' : '';
 
+  /* Genug Platz zum Schreiben: die Linien waren 16 px hoch, die
+     Beschriftung 9 px - mit einem Kugelschreiber kaum zu treffen.
+     Jetzt 26 px Schreibhoehe und 10 px Beschriftung. Wichtige Felder
+     (Anlass, Personen) bekommen zwei Zeilen. */
+  var _lin = function(){ return '<div style="border-bottom:1px solid #000;height:26px;margin-bottom:6px">&nbsp;</div>'; };
+  var _bez = function(t){ return '<div style="font-size:10px;color:#333;font-weight:bold;margin-top:8px;margin-bottom:2px">'+t+'</div>'; };
   var FIELDS_80 = ''
-    + '<div style="font-size:9px;color:#555;font-weight:bold;margin-top:6px">Anlass der Bewirtung</div>'
-    + '<div style="border-bottom:1px solid #000;min-height:16px;margin-bottom:4px">&nbsp;</div>'
-    + '<div style="font-size:9px;color:#555;font-weight:bold;margin-top:4px">Name des Bewirtenden</div>'
-    + '<div style="border-bottom:1px solid #000;min-height:16px;margin-bottom:4px">&nbsp;</div>'
-    + '<div style="font-size:9px;color:#555;font-weight:bold;margin-top:4px">Firma / Unternehmen</div>'
-    + '<div style="border-bottom:1px solid #000;min-height:16px;margin-bottom:4px">&nbsp;</div>'
-    + '<div style="font-size:9px;color:#555;font-weight:bold;margin-top:4px">Bewirtete Personen</div>'
-    + '<div style="border-bottom:1px solid #000;min-height:16px;margin-bottom:4px">&nbsp;</div>'
-    + '<div style="border-bottom:1px solid #000;min-height:16px;margin-bottom:4px">&nbsp;</div>'
-    + '<div style="font-size:9px;color:#555;font-weight:bold;margin-top:4px">Gesch\u00e4ftliche Beziehung</div>'
-    + '<div style="border-bottom:1px solid #000;min-height:16px;margin-bottom:4px">&nbsp;</div>'
-    + '<div style="border-top:1px dashed #999;margin:6px 0"></div>'
-    + '<div style="font-size:9px">Unterschrift Gastgeber:</div>'
-    + '<div style="height:18px;border-bottom:1px solid #000;margin-bottom:6px"></div>'
-    + '<div style="font-size:9px">Stempel &amp; Unterschrift Restaurant:</div>'
-    + '<div style="height:18px;border-bottom:1px solid #000;margin-bottom:6px"></div>'
+    + _bez('Anlass der Bewirtung') + _lin() + _lin()
+    + _bez('Name des Bewirtenden') + _lin()
+    + _bez('Firma / Unternehmen')  + _lin()
+    + _bez('Bewirtete Personen')   + _lin() + _lin()
+    + _bez('Gesch\u00e4ftliche Beziehung') + _lin()
+    + '<div style="border-top:1px dashed #999;margin:10px 0"></div>'
+    + _bez('Unterschrift Gastgeber')
+    + '<div style="height:34px;border-bottom:1px solid #000;margin-bottom:8px"></div>'
+    + _bez('Stempel &amp; Unterschrift Restaurant')
+    + '<div style="height:40px;border-bottom:1px solid #000;margin-bottom:8px"></div>'
     + '<div style="font-size:8px">&#x26A0; Nur 70% abzugsf\u00e4hig. Originalrechnung beilegen.</div>';
 
   var FIELDS_A4 = ''
@@ -19226,9 +19465,16 @@ function _bewHtml(items, total, label, fmt80, F) {
       + '<div style="text-align:center;font-weight:bold;font-size:13px">Bewirtungsbeleg</div>'
       + '<div style="text-align:center;font-size:9px">\u00a7 4 Abs. 5 Nr. 2 EStG</div>'
       + '<div style="border-top:1px dashed #999;margin:5px 0"></div>'
-      + '<div style="text-align:center;font-weight:bold">eatDeSi</div>'
-      + '<div style="text-align:center;font-size:10px">Brunnenallee 30 \u00b7 34537 Bad Wildungen</div>'
-      + '<div style="text-align:center;font-size:10px">Tel: 05621 9449087</div>'
+      /* Kopf wie beim Kunden-Beleg - aus den Firmendaten.
+         Vorher stand hier fest eatDeSi mit Adresse und Telefon: jede andere
+         Tochter druckte damit eine fremde Firma auf einen Beleg, der beim
+         Finanzamt eingereicht wird. */
+      + '<div style="text-align:center;font-weight:bold;font-size:13px">' + (fn||'') + '</div>'
+      + (fz   ? '<div style="text-align:center;font-size:10px">' + fz + '</div>' : '')
+      + (fstr ? '<div style="text-align:center;font-size:10px">' + fstr + (fpo?(' \u00b7 '+fpo):'') + '</div>' : (fpo?'<div style="text-align:center;font-size:10px">'+fpo+'</div>':''))
+      + (ftel ? '<div style="text-align:center;font-size:10px">Tel: ' + ftel + '</div>' : '')
+      + (fstNr? '<div style="text-align:center;font-size:9px">StNr: ' + fstNr + (fust?(' \u00b7 USt: '+fust):'') + '</div>'
+              : (fust?'<div style="text-align:center;font-size:9px">USt: '+fust+'</div>':''))
       + '<div style="border-top:1px dashed #999;margin:5px 0"></div>'
       + '<div style="display:flex;justify-content:space-between"><span>Datum:</span><span>' + d + ' ' + t + '</span></div>'
       + '<div style="display:flex;justify-content:space-between"><span>Tisch:</span><span>' + label + '</span></div>'
@@ -20593,7 +20839,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v239"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v247"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22363,9 +22609,25 @@ function App() {
     /*#__PURE__*/React.createElement("div", {
       onClick: () => {
         try {
+          /* Symbol dreht sich, solange wirklich gearbeitet wird - nicht
+             nur 0,6 Sekunden wie vorher. Sonst denkt man, es sei fertig,
+             obwohl der Abgleich noch laeuft. */
           var btn = document.getElementById('manualRefreshBtn');
-          if (btn) { btn.style.transform = 'rotate(360deg)'; setTimeout(function(){ if(btn) btn.style.transform='rotate(0deg)'; }, 600); }
+          var dreht = 0;
+          var dreher = null;
+          var startDrehen = function(){
+            if (!btn) return;
+            btn.style.transition = 'transform .6s linear';
+            dreher = setInterval(function(){ dreht += 360; btn.style.transform = 'rotate(' + dreht + 'deg)'; }, 600);
+            btn.style.transform = 'rotate(360deg)'; dreht = 360;
+          };
+          var stopDrehen = function(){
+            if (dreher) { clearInterval(dreher); dreher = null; }
+            if (btn) { btn.style.transition = 'transform .3s ease'; btn.style.transform = 'rotate(0deg)'; }
+          };
+          startDrehen();
           var doReload = function(){
+            stopDrehen();
             // Nach dem Sync alle wichtigen States frisch aus localStorage laden,
             // damit Aenderungen sofort sichtbar sind (ohne App neu zu starten)
             try { setCompletedOrders(LS.get("eatdesi_orders", [])); } catch(e){}
@@ -22378,9 +22640,13 @@ function App() {
             try { setUsers(LS.get("eatdesi_users", [])); } catch(e){}
             setNow(new Date());
           };
-          if (typeof window.runSync === 'function') {
+          if (typeof window.runSyncJetzt === 'function') {
+            Promise.resolve(window.runSyncJetzt()).then(doReload).catch(doReload);
+            // Notbremse: falls etwas haengt, spaetestens nach 12 s aufhoeren
+            setTimeout(doReload, 12000);
+          } else if (typeof window.runSync === 'function') {
             Promise.resolve(window.runSync()).then(doReload).catch(doReload);
-            setTimeout(doReload, 1500); // Sicherheit falls Promise nicht aufloest
+            setTimeout(doReload, 1500);
           } else { doReload(); }
         } catch(e) {}
       },
@@ -23939,16 +24205,23 @@ window.sumupPay=function(amount, title){
     var key=String(f.sumupKey||'').trim();
     if(!key){ window.alert('\uD83D\uDCB3 SumUp: Erst Affiliate-Key in Einstellungen \u2192 \uD83D\uDCB3 SumUp speichern (developer.sumup.com).'); return; }
     var amt=(Math.round(Number(amount||0)*100)/100).toFixed(2);
-    /* KEIN callback! Eine https-Adresse als Rueckweg landet in Android immer
-       beim Standard-Browser, nicht in dieser App. Chrome hat einen eigenen
-       Speicher: dort ist weder das Restaurant angemeldet noch der Tisch offen
-       (beobachtet: nach der Zahlung stand dort ein fremdes Restaurant).
-       Ohne callback bleibt SumUp in seiner App, und die Zurueck-Taste fuehrt
-       zurueck in die Kasse - selbe App, selber Tisch, alles wie vorher.
-       Ein echter Ruecksprung braucht ein eigenes Schema in der APK. */
+    /* RUECKWEG (callback)
+       Mit https-Adresse: SumUp oeffnet danach den Standard-Browser. Chrome hat
+       einen eigenen Speicher - dort ist weder das Restaurant angemeldet noch
+       der Tisch offen. Genau das war der Fehler vor v231.
+       Ganz ohne callback bleibt SumUp in seiner App; die Zurueck-Taste fuehrt
+       sauber in die Kasse. Danach wurde aber beobachtet, dass die SumUp-App
+       abstuerzt - moeglicherweise, weil ihr der Rueckweg fehlt.
+       Deshalb umschaltbar: 'aus' (Vorgabe) | 'https' | 'app'.
+       'app' braucht ein eigenes Schema in der APK und ist bis dahin nur zum
+       Ausprobieren gedacht. */
+    var weg='aus';
+    try{ weg = localStorage.getItem('eatdesi_sumup_rueckweg') || 'aus'; }catch(e){}
     var url='sumupmerchant://pay/1.0?affiliate-key='+encodeURIComponent(key)
       +'&app-id=com.eatdesi.pos&total='+amt+'&currency=EUR'
       +'&title='+encodeURIComponent(String(title||'Belks POS'));
+    if(weg==='https') url += '&callback='+encodeURIComponent('https://eatdesi.github.io/eatdesi-pos/');
+    else if(weg==='app') url += '&callback='+encodeURIComponent('com.eatdesi.pos://sumup');
     location.href=url;
   }catch(e){ window.alert('SumUp-Start fehlgeschlagen: '+e); }
 };
@@ -26087,7 +26360,7 @@ var _SCHUTZ_LEER = {
 // aber nicht leer - der bisherige Leer-Schutz liess ihn durch.
 // Diese Werte werden gar nicht geschrieben, solange die Cloud unbekannt ist.
 var _SCHUTZ_EINSTELLUNG = {
-  'eatdesi_tablecount':1, 'eatdesi_shortname':1, 'eatdesi_cat_order':1,
+  'eatdesi_tablecount':1, 'eatdesi_shortname':1, 'eatdesi_cat_order':1, 'eatdesi_tischplan':1,
   'eatdesi_services':1, 'eatdesi_deliveryCfg':1, 'eatdesi_happyhours':1,
   'eatdesi_loyalty_settings':1, 'eatdesi_websiteconfig':1, 'eatdesi_gutscheine':1,
   'eatdesi_firma':1, 'eatdesi_floors':1, 'eatdesi_menu':1, 'eatdesi_optiongroups':1
@@ -26583,6 +26856,8 @@ var SYNC_BLACKLIST = [
   'eatdesi_auth',          // v186: Zugangs-Token NIE synchronisieren!
   'eatdesi_printer',       // Drucker pro Geraet
   'eatdesi_mode',          // Betriebsmodus pro Geraet (POS/Kiosk)
+  'eatdesi_sumup_rueckweg',// SumUp-Rueckweg: haengt am Geraet, nicht am Restaurant
+  'eatdesi_bt_freigeben',  // Drucker teilen: haengt am Geraet
   'eatdesi_sb_url',        // Sync-interne Konfiguration
   'eatdesi_sb_key',
   'eatdesi_pending_push',  // Sync-Warteschlange lokal
@@ -26828,6 +27103,21 @@ async function runSync() {
   _syncRunning = false;
 }
 window.runSync = runSync;
+
+/* \uD83D\uDD04 SYNC, DER WIRKLICH DURCHLAEUFT
+   runSync() steigt sofort aus, wenn gerade schon einer laeuft. Fuer den
+   Hintergrund ist das richtig - fuer den Knopf des Kellners nicht: der
+   will JETZT den Stand vom anderen Geraet sehen.
+   Also: auf den laufenden warten (hoechstens 8 s), dann einen eigenen
+   Durchgang starten und dessen Ende abwarten. */
+window.runSyncJetzt = async function(){
+  var warte = 0;
+  while (_syncRunning && warte < 8000) {
+    await new Promise(function(r){ setTimeout(r, 200); });
+    warte += 200;
+  }
+  try { await runSync(); } catch(e) {}
+};
 
 // Hook in LS.set - auto-push bei Aenderungen
 var _origLSSet = LS.set.bind(LS);
