@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v248</title>
+<title>eatDeSi POS v249</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v248';",
+    "var CACHE='eatdesi-v249';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -7565,13 +7565,19 @@ const BTPrint = {
         //   GS ! n   = Schriftgröße (0x00=normal 12pt, 0x01=hoch 14pt, 0x11=hoch+breit)
         var ESC='\x1B', GS='\x1D';
         /* ESC E 1 = fett ein, ESC E 0 = fett aus.
-           Kueche, Bar und Webshop (fc=0x01) werden fett gedruckt: die Bons
+           Kueche, Bar und Webshop (fc<>0) werden fett gedruckt: die Bons
            werden im Betrieb aus Entfernung und in Eile gelesen.
-           Kunden- und Bewirtungsbeleg (fc=0x00) bleiben normal - dort zaehlt
+           Kunden- und Bewirtungsbeleg (fc=0) bleiben normal - dort zaehlt
            ein sauberes, ruhiges Schriftbild. */
         var fett = (fc ? '\x01' : '\x00');
-        var fontPrefix = ESC+'E'+fett + GS+'!'+String.fromCharCode(fc||0);
-        var fontReset  = ESC+'E'+'\x00' + GS+'!'+'\x00';   // vor Feed/Cut alles zurueck
+        /* ESC 3 n = Zeilenabstand in Punkten (Vorgabe 30).
+           Genau hier kam die Beschwerde "zu eng" her: bei doppelt hohen
+           Zeichen und Standardabstand kleben die Zeilen aneinander.
+           55 Punkte geben Luft, ohne viel mehr Papier zu brauchen. */
+        var zeilAbstand = fc ? (ESC + '3' + String.fromCharCode(55)) : '';
+        var zeilReset   = ESC + '2';   // zurueck auf Standardabstand
+        var fontPrefix = zeilAbstand + ESC+'E'+fett + GS+'!'+String.fromCharCode(fc||0);
+        var fontReset  = zeilReset + ESC+'E'+'\x00' + GS+'!'+'\x00';   // vor Feed/Cut alles zurueck
         if(typeof b.align === 'function') b = b.align('left');
         b = b.text(fontPrefix + text + '\n');
         if(qrUrl && typeof b.qr === 'function'){
@@ -7589,12 +7595,13 @@ const BTPrint = {
       // Fallback: ältere API mit Einzelaufrufen (Objekt-Parameter)
       var ESC2='\x1B', GS2='\x1D';
       var fett2 = (fc ? '\x01' : '\x00');
-      var fontPrefix2 = ESC2+'E'+fett2 + GS2+'!'+String.fromCharCode(fc||0);
+      var zeil2 = fc ? (ESC2 + '3' + String.fromCharCode(55)) : '';
+      var fontPrefix2 = zeil2 + ESC2+'E'+fett2 + GS2+'!'+String.fromCharCode(fc||0);
       return Promise.resolve()
         .then(function(){ return P.begin ? P.begin() : null; })
         .then(function(){ return P.text ? P.text({ text: fontPrefix2 + text + '\n' }) : null; })
         .then(function(){ if(qrUrl && P.qr) return P.qr({ value: qrUrl }); })
-        .then(function(){ return P.text ? P.text({ text: ESC2+'E'+'\x00' + GS2+'!'+'\x00' + '\n\n\n\n' }) : null; })
+        .then(function(){ return P.text ? P.text({ text: ESC2+'2' + ESC2+'E'+'\x00' + GS2+'!'+'\x00' + '\n\n\n\n' }) : null; })
         .then(function(){ return P.cutPaper ? P.cutPaper() : null; })
         .then(function(){ return P.write ? P.write() : null; });
     };
@@ -8614,7 +8621,14 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
       //  kueche  -> 0x01 (14pt) für gute Küchen-Lesbarkeit
       //  webshop -> 0x01 (14pt) große Artikel, gut lesbar
       //  kunde/bewirtung -> 0x00 (12pt) kompakt, volle Zeichenzahl
-      const fsz = (bonType === 'kueche' || bonType === 'webshop') ? 0x01 : 0x00;
+      /* Grundgroesse: Kueche/Webshop doppelt hoch, Kunde/Bewirtung normal.
+     Ist "Grosse Schrift" eingestellt, wird zusaetzlich die Breite verdoppelt
+     (0x11). Dann passen nur noch 22 Zeichen in eine Zeile - lange Namen
+     brechen um. Deshalb eine bewusste Entscheidung des Betriebs. */
+  var fsz = (bonType === 'kueche' || bonType === 'webshop') ? 0x01 : 0x00;
+  try {
+    if (fsz && localStorage.getItem('eatdesi_kuechen_schrift') === 'gross') fsz = 0x11;
+  } catch(e) {}
       BTPrint.printHtml(devId, html, fsz).catch(e => { printHtml(html); });
       return;
     }
@@ -8901,7 +8915,10 @@ function BonModal({
   const doPrint = (html, fontOverride) => {
     const method = printerSettings?.method || "browser";
     // Küche/Bar = 14pt (0x01), Belege geben eigenen Wert mit
-    const fc = (typeof fontOverride === 'number') ? fontOverride : 0x01;
+    /* Kueche/Bar: Grundwert doppelt hoch. Ist "Grosse Schrift" gewaehlt,
+       zusaetzlich doppelt breit (0x11) - dann nur noch 22 Zeichen je Zeile. */
+    var fc = (typeof fontOverride === 'number') ? fontOverride : 0x01;
+    try { if (fc === 0x01 && localStorage.getItem('eatdesi_kuechen_schrift') === 'gross') fc = 0x11; } catch(e) {}
     if (method === "bluetooth") {
       // Native Bluetooth (Capacitor BLE) — direkt an Thermodrucker
       let devId = printerSettings?.btAddress;
@@ -16138,6 +16155,26 @@ function PrinterSettingsView({
       /*#__PURE__*/React.createElement("button",{onClick:()=>{try{var v=String((document.getElementById('sumupKeyInp')||{}).value||'').trim();var f={};try{f=JSON.parse(localStorage.getItem('eatdesi_firma')||'null')||{};}catch(e){}f.sumupKey=v;localStorage.setItem('eatdesi_firma',JSON.stringify(f));window.alert('\u2705 SumUp-Key gespeichert (synct in die Cloud).');}catch(e){}},style:{flex:1,padding:10,borderRadius:8,border:"none",background:"#1565c0",color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"inherit"}},"\uD83D\uDCBE Key speichern"),
       /*#__PURE__*/React.createElement("button",{onClick:()=>{try{window.sumupPay(1.00,"Test Belks POS");}catch(e){}},style:{flex:1,padding:10,borderRadius:8,border:"none",background:"#2e7d32",color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"inherit"}},"\uD83D\uDCB3 Test 1,00 \u20ac")
     ),
+    /* Schriftgroesse Kueche/Bar - Rueckmeldung aus dem Betrieb */
+    /*#__PURE__*/React.createElement("div",{style:{background:"#fff3e0",borderRadius:12,padding:14,marginBottom:16}},
+      /*#__PURE__*/React.createElement("div",{style:{fontWeight:700,color:"#e65100",fontSize:14,marginBottom:4}},"\uD83C\uDF73 Schrift auf K\u00fcchen- und Bar-Bon"),
+      /*#__PURE__*/React.createElement("div",{style:{fontSize:11,color:"#777",marginBottom:8,lineHeight:1.5}},
+        "Der Zeilenabstand ist bereits gr\u00f6\u00dfer als beim Kunden-Beleg. Reicht das nicht, kann die Schrift zus\u00e4tzlich doppelt breit gedruckt werden \u2013 dann passen aber nur noch 22 statt 44 Zeichen in eine Zeile, lange Artikelnamen brechen um."),
+      /*#__PURE__*/React.createElement("div",{style:{display:"flex",gap:8}},
+        [["normal","\u2705 Normal (44 Zeichen)"],["gross","\uD83D\uDD0D Gro\u00df (22 Zeichen)"]].map(function(o){
+          var jetzt='normal'; try{ jetzt = localStorage.getItem('eatdesi_kuechen_schrift')==='gross' ? 'gross' : 'normal'; }catch(e){}
+          var aktiv = jetzt===o[0];
+          return /*#__PURE__*/React.createElement("button",{key:o[0],
+            onClick:function(){ try{ localStorage.setItem('eatdesi_kuechen_schrift',o[0]); }catch(e){}
+              window.alert(o[0]==='gross'
+                ? "\uD83D\uDD0D Gro\u00dfe Schrift.\n\nJetzt einen K\u00fcchen-Bon drucken und pr\u00fcfen, ob die Artikelnamen noch lesbar umbrechen."
+                : "\u2705 Normale Schrift mit gro\u00dfem Zeilenabstand."); },
+            style:{flex:1,padding:"10px 8px",borderRadius:8,fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+              border: aktiv ? "2px solid #e65100" : "1.5px solid #ddd",
+              background: aktiv ? "#e65100" : "#fff", color: aktiv ? "#fff" : "#555"}},o[1]);
+        })
+      )
+    ),
     /* Drucker teilen - wichtig, wenn zwei Ger\u00e4te denselben Drucker benutzen */
     /*#__PURE__*/React.createElement("div",{style:{background:"#f3e5f5",borderRadius:12,padding:14,marginBottom:16}},
       /*#__PURE__*/React.createElement("div",{style:{fontWeight:700,color:"#6a1b9a",fontSize:14,marginBottom:4}},"\uD83D\uDDA8\uFE0F Drucker mit mehreren Ger\u00e4ten teilen"),
@@ -20841,7 +20878,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v248"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v249"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26860,6 +26897,7 @@ var SYNC_BLACKLIST = [
   'eatdesi_mode',          // Betriebsmodus pro Geraet (POS/Kiosk)
   'eatdesi_sumup_rueckweg',// SumUp-Rueckweg: haengt am Geraet, nicht am Restaurant
   'eatdesi_bt_freigeben',  // Drucker teilen: haengt am Geraet
+  'eatdesi_kuechen_schrift',// Schriftgroesse Kueche/Bar: haengt am Drucker
   'eatdesi_sb_url',        // Sync-interne Konfiguration
   'eatdesi_sb_key',
   'eatdesi_pending_push',  // Sync-Warteschlange lokal
