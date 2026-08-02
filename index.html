@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v255</title>
+<title>eatDeSi POS v256</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v255';",
+    "var CACHE='eatdesi-v256';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -20944,7 +20944,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v255"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v256"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22289,9 +22289,34 @@ function App() {
     try {
       if (!window.__belksHydrated) return false;          // Cloud noch nicht gelesen
       if (window.__belksRechteFehler) return false;       // Anmeldung/Rechte kaputt
+      /* ENTSCHEIDEND: __belksHydrated wird nach 10 Sekunden auch dann gesetzt,
+         wenn die Cloud gar nicht geantwortet hat ("Notbremse"). Auf einer
+         langsamen Verbindung war die Benutzerliste dann noch unterwegs - die
+         App hielt das Restaurant faelschlich fuer neu und bot an, einen
+         ersten Admin anzulegen. Wer das bestaetigt, ersetzt die echte
+         Benutzerliste in der Cloud durch eine mit einem einzigen Eintrag.
+         Deshalb: dieser Bildschirm nur, wenn der Schluessel 'users'
+         nachweislich aus der Cloud gelesen wurde. */
+      var gelesen = window.__belksGelesen || {};
+      if (!gelesen['users']) return false;
       return true;
     } catch(e) { return false; }
   })();
+  /* Solange die Benutzerliste noch nicht gelesen ist, klar sagen was los ist -
+     sonst steht der Kellner vor einem leeren Bildschirm und probiert Dinge aus. */
+  const _wartetAufBenutzer = (!loggedInUser && _activeUsers.length===0 && !_darfErstBenutzer)
+    ? /*#__PURE__*/React.createElement("div",{style:{position:"fixed",inset:0,background:"linear-gradient(135deg,#C84B31 0%,#6B1200 100%)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}},
+        /*#__PURE__*/React.createElement("div",{style:{background:"#fff",borderRadius:18,padding:"26px 22px",maxWidth:360,width:"100%",textAlign:"center"}},
+          /*#__PURE__*/React.createElement("div",{style:{fontSize:30}},"\u23F3"),
+          /*#__PURE__*/React.createElement("div",{style:{fontWeight:800,fontSize:17,color:"#C84B31",margin:"6px 0 8px"}},"Benutzer werden geladen \u2026"),
+          /*#__PURE__*/React.createElement("div",{style:{fontSize:13,color:"#666",lineHeight:1.55}},
+            "Die Verbindung ist gerade langsam. Bitte kurz warten \u2013 die Benutzer dieses Restaurants kommen aus der Cloud."),
+          /*#__PURE__*/React.createElement("button",{
+            onClick:function(){ try{ if(window.runSyncJetzt) window.runSyncJetzt().then(function(){ location.reload(); }); else location.reload(); }catch(e){ location.reload(); } },
+            style:{marginTop:16,width:"100%",padding:12,borderRadius:10,border:"none",background:"#C84B31",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer",fontFamily:"inherit"}
+          },"\uD83D\uDD04 Nochmal versuchen")
+        ))
+    : null;
   const _firstUserSetup = (!loggedInUser && _activeUsers.length===0 && _darfErstBenutzer) ? /*#__PURE__*/React.createElement("div",{style:{position:"fixed",inset:0,background:"linear-gradient(135deg,#C84B31 0%,#6B1200 100%)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}},
     /*#__PURE__*/React.createElement("div",{style:{background:"#fff",borderRadius:18,padding:"26px 22px",maxWidth:360,width:"100%",textAlign:"center"}},
       /*#__PURE__*/React.createElement("div",{style:{fontSize:30}},"\uD83D\uDC64"),
@@ -22318,6 +22343,7 @@ function App() {
       },style:{width:"100%",padding:13,borderRadius:10,border:"none",background:"#2e7d32",color:"#fff",fontWeight:800,fontSize:15,cursor:"pointer",fontFamily:"inherit"}},"\u2705 Anlegen & anmelden")
     )
   ) : null;
+  if(_wartetAufBenutzer) return _wartetAufBenutzer;
   if(_firstUserSetup) return _firstUserSetup;
   // v192: Daten noch nicht da? Dann warten statt "neues Restaurant" anzunehmen.
   if(!loggedInUser && _activeUsers.length===0 && !_darfErstBenutzer){
