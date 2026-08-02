@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v253</title>
+<title>eatDeSi POS v255</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v253';",
+    "var CACHE='eatdesi-v255';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -7415,11 +7415,32 @@ const BTPrint = {
   },
   freigeben: function(){
     var P=this._plugin(); var self=this;
-    if(!P){ self._connectedAddr=null; return Promise.resolve(); }
-    return Promise.resolve()
-      .then(function(){ if(P.disconnect) return P.disconnect(); })
-      .catch(function(){})
-      .then(function(){ self._connectedAddr=null; });
+    self._connectedAddr = null;                 // sofort, egal was folgt
+    if(self._loslassTimer){ clearTimeout(self._loslassTimer); self._loslassTimer=null; }
+    if(!P) return Promise.resolve();
+    /* Je nach Plugin-Fassung heisst die Methode anders. Alle probieren,
+       Fehler ignorieren - Hauptsache der Drucker wird frei. */
+    var namen = ['disconnect','disconnectPrinter','close','stop'];
+    var kette = Promise.resolve();
+    namen.forEach(function(n){
+      kette = kette.then(function(){
+        try { if (typeof P[n] === 'function') return P[n](); } catch(e){}
+      }).catch(function(){});
+    });
+    return kette.then(function(){
+      try { console.log('Drucker freigegeben'); } catch(e){}
+    });
+  },
+  /* Nach dem letzten Druck kurz warten und dann loslassen. Das Warten
+     verhindert, dass bei Kueche + Bar direkt hintereinander zweimal neu
+     verbunden werden muss. Danach ist der Drucker fuer andere Geraete frei. */
+  spaeterFreigeben: function(){
+    var self=this;
+    if(self._loslassTimer) clearTimeout(self._loslassTimer);
+    self._loslassTimer = setTimeout(function(){
+      self._loslassTimer = null;
+      self.freigeben();
+    }, 6000);
   },
   connect: function(address){
     var P=this._plugin();
@@ -7630,7 +7651,8 @@ const BTPrint = {
     // Geraet drucken kann (Bluetooth erlaubt nur eine Verbindung).
     var danach = function(erg){
       if(!self._freigebenAn()) return erg;
-      return self.freigeben().then(function(){ return erg; });
+      self.spaeterFreigeben();   // 6 s nach dem letzten Bon loslassen
+      return erg;
     };
     var fehler = function(e){
       if(!self._freigebenAn()) throw e;
@@ -16217,6 +16239,11 @@ function PrinterSettingsView({
     /* Drucker teilen - wichtig, wenn zwei Ger\u00e4te denselben Drucker benutzen */
     /*#__PURE__*/React.createElement("div",{style:{background:"#f3e5f5",borderRadius:12,padding:14,marginBottom:16}},
       /*#__PURE__*/React.createElement("div",{style:{fontWeight:700,color:"#6a1b9a",fontSize:14,marginBottom:4}},"\uD83D\uDDA8\uFE0F Drucker mit mehreren Ger\u00e4ten teilen"),
+      /*#__PURE__*/React.createElement("button",{
+        onClick:function(){ try{ BTPrint.freigeben().then(function(){ window.alert("\uD83D\uDD13 Drucker freigegeben.\n\nJetzt am anderen Ger\u00e4t drucken."); }); }catch(e){ window.alert("Konnte nicht freigeben."); } },
+        style:{width:"100%",padding:"10px 8px",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+               border:"2px solid #6a1b9a",background:"#fff",color:"#6a1b9a",marginBottom:8}
+      },"\uD83D\uDD13 Drucker jetzt freigeben"),
       /*#__PURE__*/React.createElement("div",{style:{fontSize:11,color:"#777",marginBottom:8,lineHeight:1.5}},
         "Bluetooth l\u00e4sst nur EINE Verbindung zum Drucker zu. Bleibt ein Ger\u00e4t dauerhaft verbunden, meldet das andere \u201EPrinter is not connected\u201C. Mit \u201ETeilen\u201C wird die Verbindung nach jedem Druck freigegeben \u2013 der n\u00e4chste Druck dauert daf\u00fcr 1\u20132 Sekunden l\u00e4nger."),
       /*#__PURE__*/React.createElement("div",{style:{display:"flex",gap:8}},
@@ -20917,7 +20944,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v253"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v255"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22725,8 +22752,16 @@ function App() {
             /* Sichtbare Rueckmeldung: ohne sie sieht der Knopf immer gleich aus,
                egal ob der Abgleich lief, nichts zu tun war oder das Netz fehlte. */
             try {
-              var _nachher = JSON.stringify(LS.get("eatdesi_tableorders", {}));
-              var _off = Object.keys(LS.get("eatdesi_tableorders", {})).length;
+              var _to = LS.get("eatdesi_tableorders", {});
+              var _nachher = JSON.stringify(_to);
+              /* Nur echte Tische zaehlen: leere Eintraege und Takeaway ("ta_")
+                 gehoeren nicht dazu. Meine erste Fassung zaehlte alle
+                 Schluessel - daher "3 Tische offen" bei 2 sichtbaren. */
+              var _off = Object.keys(_to).filter(function(k){
+                if (String(k).indexOf('ta_') === 0) return false;
+                var t = _to[k];
+                return t && t.items && t.items.length > 0;
+              }).length;
               var _txt;
               if (window.__syncFehler) { _txt = "\u26A0\uFE0F Keine Verbindung \u2013 sp\u00e4ter nochmal"; window.__syncFehler = null; }
               else if (_nachher !== _vorher) _txt = "\u2705 Aktualisiert \u00b7 " + _off + " Tische offen";
@@ -26812,8 +26847,15 @@ function toMerge(local, lmeta, remote, rmeta){
       var bezahltAm = window.belksTischBezahltAm ? window.belksTischBezahltAm(k) : 0;
       if (bezahltAm && bezahltAm >= best) { meta.del[k] = bezahltAm; return; }
     } catch(e) {}
-    if (best===lt && (k in local)){ out[k]=local[k];  meta.ts[k]=lt; return; }
-    if (k in remote){ out[k]=remote[k]; meta.ts[k]=rt; }
+    var gewaehlt = null, gts = 0;
+    if (best===lt && (k in local)) { gewaehlt = local[k]; gts = lt; }
+    else if (k in remote)          { gewaehlt = remote[k]; gts = rt; }
+    else return;
+    /* Leere Tische gar nicht erst uebernehmen. Sie entstehen, wenn ein Tisch
+       geoeffnet und ohne Buchung wieder verlassen wird - sie belegen dann
+       einen Platz in der Liste, ohne irgendwo sichtbar zu sein. */
+    if (!gewaehlt || !gewaehlt.items || gewaehlt.items.length === 0) { return; }
+    out[k] = gewaehlt; meta.ts[k] = gts;
   });
   return { tables: out, meta: toMetaPurge(meta) };
 }
@@ -27297,6 +27339,9 @@ LS.set = function(key, value) {
       setTimeout(function(){
         pushStateToSupabase('tableOrders', val);
         if (mt) pushStateToSupabase('tableordersmeta', mt);
+        /* Direkt danach einen Abgleich anstossen: so sieht das andere Geraet
+           die Buchung in ein bis zwei Sekunden statt erst beim naechsten Takt. */
+        setTimeout(function(){ try { runSync(); } catch(e){} }, 400);
       }, 300);
     })(value, _meta);
   }
@@ -27409,7 +27454,29 @@ localStorage.setItem = function(key, valueStr) {
 localStorage.setItem('eatdesi_sb_url', SUPA_URL);
 localStorage.setItem('eatdesi_sb_key', SUPA_KEY);
 setTimeout(runSync, 800);          // schneller erster Sync (statt 3s)
-setInterval(runSync, 5000);        // alle 5s (statt 8s)
+/* Alle 3 Sekunden statt 5: im Betrieb stehen zwei Kellner an einem Tisch und
+   erwarten, dass die Buchung des anderen sofort da ist. Der Abgleich selbst
+   ist klein - nur geaenderte Schluessel gehen ueber die Leitung. */
+/* \uD83D\uDD13 DRUCKER NICHT FESTHALTEN
+   Der eigentliche Grund, warum das zweite Geraet nie drucken konnte: die App
+   blieb an der Bluetooth-Verbindung kleben, auch wenn stundenlang nichts
+   gedruckt wurde. Bluetooth Classic laesst nur EINE Verbindung zu - damit war
+   der Drucker fuer alle anderen gesperrt.
+   Deshalb: beim Start eine alte Verbindung loesen, und immer loslassen, sobald
+   die App in den Hintergrund geht (Handy weggelegt, anderer Kellner dran). */
+try {
+  setTimeout(function(){ try { if (window.BTPrint && BTPrint.freigeben) BTPrint.freigeben(); } catch(e){} }, 1500);
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState !== 'visible') {
+      try { if (window.BTPrint && BTPrint.freigeben && BTPrint._freigebenAn && BTPrint._freigebenAn()) BTPrint.freigeben(); } catch(e){}
+    }
+  });
+  window.addEventListener('pagehide', function(){
+    try { if (window.BTPrint && BTPrint.freigeben) BTPrint.freigeben(); } catch(e){}
+  });
+} catch(e){}
+
+setInterval(runSync, 3000);
 
 // Android WebView pausiert setInterval im Hintergrund -> bei Rueckkehr sofort syncen
 document.addEventListener('visibilitychange', function(){
