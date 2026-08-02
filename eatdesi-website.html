@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-07-31f: Anfragen stehen jetzt im Kassensystem (Web-Admin-Tab entfernt). Anfragen werden ueber belks_anfrage_neu angehaengt statt die ganze Liste zurueckzuschreiben — es kann keine Anfrage mehr verloren gehen, wenn das Kassensystem gleichzeitig einen Status aendert. · Update 2026-07-31e: Bestellungen abgesichert. Live-Status und eigene Bestellungen laufen ueber belks_bestellstatus / belks_meine_bestellungen — die Seite laedt keine fremden Bestellungen mehr. Bestellung als reines INSERT (anon braucht kein UPDATE). Reports im Web-Admin entfernt (Zahlen stehen im POS). · Update 2026-07-31d: Wartezeit lesbar — bei Vorbestellungen steht jetzt der Zeitpunkt ("gegen 14:15 Uhr" / "01.08. um 14:15 Uhr") statt "ca. 2159 Min". Im Kundenkonto werden [FERTIG] und [GELIEFERT] richtig angezeigt statt dauerhaft "In Arbeit". · Update 2026-07-31c: Kundenkonten laufen ueber Server-Funktionen (belks_kunde_bekannt / _login / _speichern / _bestellung). Die komplette Kundenliste wird NICHT mehr in den Browser geladen und nicht mehr ganz zurueckgeschrieben — kein Datenabfluss, keine verlorenen Konten bei gleichzeitigen Bestellungen. Punkte rechnet der Server. · Update 2026-07-31b: Tochter-Kategorien im Webshop sichtbar (auch außerhalb CAT_GROUPS) · Über-uns nie BW-Text auf Töchtern · Update 2026-07-27c: Speichern-Feedback sichtbar (Toast über Admin, Button-Bestätigung) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
+<!-- Belks Website (Mutter-Website, Multi-Tenant ?r=CODE) · Update 2026-08-01a: Speisekarte — es wurde immer derselbe Artikel bestellt, weil Artikel unter ihrer id abgelegt wurden und doppelte oder fehlende ids sich gegenseitig ueberschrieben. Jetzt Schluessel aus Kategorie + Position. · Update 2026-07-31f: Anfragen stehen jetzt im Kassensystem (Web-Admin-Tab entfernt). Anfragen werden ueber belks_anfrage_neu angehaengt statt die ganze Liste zurueckzuschreiben — es kann keine Anfrage mehr verloren gehen, wenn das Kassensystem gleichzeitig einen Status aendert. · Update 2026-07-31e: Bestellungen abgesichert. Live-Status und eigene Bestellungen laufen ueber belks_bestellstatus / belks_meine_bestellungen — die Seite laedt keine fremden Bestellungen mehr. Bestellung als reines INSERT (anon braucht kein UPDATE). Reports im Web-Admin entfernt (Zahlen stehen im POS). · Update 2026-07-31d: Wartezeit lesbar — bei Vorbestellungen steht jetzt der Zeitpunkt ("gegen 14:15 Uhr" / "01.08. um 14:15 Uhr") statt "ca. 2159 Min". Im Kundenkonto werden [FERTIG] und [GELIEFERT] richtig angezeigt statt dauerhaft "In Arbeit". · Update 2026-07-31c: Kundenkonten laufen ueber Server-Funktionen (belks_kunde_bekannt / _login / _speichern / _bestellung). Die komplette Kundenliste wird NICHT mehr in den Browser geladen und nicht mehr ganz zurueckgeschrieben — kein Datenabfluss, keine verlorenen Konten bei gleichzeitigen Bestellungen. Punkte rechnet der Server. · Update 2026-07-31b: Tochter-Kategorien im Webshop sichtbar (auch außerhalb CAT_GROUPS) · Über-uns nie BW-Text auf Töchtern · Update 2026-07-27c: Speichern-Feedback sichtbar (Toast über Admin, Button-Bestätigung) · Update 2026-07-27b: Galerie pro Tochter (Start leer, Upload-Ordner je Restaurant) · Update 2026-07-27a: Landing-White-Label pro Tochter (Logo/Tagline/Hero/Footer aus Firmendaten, BW-Extras nur BW) \u00b7 Update 2026-07-06b: AI-Priya-Prompt tenant-dynamisch (BW-Daten nur bei BW) · davor 2026-07-06: 👤 Konto 2.0 (Passwort-Schutz, Konto-Erstellung, ⭐ Punkte einsehen + ab 5€ einlösen, 💾 Daten-Speichern-Option, Auto-Kunde im POS nach 1. Bestellung, ⭐ Bewertungslink bei Abgeschlossen) · davor 2026-07-05: 👤 Kundenkonto (Telefon-Login + Historie) + Liefergebiet-Fix (hybrides Zonen-Matching) + Tenant-Branding aus belks_tenants · vorher 2026-07-03: AI Priya = schlaue Verkaeuferin (Upselling Grill+Vorspeise+Cocktail) + Kundennummer-Lookup + Registrierung + direkt in Warenkorb legen ({cart}/{lookup}/{register} Bloecke) + gemini-2.5-flash-lite + Rate-Limit-Retry -->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -1081,7 +1081,25 @@ function checkOpen(){
 /* ====================================================================
    MENU RENDER
    ==================================================================== */
-function indexMenu(){ window._byId={}; for(const c of Object.keys(MENU)){for(const it of MENU[c]){it._cat=c;window._byId[it.id]=it;}} }
+function indexMenu(){
+  /* Schluessel aus Kategorie + Position statt aus it.id.
+     Doppelte oder fehlende ids kommen in gepflegten Karten staendig vor
+     (kopierte Artikel, Import aus anderen Quellen). Ueber die id abgelegt
+     ueberschrieben sie sich gegenseitig, und angetippt wurde am Ende immer
+     derselbe Artikel. Kategorie+Position ist dagegen immer eindeutig. */
+  window._byId = {};
+  Object.keys(MENU).forEach(function(c){
+    (MENU[c] || []).forEach(function(it, i){
+      it._cat = c;
+      it._key = c + '##' + i;
+      window._byId[it._key] = it;
+      // alte Schluessel weiter bedienen, falls irgendwo noch mit id gearbeitet wird
+      if (it.id !== undefined && it.id !== null && window._byId[it.id] === undefined) {
+        window._byId[it.id] = it;
+      }
+    });
+  });
+}
 // nur Artikel zeigen, die im Webshop sichtbar sind (channel both/web; fehlt = both)
 function webVisible(it){ return (it.channel||'both')!=='house'; }
 let activeCat=null; // aktuell gewählte Kategorie (nur eine sichtbar)
@@ -1153,14 +1171,24 @@ function renderCard(it){
   const priced=hasOpt&&it.options.some(o=>o.priced);
   return `<div class="card${it.top?' top':''}"><div class="nr">Nr. ${it.nr}</div><h4>${it.name}</h4>${desc}<div class="tags">${topTag}${veg}${optTag}</div>
     <div class="foot"><div class="price">${priced?'<small>ab </small>':''}${eur(it.price)}</div>
-    <button class="add" onclick="onAdd(${it.id})">+ Hinzufügen</button></div></div>`;
+    <button class="add" onclick="onAdd('${String(it._key||it.id||'').replace(/'/g,"\\'")}')">+ Hinzufügen</button></div></div>`;
 }
 function jumpCat(s){document.getElementById('cat-'+s).scrollIntoView({behavior:'smooth'});}
 
 /* ====================================================================
    OPTIONS MODAL
    ==================================================================== */
-function onAdd(id){const it=window._byId[id]; openOpt(it);}
+function onAdd(id){
+  const it = window._byId[id];
+  if(!it){
+    // Frueher wurde hier stillschweigend undefined weitergereicht und die
+    // Seite zeigte einen leeren oder falschen Artikel.
+    console.warn('Artikel nicht gefunden:', id);
+    toast('\u26A0\uFE0F Artikel nicht gefunden \u2013 bitte Seite neu laden.');
+    return;
+  }
+  openOpt(it);
+}
 function normChoice(c){return (typeof c==='string')?{name:c,price:0}:{name:c.name,price:c.price||0};}
 function openOpt(it){
   modalItem=it;modalSel={};modalQty=1;modalNote='';
