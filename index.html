@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v260</title>
+<title>eatDeSi POS v261</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v260';",
+    "var CACHE='eatdesi-v261';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -20944,7 +20944,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v260"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v261"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27196,8 +27196,13 @@ async function syncOneStateKey(lsKey) {
       var ausTabelle = await window.belksUser.lesen();
       if (ausTabelle === null) {
         console.warn('users: Tabelle nicht lesbar - nichts veraendert');
+        if (!window.__userLeseHinweis) {
+          window.__userLeseHinweis = 1;
+          window.belksHinweis('\u26A0\uFE0F Benutzer-Tabelle nicht lesbar \u2013 ' + (window.belksUser._fehler || 'Anmeldung/Rechte pr\u00fcfen'), '#e65100');
+        }
         return;
       }
+      window.__userLeseHinweis = 0;
       var lokal = [];
       try { lokal = JSON.parse(localStorage.getItem(lsKey) || '[]') || []; } catch(e){}
       if (!ausTabelle.length && lokal.length) {
@@ -27373,6 +27378,30 @@ window.runSync = runSync;
 
 /* ===== \uD83D\uDC65 BENUTZER: EIGENE TABELLE =====
    Eine Zeile je Kellner statt ein Textblock je Restaurant. */
+/* Hinweis direkt ins Bild - ohne React.
+   Die vorherige Fassung meldete Fehler ueber toast(), das aber nur INNERHALB
+   der React-Anwendung existiert. Von hier aus war es nie erreichbar; der
+   try/catch schluckte den Fehler, und man sah gar nichts. */
+window.belksHinweis = function(text, farbe){
+  try {
+    var id = 'belksHinweisBalken';
+    var d = document.getElementById(id);
+    if (!d) {
+      d = document.createElement('div');
+      d.id = id;
+      d.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;'
+        + 'padding:12px 14px;border-radius:12px;font-family:sans-serif;font-size:13px;'
+        + 'line-height:1.5;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,.3);cursor:pointer';
+      d.onclick = function(){ try { d.remove(); } catch(e){} };
+      document.body.appendChild(d);
+    }
+    d.style.background = farbe || '#c62828';
+    d.textContent = text;
+    clearTimeout(window.__hinweisTimer);
+    window.__hinweisTimer = setTimeout(function(){ try { d.remove(); } catch(e){} }, 12000);
+  } catch(e) { try { console.warn(text); } catch(e2){} }
+};
+
 window.belksUser = {
   /* Kellner, deren Speichern noch laeuft oder fehlgeschlagen ist.
      Ohne diesen Merker holt der 3-Sekunden-Abgleich die Tabelle, findet den
@@ -27397,7 +27426,12 @@ window.belksUser = {
     try {
       var r = await fetch(this._url() + '/rest/v1/belks_users?location_id=eq.'
               + encodeURIComponent(LOCATION_ID) + '&select=*', { headers: this._kopf() });
-      if (!r.ok) { console.warn('belks_users lesen: HTTP ' + r.status); return null; }
+      if (!r.ok) {
+        var t = ''; try { t = await r.text(); } catch(e2){}
+        this._fehler = 'Lesen HTTP ' + r.status + ' ' + String(t).slice(0,160);
+        console.warn('belks_users lesen:', this._fehler);
+        return null;
+      }
       var rows = await r.json();
       if (!Array.isArray(rows)) return null;
       return rows.map(function(z){
@@ -27513,10 +27547,13 @@ LS.set = function(key, value) {
           (function(user){
             setTimeout(function(){
               window.belksUser.speichern(user).then(function(ok){
-                if (!ok) {
+                if (ok) { window.belksHinweis('\u2705 ' + user.name + ' gespeichert', '#2e7d32'); }
+                else {
                   var m = window.belksUser._fehler || 'unbekannt';
-                  try { if (typeof toast === 'function') toast('\u26A0\uFE0F Benutzer nicht gespeichert: ' + m); } catch(e){}
+                  window.belksHinweis('\u26A0\uFE0F ' + user.name + ' NICHT gespeichert \u2013 ' + m);
                 }
+              }).catch(function(e){
+                window.belksHinweis('\u26A0\uFE0F ' + user.name + ' NICHT gespeichert \u2013 ' + ((e&&e.message)||e));
               });
             }, 0);
           })(u);
