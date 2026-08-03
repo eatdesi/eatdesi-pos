@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v263</title>
+<title>eatDeSi POS v264</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v263';",
+    "var CACHE='eatdesi-v264';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -18178,6 +18178,30 @@ function UserManagementView({
   const [role, setRole] = useState("Kellner");
   const [pin, setPin] = useState("");
   const [permEditIdx, setPermEditIdx] = useState(null); // welcher Nutzer wird gerade bearbeitet
+  /* Bearbeiten von Name, PIN und Rolle. Bisher liess sich ein angelegter
+     Mitarbeiter nur loeschen und neu anlegen - ein vergessener PIN bedeutete,
+     den Kellner komplett neu einzutragen. */
+  const [bearbIdx, setBearbIdx] = useState(null);
+  const [bName, setBName] = useState("");
+  const [bPin, setBPin] = useState("");
+  const [bRole, setBRole] = useState("Kellner");
+  const bearbOeffnen = (i) => {
+    const u = users[i]; if (!u) return;
+    setBName(u.name || ""); setBPin(u.pin || ""); setBRole(u.role || "Kellner");
+    setBearbIdx(i);
+  };
+  const bearbSpeichern = () => {
+    const u = users[bearbIdx]; if (!u) return;
+    const nm = String(bName || "").trim();
+    if (!nm) { window.alert("Bitte einen Namen eingeben."); return; }
+    const p = String(bPin || "").trim();
+    if (p && !/^\d{4}$/.test(p)) { window.alert("Die PIN muss aus 4 Ziffern bestehen."); return; }
+    // Gleicher Name + gleiche PIN wie ein anderer Mitarbeiter -> Anmeldung waere nicht eindeutig
+    const doppelt = users.some((x, i) => i !== bearbIdx && !x.deleted && p && String(x.pin) === p);
+    if (doppelt && !window.confirm("Diese PIN benutzt bereits jemand anderes.\n\nTrotzdem speichern?")) return;
+    onUpdate({ ...u, name: nm, pin: p || u.pin, role: bRole });
+    setBearbIdx(null);
+  };
   const ROLES = ["Kellner", "Küche", "Bar", "Manager", "Admin"];
   const roleColors = {
     "Kellner": C.blue,
@@ -18419,6 +18443,12 @@ function UserManagementView({
       style: { fontSize: 11, color: C.red, fontWeight: 700 }
     }, "\u2713 Voller Zugriff"),
     /*#__PURE__*/React.createElement("button", {
+      onClick: () => bearbOeffnen(idx),
+      title: "Name, PIN und Rolle \u00e4ndern",
+      style: { background:"#e3f2fd", border:"none", color:"#1565c0", borderRadius:8,
+               padding:"6px 10px", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:11 }
+    }, "\u270F\uFE0F"),
+    /*#__PURE__*/React.createElement("button", {
       onClick: () => onDelete(u),
       style: {
         background: "none",
@@ -18429,6 +18459,49 @@ function UserManagementView({
       }
     }, "\u2715")
   ))),
+  // === Mitarbeiter bearbeiten (Name / PIN / Rolle) ===
+  bearbIdx !== null && users[bearbIdx] && /*#__PURE__*/React.createElement("div", {
+    style: { position:"fixed", inset:0, background:"#0009", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { background:"#fff", borderRadius:16, width:"100%", maxWidth:420, padding:20 }
+  },
+    /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:16, marginBottom:14, color:"#222" } },
+      "\u270F\uFE0F Mitarbeiter bearbeiten"),
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#777", marginBottom:4 } }, "Name"),
+    /*#__PURE__*/React.createElement("input", {
+      value: bName, onChange: e => setBName(e.target.value), placeholder: "Name",
+      style: { width:"100%", padding:11, borderRadius:10, border:"2px solid #ddd", fontSize:15, fontFamily:"inherit", boxSizing:"border-box", marginBottom:12 }
+    }),
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#777", marginBottom:4 } }, "PIN (4 Ziffern)"),
+    /*#__PURE__*/React.createElement("input", {
+      value: bPin, onChange: e => setBPin(e.target.value.replace(/\D/g, "").slice(0, 4)),
+      inputMode: "numeric", placeholder: "z.B. 1234",
+      style: { width:"100%", padding:11, borderRadius:10, border:"2px solid #ddd", fontSize:17, fontWeight:800,
+               letterSpacing:4, textAlign:"center", fontFamily:"inherit", boxSizing:"border-box", marginBottom:12 }
+    }),
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#777", marginBottom:4 } }, "Rolle"),
+    /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:16 } },
+      ROLES.map(r => /*#__PURE__*/React.createElement("button", {
+        key: r, onClick: () => setBRole(r),
+        style: { padding:"8px 12px", borderRadius:9, cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12,
+                 border: bRole === r ? "2px solid " + (roleColors[r]||C.blue) : "1.5px solid #ddd",
+                 background: bRole === r ? (roleColors[r]||C.blue) : "#fff",
+                 color: bRole === r ? "#fff" : "#555" }
+      }, r))
+    ),
+    /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8 } },
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => setBearbIdx(null),
+        style: { flex:1, padding:12, borderRadius:10, border:"1.5px solid #ddd", background:"#fff", color:"#555",
+                 cursor:"pointer", fontFamily:"inherit", fontWeight:700 }
+      }, "Abbrechen"),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: bearbSpeichern,
+        style: { flex:2, padding:12, borderRadius:10, border:"none", background:C.green, color:"#fff",
+                 cursor:"pointer", fontFamily:"inherit", fontWeight:800 }
+      }, "\u2713 Speichern")
+    )
+  )),
   // === Berechtigungen-Editor (Modal) ===
   permEditIdx !== null && users[permEditIdx] && /*#__PURE__*/React.createElement("div", {
     style: { position:"fixed", inset:0, background:"#0009", zIndex:3000, display:"flex", alignItems:"flex-end", justifyContent:"center" }
@@ -20944,7 +21017,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v263"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v264"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
