@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v258</title>
+<title>eatDeSi POS v259</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v258';",
+    "var CACHE='eatdesi-v259';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -20944,7 +20944,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v258"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v259"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27205,6 +27205,19 @@ async function syncOneStateKey(lsKey) {
         await window.belksUser.einmaligUebernehmen(lokal);
         ausTabelle = (await window.belksUser.lesen()) || lokal;
       }
+      /* Was gerade gespeichert wird (oder nicht durchkam), muss in der Liste
+         bleiben - sonst blinkt der neue Kellner nur kurz auf. */
+      try {
+        var offen = window.belksUser._offen || {};
+        Object.keys(offen).forEach(function(k){
+          var u = offen[k];
+          if (!u) return;
+          var drin = ausTabelle.some(function(x){
+            return (x.id && u.id && x.id === u.id) || (x.name === u.name);
+          });
+          if (!drin) ausTabelle.push(u);
+        });
+      } catch(e){}
       var neuStr = JSON.stringify(ausTabelle);
       if (neuStr !== JSON.stringify(lokal)) {
         window._syncWriting = true;
@@ -27361,6 +27374,12 @@ window.runSync = runSync;
 /* ===== \uD83D\uDC65 BENUTZER: EIGENE TABELLE =====
    Eine Zeile je Kellner statt ein Textblock je Restaurant. */
 window.belksUser = {
+  /* Kellner, deren Speichern noch laeuft oder fehlgeschlagen ist.
+     Ohne diesen Merker holt der 3-Sekunden-Abgleich die Tabelle, findet den
+     neuen Kellner noch nicht und ueberschreibt ihn wieder weg - genau das
+     "verschwindet nach einer Sekunde". */
+  _offen: {},
+  _fehler: null,
   _url: function(){ return (window.RESTAURANT && window.RESTAURANT.SUPA_URL) || ''; },
   _kopf: function(){
     var k = (window.RESTAURANT && window.RESTAURANT.SUPA_KEY) || '';
@@ -27391,6 +27410,9 @@ window.belksUser = {
   /* EINEN Kellner speichern. Beruehrt keine andere Zeile. */
   speichern: async function(u){
     if (!u || !u.name) return false;
+    var self = this;
+    var merk = (u.id || ('nm:' + u.name));
+    self._offen[merk] = u;                       // solange offen: nicht wegsynchronisieren
     var zeile = {
       location_id: LOCATION_ID,
       id: u.id || ('u_' + Date.now() + '_' + Math.random().toString(36).slice(2,7)),
@@ -27402,9 +27424,20 @@ window.belksUser = {
       var h = this._kopf(); h['Prefer'] = 'resolution=merge-duplicates';
       var r = await fetch(this._url() + '/rest/v1/belks_users?on_conflict=location_id,id',
               { method: 'POST', headers: h, body: JSON.stringify(zeile) });
-      if (!r.ok) { console.warn('belks_users speichern: HTTP ' + r.status); return false; }
+      if (!r.ok) {
+        var txt = ''; try { txt = await r.text(); } catch(e2){}
+        self._fehler = 'HTTP ' + r.status + ' ' + String(txt).slice(0,200);
+        console.warn('belks_users speichern:', self._fehler);
+        return false;                            // Merker bleibt -> Kellner bleibt sichtbar
+      }
+      delete self._offen[merk];
+      self._fehler = null;
       return true;
-    } catch(e) { console.warn('belks_users speichern:', e && e.message); return false; }
+    } catch(e) {
+      self._fehler = (e && e.message) || String(e);
+      console.warn('belks_users speichern:', self._fehler);
+      return false;
+    }
   },
 
   /* Beim Start einmal alles hochschieben, was nur lokal existiert.
@@ -27463,7 +27496,16 @@ LS.set = function(key, value) {
         if (!u || !u.name) return;
         var k = u.id || ('nm:'+u.name);
         if (_altMap[k] !== JSON.stringify(u)) {
-          setTimeout(function(){ window.belksUser.speichern(u); }, 0);
+          (function(user){
+            setTimeout(function(){
+              window.belksUser.speichern(user).then(function(ok){
+                if (!ok) {
+                  var m = window.belksUser._fehler || 'unbekannt';
+                  try { if (typeof toast === 'function') toast('\u26A0\uFE0F Benutzer nicht gespeichert: ' + m); } catch(e){}
+                }
+              });
+            }, 0);
+          })(u);
         }
       });
     } catch(e){}
