@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v257</title>
+<title>eatDeSi POS v258</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v257';",
+    "var CACHE='eatdesi-v258';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -20944,7 +20944,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v257"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v258"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27187,6 +27187,36 @@ var MERGE_BY_NAME_KEYS = { 'users': 1, 'floors': 1, 'drivers': 1 };
 async function syncOneStateKey(lsKey) {
   try {
     var remoteKey = _remoteName(lsKey);
+
+    /* Benutzer kommen aus der eigenen Tabelle. Antwortet sie, ist sie die
+       Wahrheit; pos_state wird nur noch mitgeschrieben, damit eine
+       Rueckfahrkarte bleibt. Antwortet sie NICHT, wird gar nichts geaendert -
+       lieber alte Daten anzeigen als richtige loeschen. */
+    if (remoteKey === 'users' && window.belksUser) {
+      var ausTabelle = await window.belksUser.lesen();
+      if (ausTabelle === null) {
+        console.warn('users: Tabelle nicht lesbar - nichts veraendert');
+        return;
+      }
+      var lokal = [];
+      try { lokal = JSON.parse(localStorage.getItem(lsKey) || '[]') || []; } catch(e){}
+      if (!ausTabelle.length && lokal.length) {
+        // Tabelle noch leer, lokal aber Kellner vorhanden -> einmalig uebernehmen
+        await window.belksUser.einmaligUebernehmen(lokal);
+        ausTabelle = (await window.belksUser.lesen()) || lokal;
+      }
+      var neuStr = JSON.stringify(ausTabelle);
+      if (neuStr !== JSON.stringify(lokal)) {
+        window._syncWriting = true;
+        localStorage.setItem(lsKey, neuStr);
+        window._syncWriting = false;
+        window.dispatchEvent(new CustomEvent('eatdesi_state_synced', { detail: { key: lsKey, value: ausTabelle } }));
+        window.dispatchEvent(new CustomEvent(lsKey + '_synced', { detail: ausTabelle }));
+      }
+      try { window.__belksGelesen = window.__belksGelesen || {}; window.__belksGelesen['users'] = true; } catch(e){}
+      return;
+    }
+
     var raw = localStorage.getItem(lsKey);
     var local = raw ? JSON.parse(raw) : null;
     var remote = await pullStateWithTime(remoteKey);
@@ -27328,6 +27358,65 @@ async function runSync() {
 }
 window.runSync = runSync;
 
+/* ===== \uD83D\uDC65 BENUTZER: EIGENE TABELLE =====
+   Eine Zeile je Kellner statt ein Textblock je Restaurant. */
+window.belksUser = {
+  _url: function(){ return (window.RESTAURANT && window.RESTAURANT.SUPA_URL) || ''; },
+  _kopf: function(){
+    var k = (window.RESTAURANT && window.RESTAURANT.SUPA_KEY) || '';
+    var h = { 'apikey': k, 'Content-Type': 'application/json' };
+    var t = null;
+    try { t = window.belksAuthToken && window.belksAuthToken(); } catch(e){}
+    h['Authorization'] = 'Bearer ' + (t || k);
+    return h;
+  },
+
+  /* Alle Kellner dieses Restaurants holen.
+     Gibt null zurueck, wenn die Abfrage FEHLSCHLAEGT - das ist etwas ganz
+     anderes als eine leere Liste und darf nie als "keine Kellner" gelten. */
+  lesen: async function(){
+    try {
+      var r = await fetch(this._url() + '/rest/v1/belks_users?location_id=eq.'
+              + encodeURIComponent(LOCATION_ID) + '&select=*', { headers: this._kopf() });
+      if (!r.ok) { console.warn('belks_users lesen: HTTP ' + r.status); return null; }
+      var rows = await r.json();
+      if (!Array.isArray(rows)) return null;
+      return rows.map(function(z){
+        return { id: z.id, name: z.name, pin: z.pin, role: z.role,
+                 deleted: !!z.deleted, time: z.updated_at };
+      });
+    } catch(e) { console.warn('belks_users lesen:', e && e.message); return null; }
+  },
+
+  /* EINEN Kellner speichern. Beruehrt keine andere Zeile. */
+  speichern: async function(u){
+    if (!u || !u.name) return false;
+    var zeile = {
+      location_id: LOCATION_ID,
+      id: u.id || ('u_' + Date.now() + '_' + Math.random().toString(36).slice(2,7)),
+      name: String(u.name), pin: u.pin ? String(u.pin) : null,
+      role: u.role || null, deleted: !!u.deleted,
+      updated_at: new Date().toISOString()
+    };
+    try {
+      var h = this._kopf(); h['Prefer'] = 'resolution=merge-duplicates';
+      var r = await fetch(this._url() + '/rest/v1/belks_users?on_conflict=location_id,id',
+              { method: 'POST', headers: h, body: JSON.stringify(zeile) });
+      if (!r.ok) { console.warn('belks_users speichern: HTTP ' + r.status); return false; }
+      return true;
+    } catch(e) { console.warn('belks_users speichern:', e && e.message); return false; }
+  },
+
+  /* Beim Start einmal alles hochschieben, was nur lokal existiert.
+     Danach lebt jeder Kellner in der Tabelle. */
+  einmaligUebernehmen: async function(liste){
+    if (!Array.isArray(liste) || !liste.length) return;
+    for (var i = 0; i < liste.length; i++) {
+      try { await this.speichern(liste[i]); } catch(e){}
+    }
+  }
+};
+
 /* \uD83D\uDD04 SYNC, DER WIRKLICH DURCHLAEUFT
    runSync() steigt sofort aus, wenn gerade schon einer laeuft. Fuer den
    Hintergrund ist das richtig - fuer den Knopf des Kellners nicht: der
@@ -27358,6 +27447,26 @@ LS.set = function(key, value) {
       localStorage.setItem('eatdesi_pushed_bonNrs', JSON.stringify(pushed));
       setTimeout(runSync, 500);
     }
+  }
+  /* Benutzer: zusaetzlich jede geaenderte Zeile einzeln in die Tabelle.
+     pos_state wird weiter beschrieben (Rueckfahrkarte), ist aber nicht mehr
+     die Quelle. Verglichen wird gegen den vorherigen Stand, damit nur
+     wirklich Geaendertes hochgeht. */
+  if (key === 'eatdesi_users' && !window._syncWriting && window.belksUser) {
+    try {
+      var _neu = JSON.parse(valueStr || '[]') || [];
+      var _alt = [];
+      try { _alt = JSON.parse(localStorage.getItem(key) || '[]') || []; } catch(e){}
+      var _altMap = {};
+      _alt.forEach(function(u){ if(u) _altMap[u.id || ('nm:'+u.name)] = JSON.stringify(u); });
+      _neu.forEach(function(u){
+        if (!u || !u.name) return;
+        var k = u.id || ('nm:'+u.name);
+        if (_altMap[k] !== JSON.stringify(u)) {
+          setTimeout(function(){ window.belksUser.speichern(u); }, 0);
+        }
+      });
+    } catch(e){}
   }
   if (key === 'eatdesi_tableorders') {
     /* Nicht hochladen, solange die Cloud noch nicht gelesen wurde.
