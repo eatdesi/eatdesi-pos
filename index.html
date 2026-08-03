@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v261</title>
+<title>eatDeSi POS v262</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -36,7 +36,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f5f5f5;overscroll-b
 // Service Worker fuer Offline-Modus
 if('serviceWorker' in navigator) {
   var swLines = [
-    "var CACHE='eatdesi-v261';",
+    "var CACHE='eatdesi-v262';",
     "self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(['/']);}));self.skipWaiting();});",
     "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(keys){return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}));self.clients.claim();});",
     "self.addEventListener('fetch',function(e){",
@@ -20944,7 +20944,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v261"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v262"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27516,6 +27516,12 @@ window.runSyncJetzt = async function(){
 // Hook in LS.set - auto-push bei Aenderungen
 var _origLSSet = LS.set.bind(LS);
 LS.set = function(key, value) {
+  /* Den bisherigen Stand VOR dem Schreiben lesen.
+     Vorher wurde erst gespeichert und danach verglichen - der "alte" Wert war
+     dann schon der neue. Ergebnis: kein Unterschied gefunden, also nichts
+     hochgeladen. Genau deshalb kam ein neuer Kellner nie in der Tabelle an. */
+  var _vorherStr = null;
+  if (key === 'eatdesi_users') { try { _vorherStr = localStorage.getItem(key); } catch(e){} }
   _origLSSet(key, value);
   if (key === 'eatdesi_orders' && Array.isArray(value) && value.length > 0) {
     var pushed = JSON.parse(localStorage.getItem('eatdesi_pushed_bonNrs') || '[]');
@@ -27535,9 +27541,9 @@ LS.set = function(key, value) {
      wirklich Geaendertes hochgeht. */
   if (key === 'eatdesi_users' && !window._syncWriting && window.belksUser) {
     try {
-      var _neu = JSON.parse(valueStr || '[]') || [];
+      var _neu = Array.isArray(value) ? value : [];
       var _alt = [];
-      try { _alt = JSON.parse(localStorage.getItem(key) || '[]') || []; } catch(e){}
+      try { _alt = JSON.parse(_vorherStr || '[]') || []; } catch(e){}
       var _altMap = {};
       _alt.forEach(function(u){ if(u) _altMap[u.id || ('nm:'+u.name)] = JSON.stringify(u); });
       _neu.forEach(function(u){
