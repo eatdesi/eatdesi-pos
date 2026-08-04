@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v268</title>
+<title>eatDeSi POS v269</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v268"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v269"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21637,6 +21637,17 @@ function App() {
     window.addEventListener('eatdesi_menu_synced', onMenu);
     window.addEventListener('eatdesi_drivers_synced', onDrivers);
     window.addEventListener('eatdesi_reservations_synced', onReservations);
+    /* Fuer Kunden fehlte dieser Zuhoerer. Der Abgleich schrieb die Liste
+       zwar in den Speicher, aber die Anzeige erfuhr nie davon: nach einem
+       Neustart war ein frisch angelegter Gast aus der App verschwunden -
+       in der Tabelle stand er die ganze Zeit. */
+    const onCustomers = () => {
+      try {
+        const v = LS.get("eatdesi_customers", []);
+        setCustomers(prev => JSON.stringify(prev) === JSON.stringify(v) ? prev : v);
+      } catch(err) {}
+    };
+    window.addEventListener('eatdesi_customers_synced', onCustomers);
     window.addEventListener('eatdesi_users_synced', onUsers);
     window.addEventListener('eatdesi_optiongroups_synced', onOptionGroups);
     window.addEventListener('eatdesi_orders_updated', onOrdersUpdated);
@@ -21645,6 +21656,7 @@ function App() {
       window.removeEventListener('eatdesi_menu_synced', onMenu);
       window.removeEventListener('eatdesi_drivers_synced', onDrivers);
       window.removeEventListener('eatdesi_reservations_synced', onReservations);
+      window.removeEventListener('eatdesi_customers_synced', onCustomers);
       window.removeEventListener('eatdesi_users_synced', onUsers);
       window.removeEventListener('eatdesi_optiongroups_synced', onOptionGroups);
       window.removeEventListener('eatdesi_orders_updated', onOrdersUpdated);
