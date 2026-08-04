@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v269</title>
+<title>eatDeSi POS v270</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v269"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v270"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27403,6 +27403,14 @@ async function syncOneStateKey(lsKey) {
         window.dispatchEvent(new CustomEvent(lsKey + '_synced', { detail: kTab }));
       }
       try { window.__belksGelesen = window.__belksGelesen || {}; window.__belksGelesen['customers'] = true; } catch(e){}
+      /* Einmal pro Start kurz zeigen, wie viele Kunden aus der Tabelle kamen.
+         Ohne diese Rueckmeldung liess sich nicht unterscheiden, ob der
+         Abgleich gar nicht lief oder ob nur die Anzeige nicht nachzog. */
+      if (!window.__kundeMeldung) {
+        window.__kundeMeldung = 1;
+        window.belksHinweis('\uD83D\uDC64 ' + kTab.filter(function(c){return c && !c.deleted;}).length
+          + ' Kunden aus der Tabelle geladen', '#2e7d32');
+      }
       return;
     }
 
