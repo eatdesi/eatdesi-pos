@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v267</title>
+<title>eatDeSi POS v268</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v267"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v268"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24321,6 +24321,92 @@ window.belksDiktat = function(opt){
   } catch(e) { beiFehler('Diktat nicht m\u00F6glich.'); beiEnde(); return { stop: function(){} }; }
 };
 
+/* ===== \uD83D\uDC64 KUNDEN: EIGENE TABELLE =====
+   Gleiche Bauweise wie bei den Kellnern: eine Zeile je Kunde statt ein
+   Textblock je Restaurant. Kunden tragen Treuepunkte - also faktisch Geld -
+   und persoenliche Daten. Ein Ueberschreiben der ganzen Liste, wie es
+   vorher moeglich war, waere hier besonders teuer. */
+window.belksKunde = {
+  _offen: {},
+  _fehler: null,
+  _url: function(){ return (window.RESTAURANT && window.RESTAURANT.SUPA_URL) || ''; },
+  _kopf: function(){
+    var k = (window.RESTAURANT && window.RESTAURANT.SUPA_KEY) || '';
+    var h = { 'apikey': k, 'Content-Type': 'application/json' };
+    var t = null;
+    try { t = window.belksAuthToken && window.belksAuthToken(); } catch(e){}
+    h['Authorization'] = 'Bearer ' + (t || k);
+    return h;
+  },
+  /* Aus der Tabelle in die Form bringen, die die App kennt. */
+  _ausZeile: function(z){
+    return { id: z.id, name: z.name, phone: z.phone, kundenNr: z.kunden_nr,
+             email: z.email, street: z.street, plz: z.plz, city: z.city,
+             points: Number(z.points) || 0, visits: Number(z.visits) || 0,
+             notiz: z.notiz, pw: z.pw, since: z.since,
+             pointsHistory: Array.isArray(z.points_history) ? z.points_history : [],
+             deleted: !!z.deleted };
+  },
+  lesen: async function(){
+    try {
+      var r = await fetch(this._url() + '/rest/v1/belks_customers?location_id=eq.'
+              + encodeURIComponent(LOCATION_ID) + '&select=*&order=id.asc', { headers: this._kopf() });
+      if (!r.ok) {
+        var t = ''; try { t = await r.text(); } catch(e2){}
+        this._fehler = 'Lesen HTTP ' + r.status + ' ' + String(t).slice(0,160);
+        console.warn('belks_customers lesen:', this._fehler);
+        return null;                       // Fehler ist NICHT "keine Kunden"
+      }
+      var rows = await r.json();
+      if (!Array.isArray(rows)) return null;
+      var self = this;
+      return rows.map(function(z){ return self._ausZeile(z); });
+    } catch(e) { this._fehler = (e && e.message) || String(e); return null; }
+  },
+  speichern: async function(k){
+    if (!k) return false;
+    var self = this;
+    var merk = k.id || ('tel:' + (k.phone || k.name || ''));
+    self._offen[merk] = k;
+    var zeile = {
+      location_id: LOCATION_ID,
+      id: k.id || ('k_' + Date.now() + '_' + Math.random().toString(36).slice(2,7)),
+      name: k.name || null, phone: k.phone || null, kunden_nr: k.kundenNr || null,
+      email: k.email || null, street: k.street || null, plz: k.plz || null, city: k.city || null,
+      points: Number(k.points) || 0, visits: Number(k.visits) || 0,
+      notiz: k.notiz || null, pw: k.pw || null,
+      since: k.since || null,
+      points_history: Array.isArray(k.pointsHistory) ? k.pointsHistory : [],
+      deleted: !!k.deleted,
+      updated_at: new Date().toISOString()
+    };
+    try {
+      var h = this._kopf();
+      h['Prefer'] = 'resolution=merge-duplicates,return=representation';
+      var r = await fetch(this._url() + '/rest/v1/belks_customers?on_conflict=location_id,id',
+              { method: 'POST', headers: h, body: JSON.stringify(zeile) });
+      if (!r.ok) {
+        var txt = ''; try { txt = await r.text(); } catch(e2){}
+        self._fehler = 'HTTP ' + r.status + ' ' + String(txt).slice(0,200);
+        console.warn('belks_customers speichern:', self._fehler);
+        return false;
+      }
+      var zurueck = null; try { zurueck = await r.json(); } catch(e2){}
+      if (!Array.isArray(zurueck) || zurueck.length === 0) {
+        self._fehler = 'Zeile wurde nicht angelegt (Rechte?)';
+        return false;
+      }
+      delete self._offen[merk];
+      self._fehler = null;
+      return true;
+    } catch(e) { self._fehler = (e && e.message) || String(e); return false; }
+  },
+  einmaligUebernehmen: async function(liste){
+    if (!Array.isArray(liste) || !liste.length) return;
+    for (var i = 0; i < liste.length; i++) { try { await this.speichern(liste[i]); } catch(e){} }
+  }
+};
+
 window._belksAdrCache = window._belksAdrCache || {};
 /* Eigener Standort - einmal ermitteln, dann gemerkt.
    Er dient nur als Hinweis fuer die Suche ("in dieser Gegend zuerst"). */
@@ -27264,6 +27350,50 @@ async function syncOneStateKey(lsKey) {
        Wahrheit; pos_state wird nur noch mitgeschrieben, damit eine
        Rueckfahrkarte bleibt. Antwortet sie NICHT, wird gar nichts geaendert -
        lieber alte Daten anzeigen als richtige loeschen. */
+    if (remoteKey === 'customers' && window.belksKunde) {
+      var kTab = await window.belksKunde.lesen();
+      if (kTab === null) {
+        if (!window.__kundeLeseHinweis) {
+          window.__kundeLeseHinweis = 1;
+          window.belksHinweis('\u26A0\uFE0F Kunden-Tabelle nicht lesbar \u2013 ' + (window.belksKunde._fehler || 'Anmeldung pr\u00fcfen'), '#e65100');
+        }
+        return;
+      }
+      window.__kundeLeseHinweis = 0;
+      var kLokal = [];
+      try { kLokal = JSON.parse(localStorage.getItem(lsKey) || '[]') || []; } catch(e){}
+      if (!kTab.length && kLokal.length) {
+        await window.belksKunde.einmaligUebernehmen(kLokal);
+        kTab = (await window.belksKunde.lesen()) || kLokal;
+      }
+      /* Noch nicht bestaetigte Kunden behalten - sonst blinkt ein frisch
+         angelegter Gast nur kurz auf und ist wieder weg. */
+      try {
+        var kOffen = window.belksKunde._offen || {};
+        Object.keys(kOffen).forEach(function(x){
+          var k = kOffen[x]; if (!k) return;
+          var drin = kTab.some(function(y){
+            return (y.id && k.id && y.id === k.id) || (k.phone && y.phone === k.phone);
+          });
+          if (!drin) kTab.push(k);
+        });
+      } catch(e){}
+      var kFinger = function(arr){
+        return (arr || []).map(function(c){
+          return [c.id, c.name, c.phone, c.points, c.visits, c.deleted ? 1 : 0].join('|');
+        }).sort().join('||');
+      };
+      if (kFinger(kTab) !== kFinger(kLokal)) {
+        window._syncWriting = true;
+        localStorage.setItem(lsKey, JSON.stringify(kTab));
+        window._syncWriting = false;
+        window.dispatchEvent(new CustomEvent('eatdesi_state_synced', { detail: { key: lsKey, value: kTab } }));
+        window.dispatchEvent(new CustomEvent(lsKey + '_synced', { detail: kTab }));
+      }
+      try { window.__belksGelesen = window.__belksGelesen || {}; window.__belksGelesen['customers'] = true; } catch(e){}
+      return;
+    }
+
     if (remoteKey === 'users' && window.belksUser) {
       var ausTabelle = await window.belksUser.lesen();
       if (ausTabelle === null) {
@@ -27604,7 +27734,9 @@ LS.set = function(key, value) {
      dann schon der neue. Ergebnis: kein Unterschied gefunden, also nichts
      hochgeladen. Genau deshalb kam ein neuer Kellner nie in der Tabelle an. */
   var _vorherStr = null;
-  if (key === 'eatdesi_users') { try { _vorherStr = localStorage.getItem(key); } catch(e){} }
+  if (key === 'eatdesi_users' || key === 'eatdesi_customers') {
+    try { _vorherStr = localStorage.getItem(key); } catch(e){}
+  }
   _origLSSet(key, value);
   if (key === 'eatdesi_orders' && Array.isArray(value) && value.length > 0) {
     var pushed = JSON.parse(localStorage.getItem('eatdesi_pushed_bonNrs') || '[]');
@@ -27646,6 +27778,29 @@ LS.set = function(key, value) {
               });
             }, 0);
           })(u);
+        }
+      });
+    } catch(e){}
+  }
+  /* Kunden: nur die tatsaechlich geaenderte Zeile hochschieben. */
+  if (key === 'eatdesi_customers' && !window._syncWriting && window.belksKunde) {
+    try {
+      var _kNeu = Array.isArray(value) ? value : [];
+      var _kAlt = [];
+      try { _kAlt = JSON.parse(_vorherStr || '[]') || []; } catch(e){}
+      var _kMap = {};
+      _kAlt.forEach(function(c){ if(c) _kMap[c.id || ('tel:'+(c.phone||c.name))] = JSON.stringify(c); });
+      _kNeu.forEach(function(c){
+        if (!c) return;
+        var kk = c.id || ('tel:'+(c.phone||c.name));
+        if (_kMap[kk] !== JSON.stringify(c)) {
+          (function(kunde){
+            setTimeout(function(){
+              window.belksKunde.speichern(kunde).then(function(ok){
+                if (!ok) window.belksHinweis('\u26A0\uFE0F Kunde ' + (kunde.name||'') + ' NICHT gespeichert \u2013 ' + (window.belksKunde._fehler||''), '#c62828');
+              });
+            }, 0);
+          })(c);
         }
       });
     } catch(e){}
