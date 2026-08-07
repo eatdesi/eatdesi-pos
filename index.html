@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v273</title>
+<title>eatDeSi POS v274</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v273"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v274"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27051,9 +27051,16 @@ function toMerge(local, lmeta, remote, rmeta){
     var lt=lmeta.ts[k]||0, ld=lmeta.del[k]||0, rt=rmeta.ts[k]||0, rd=rmeta.del[k]||0;
     var best=Math.max(lt,ld,rt,rd);
     if (best===0){
-      // Keine Zeitstempel (altes Geraet): vorhandener Tisch gewinnt
-      if (k in local)  out[k]=local[k];
-      else if (k in remote) out[k]=remote[k];
+      /* Keine Zeitstempel (altes Geraet oder in der Startphase gebucht):
+         vorhandener Tisch gewinnt - und bekommt v274 endlich eine Marke.
+         Ohne sie bliebe er dauerhaft unsichtbar fuer alle anderen Geraete. */
+      var _ohne = null;
+      if (k in local)  _ohne = local[k];
+      else if (k in remote) _ohne = remote[k];
+      if (_ohne && _ohne.items && _ohne.items.length > 0) {
+        out[k] = _ohne;
+        meta.ts[k] = Date.now();
+      }
       return;
     }
     if (best===ld || best===rd){ meta.del[k]=best; return; }   // geloescht gewinnt
@@ -27890,6 +27897,12 @@ LS.set = function(key, value) {
        bezahlter Tisch tauchte wieder als offen auf. */
     if (!window.__belksHydrated) {
       try { console.warn('Tische nicht hochgeladen - Cloud noch nicht gelesen'); } catch(e){}
+      /* v274: Der Stempel MUSS trotzdem gesetzt werden. Sonst bleibt ein in
+         der Startphase gebuchter Tisch fuer immer ohne Marke - er wird nie
+         hochgeladen und taucht auf keinem zweiten Geraet auf. Hochgeladen
+         wird weiterhin nicht; das erledigt syncTableOrders, sobald die Cloud
+         gelesen ist. */
+      try { toMetaStampChanges(value, _toVorher); } catch(e){}
       try { _toVorher = JSON.parse(JSON.stringify(value||{})); } catch(e){ _toVorher = {}; }
       return;
     }
