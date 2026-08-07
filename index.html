@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v271</title>
+<title>eatDeSi POS v272</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v271"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v272"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27165,7 +27165,25 @@ async function syncTableOrders() {
     var local = JSON.parse(localStorage.getItem('eatdesi_tableorders') || '{}');
     var remote = await pullStateWithTime('tableOrders');
     var rmetaRow = await pullStateWithTime('tableordersmeta');
-    // Cloud wurde gelesen -> Hochladen ab jetzt erlaubt
+    /* v272: remote ist auch dann null, wenn die ABFRAGE FEHLSCHLAEGT -
+       abgelaufene Anmeldung (401), fehlende Berechtigung (403), Netzaussetzer.
+       Bisher wurde trotzdem "Cloud gelesen" gemeldet. Die Folge: toMerge
+       arbeitete mit einer leeren Cloud, das Ergebnis war der eigene kurze
+       Bestand, und wegen (!remote) wurde er hochgeladen - die offenen Tische
+       der anderen Geraete waren damit geloescht. Genau dieser Fehler hat
+       schon die Kellner gekostet; in syncOneStateKey ist er laengst
+       abgesichert, bei den Tischen war er es nie.
+       Jetzt: ohne wirklich beantwortete Abfrage wird weder zusammengefuehrt
+       noch hochgeladen noch freigegeben. Lieber nichts tun als loeschen. */
+    var _toGelesen = _schonGelesen('eatdesi_tableorders');
+    var _mtGelesen = false;
+    try { _mtGelesen = !!(window.__belksGelesen && window.__belksGelesen['tableordersmeta']); } catch(e){}
+    if (!_toGelesen || !_mtGelesen) {
+      try { console.warn('Tische: Cloud nicht lesbar - kein Hochladen (Anmeldung/Netz pruefen)'); } catch(e){}
+      try { window.__syncFehler = 'Tische: Cloud nicht lesbar - Anmeldung oder Netz pruefen'; } catch(e){}
+      return;
+    }
+    // Cloud wurde WIRKLICH gelesen -> Hochladen ab jetzt erlaubt
     window.belksMarkHydrated('Tische gelesen');
     // v202: Erst NACH dem Cloud-Lesen aufraeumen, sonst arbeitet die Funktion
     // auf Vorgabewerten statt auf den echten Benutzern dieser Tochter.
