@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v274</title>
+<title>eatDeSi POS v275</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v274"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v275"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22892,10 +22892,23 @@ function App() {
                 _dg.push('Hochladen erlaubt: ' + (window.__belksHydrated ? 'ja' : 'NEIN'));
                 var _lm = {};
                 try { _lm = JSON.parse(localStorage.getItem('eatdesi_to_meta') || '{}') || {}; } catch(e){}
-                var _lts = Object.keys(_lm.ts || {});
-                var _ldl = Object.keys(_lm.del || {});
-                _dg.push('Marken hier - offen: ' + (_lts.length ? _lts.join(',') : '-'));
-                _dg.push('Marken hier - geloescht: ' + (_ldl.length ? _ldl.join(',') : '-'));
+                /* v275: MIT Uhrzeit. Ohne sie laesst sich nicht entscheiden, ob ein
+                   Grabstein aelter oder juenger ist als der Tisch aus der Cloud -
+                   und genau daran haengt, ob der Tisch uebernommen wird. */
+                var _uhr = function(ms){
+                  try { var d = new Date(Number(ms));
+                    return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);
+                  } catch(e){ return '?'; }
+                };
+                var _liste = function(o){
+                  var ks = Object.keys(o || {});
+                  if (!ks.length) return '-';
+                  ks.sort(function(a,b){ return (o[b]||0) - (o[a]||0); });   // neueste zuerst
+                  return ks.slice(0, 6).map(function(k){ return k + '=' + _uhr(o[k]); }).join('  ')
+                         + (ks.length > 6 ? '  (+' + (ks.length-6) + ')' : '');
+                };
+                _dg.push('Marken offen:  ' + _liste(_lm.ts));
+                _dg.push('Grabsteine:  ' + _liste(_lm.del));
                 _txt = _txt + '\n\n' + _dg.join('\n');
               } catch(e){}
               if (typeof toast === 'function') toast(_txt); else window.alert(_txt);
