@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v272</title>
+<title>eatDeSi POS v273</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v272"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v273"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22876,6 +22876,28 @@ function App() {
               if (window.__syncFehler) { _txt = "\u26A0\uFE0F " + String(window.__syncFehler).slice(0, 90); window.__syncFehler = null; }
               else if (_nachher !== _vorher) _txt = "\u2705 Aktualisiert \u00b7 " + _off + " Tische offen";
               else _txt = "\u2714\uFE0F Schon aktuell \u00b7 " + _off + " Tische offen";
+              /* v273: Kurzdiagnose anhaengen. Wenn zwei Geraete verschiedene
+                 Tische zeigen, beantwortet dieser Block die einzigen Fragen,
+                 die dann noch zaehlen - ohne Browser-Konsole. */
+              try {
+                var _dg = [];
+                var _tn = Object.keys(_to).filter(function(k){
+                  if (String(k).indexOf('ta_') === 0) return false;
+                  var t = _to[k]; return t && t.items && t.items.length > 0;
+                });
+                _dg.push('Tische hier: ' + (_tn.length ? _tn.join(', ') : 'keine'));
+                var _gel = false;
+                try { _gel = !!(window.__belksGelesen && window.__belksGelesen['tableOrders']); } catch(e){}
+                _dg.push('Cloud gelesen: ' + (_gel ? 'ja' : 'NEIN'));
+                _dg.push('Hochladen erlaubt: ' + (window.__belksHydrated ? 'ja' : 'NEIN'));
+                var _lm = {};
+                try { _lm = JSON.parse(localStorage.getItem('eatdesi_to_meta') || '{}') || {}; } catch(e){}
+                var _lts = Object.keys(_lm.ts || {});
+                var _ldl = Object.keys(_lm.del || {});
+                _dg.push('Marken hier - offen: ' + (_lts.length ? _lts.join(',') : '-'));
+                _dg.push('Marken hier - geloescht: ' + (_ldl.length ? _ldl.join(',') : '-'));
+                _txt = _txt + '\n\n' + _dg.join('\n');
+              } catch(e){}
               if (typeof toast === 'function') toast(_txt); else window.alert(_txt);
             } catch(e){}
           };
