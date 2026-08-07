@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v270</title>
+<title>eatDeSi POS v271</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v270"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v271"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22873,7 +22873,7 @@ function App() {
                 return t && t.items && t.items.length > 0;
               }).length;
               var _txt;
-              if (window.__syncFehler) { _txt = "\u26A0\uFE0F Keine Verbindung \u2013 sp\u00e4ter nochmal"; window.__syncFehler = null; }
+              if (window.__syncFehler) { _txt = "\u26A0\uFE0F " + String(window.__syncFehler).slice(0, 90); window.__syncFehler = null; }
               else if (_nachher !== _vorher) _txt = "\u2705 Aktualisiert \u00b7 " + _off + " Tische offen";
               else _txt = "\u2714\uFE0F Schon aktuell \u00b7 " + _off + " Tische offen";
               if (typeof toast === 'function') toast(_txt); else window.alert(_txt);
@@ -27209,7 +27209,14 @@ async function syncTableOrders() {
     // KEIN automatischer Push hier mehr - Push passiert nur bei echter lokaler
     // Aenderung (ueber den LS.set / setItem-Hook). So ueberschreibt ein Geraet
     // nicht staendig den frischen Stand des anderen.
-  } catch(e) {}
+  } catch(e) {
+    /* v271: Hier stand ein leeres catch. Schlug der Tisch-Abgleich fehl,
+       hoerte er still auf - kein Hinweis, keine Meldung, tagelang. Genau so
+       hat sich der Service Worker jahrelang versteckt. Jetzt wird der Fehler
+       gemeldet, damit der Aktualisieren-Knopf ihn anzeigen kann. */
+    try { window.__syncFehler = 'Tische: ' + ((e && e.message) ? e.message : String(e)); } catch(_e){}
+    try { console.warn('syncTableOrders fehlgeschlagen:', e); } catch(_e){}
+  }
 }
 
 // === AUTOMATISCHE STATE-SYNCHRONISATION ===
@@ -27743,7 +27750,17 @@ window.runSyncJetzt = async function(){
     await new Promise(function(r){ setTimeout(r, 200); });
     warte += 200;
   }
-  try { await runSync(); } catch(e) {}
+  /* v271: Haengt die Runde nach 8 Sekunden immer noch, wurde bisher trotzdem
+     runSync gerufen - das sah _syncRunning und stieg SOFORT wieder aus (die
+     Notbremse dort greift erst nach 25 s). Der Knopf lud dann nur die lokalen
+     Daten neu und meldete "Schon aktuell", ohne die Cloud auch nur zu fragen.
+     Jetzt wird die Sperre vorher geloest, damit der Knopf wirklich abgleicht. */
+  if (_syncRunning) {
+    try { console.warn('Sync-Sperre haengt seit ' + Math.round((Date.now()-(window.__syncStart||Date.now()))/1000) + 's - wird fuer den Knopf geloest'); } catch(e){}
+    _syncRunning = false;
+    window.__syncStart = 0;
+  }
+  try { await runSync(); } catch(e) { try { window.__syncFehler = (e && e.message) ? e.message : String(e); } catch(_e){} }
 };
 
 // Hook in LS.set - auto-push bei Aenderungen
