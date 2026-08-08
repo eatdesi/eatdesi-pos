@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v278</title>
+<title>eatDeSi POS v279</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v278"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v279"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22921,6 +22921,30 @@ function App() {
               if (typeof toast === 'function') toast(_txt); else window.alert(_txt);
             } catch(e){}
           };
+          /* v279: Grabsteine beim Aktualisieren wegraeumen.
+             ABER nur, wenn gerade KEIN Tisch offen ist. Sonst koennte ein
+             Geraet, das gerade aus ist, einen geloeschten Tisch beim naechsten
+             Einschalten wieder hochladen - die Loeschmarke ist genau der
+             Schutz dagegen. Nach Feierabend ist kein Tisch offen, also greift
+             die Reinigung genau dann, wenn man sie haben will. */
+          try {
+            var _to0 = LS.get("eatdesi_tableorders", {}) || {};
+            var _offen0 = Object.keys(_to0).filter(function(k){
+              if (String(k).indexOf('ta_') === 0) return false;
+              var t = _to0[k]; return t && t.items && t.items.length > 0;
+            }).length;
+            if (_offen0 === 0) {
+              var _m0 = {};
+              try { _m0 = JSON.parse(localStorage.getItem('eatdesi_to_meta') || '{}') || {}; } catch(e){}
+              if (_m0 && _m0.del && Object.keys(_m0.del).length) {
+                var _sauber = { ts: _m0.ts || {}, del: {} };
+                window._syncWriting = true;
+                localStorage.setItem('eatdesi_to_meta', JSON.stringify(_sauber));
+                window._syncWriting = false;
+                if (typeof pushStateToSupabase === 'function') pushStateToSupabase('tableordersmeta', _sauber);
+              }
+            }
+          } catch(e){}
           if (typeof window.runSyncJetzt === 'function') {
             Promise.resolve(window.runSyncJetzt()).then(doReload).catch(doReload);
             // Notbremse: falls etwas haengt, spaetestens nach 12 s aufhoeren
@@ -27071,7 +27095,7 @@ var TO_META = 'eatdesi_to_meta';           // { ts:{Tisch:ms}, del:{Tisch:ms} }
    naechsten Tag seinen alten Stand mit. War die Loeschmarke bis dahin
    verfallen, galt der alte Tisch wieder als gueltig - ein bezahlter Tisch
    stand wieder offen da. Sieben Tage decken Ruhetage und Urlaub ab. */
-var TO_TOMB_MS = 7*24*60*60*1000;
+var TO_TOMB_MS = 24*60*60*1000;   // v279: 24 Stunden statt 7 Tage - lange genug, dass kein Geraet einen Tisch zurueckholt, kurz genug, dass nichts liegen bleibt
 
 function toMetaRead(){
   try { var m = JSON.parse(localStorage.getItem(TO_META)||'{}'); return { ts:m.ts||{}, del:m.del||{} }; }
