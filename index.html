@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v280</title>
+<title>eatDeSi POS v281</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v280"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v281"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22916,6 +22916,8 @@ function App() {
                 _dg.push('Warteschlange: ' + (_wq.length ? _wq.length + ' Eintraege' : 'leer'));
                 _dg.push('Letzter Sendefehler: ' + (window.__pushFehler ? String(window.__pushFehler).slice(0,60) : 'keiner'));
                 if (window.__pushWeg) _dg.push('Sendeweg: ' + String(window.__pushWeg).slice(0,70));
+                _dg.push('Anfragen seit letztem Druck: ' + (window.__reqGes||0) + ', davon Fehler: ' + (window.__reqFehl||0));
+                try { window.__reqGes = 0; window.__reqFehl = 0; } catch(e){}
                 _txt = _txt + '\n\n' + _dg.join('\n');
               } catch(e){}
               if (typeof toast === 'function') toast(_txt); else window.alert(_txt);
@@ -26624,6 +26626,7 @@ window._deviceId = localStorage.getItem('eatdesi_device_id') || (function(){
 
 // Supabase fetch helper
 function supaFetch(path, method, body) {
+  try { window.__reqGes = (window.__reqGes||0) + 1; } catch(e){}
   return fetch(SUPA_URL + path, {
     method: method || 'GET',
     headers: {
@@ -26862,8 +26865,10 @@ async function pushStateToSupabase(key, value) {
     // on_conflict=key + merge-duplicates => bestehende Zeile wird UEBERSCHRIEBEN statt ignoriert
     var resp = null;
     try {
+      try { window.__reqGes = (window.__reqGes||0) + 1; } catch(e){}
       resp = await fetch(_ziel, _opt);
     } catch (eNetz) {
+      try { window.__reqFehl = (window.__reqFehl||0) + 1; } catch(e){}
       /* v278: "Failed to fetch" heisst, die Anfrage kam nie beim Server an.
          Zwischen App und Netz sitzt der fetch-Aufsatz aus v186, der die
          Kopfzeilen neu zusammenbaut. Zweiter Versuch OHNE ihn - das trennt
@@ -27428,6 +27433,7 @@ function _setLocalStamp(remoteKey, ts) {
 async function pullStateWithTime(remoteKey) {
   try {
     var resp = await supaFetch('/rest/v1/pos_state?key=eq.' + LOCATION_ID + '_' + remoteKey + '&select=value,updated_at');
+  try { if (!resp || !resp.ok) window.__reqFehl = (window.__reqFehl||0) + 1; } catch(e){}
     // v192: 401/403 = keine gueltige Anmeldung bzw. keine Berechtigung.
     // Das MUSS auffallen, sonst haelt die App das Restaurant faelschlich fuer leer.
     if (resp.status === 401 || resp.status === 403) {
