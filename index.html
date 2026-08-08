@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v277</title>
+<title>eatDeSi POS v278</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v277"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v278"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22915,6 +22915,7 @@ function App() {
                 try { _wq = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]') || []; } catch(e){}
                 _dg.push('Warteschlange: ' + (_wq.length ? _wq.length + ' Eintraege' : 'leer'));
                 _dg.push('Letzter Sendefehler: ' + (window.__pushFehler ? String(window.__pushFehler).slice(0,60) : 'keiner'));
+                if (window.__pushWeg) _dg.push('Sendeweg: ' + String(window.__pushWeg).slice(0,70));
                 _txt = _txt + '\n\n' + _dg.join('\n');
               } catch(e){}
               if (typeof toast === 'function') toast(_txt); else window.alert(_txt);
@@ -26819,8 +26820,8 @@ async function pushStateToSupabase(key, value) {
       } catch (e) {}
     }
     var stamp = new Date().toISOString();
-    // on_conflict=key + merge-duplicates => bestehende Zeile wird UEBERSCHRIEBEN statt ignoriert
-    var resp = await fetch(SUPA_URL + '/rest/v1/pos_state?on_conflict=key', {
+    var _ziel = SUPA_URL + '/rest/v1/pos_state?on_conflict=key';
+    var _opt = {
       method: 'POST',
       headers: {
         'apikey': SUPA_KEY,
@@ -26833,7 +26834,35 @@ async function pushStateToSupabase(key, value) {
         value: JSON.stringify(value),
         updated_at: stamp
       })
-    });
+    };
+    // on_conflict=key + merge-duplicates => bestehende Zeile wird UEBERSCHRIEBEN statt ignoriert
+    var resp = null;
+    try {
+      resp = await fetch(_ziel, _opt);
+    } catch (eNetz) {
+      /* v278: "Failed to fetch" heisst, die Anfrage kam nie beim Server an.
+         Zwischen App und Netz sitzt der fetch-Aufsatz aus v186, der die
+         Kopfzeilen neu zusammenbaut. Zweiter Versuch OHNE ihn - das trennt
+         "Aufsatz kaputt" von "wirklich kein Netz" und rettet nebenbei den
+         Tisch, falls es am Aufsatz lag. */
+      try { window.__pushWeg = 'Aufsatz fehlgeschlagen (' + (eNetz && eNetz.message ? eNetz.message : eNetz) + ')'; } catch(e8){}
+      if (typeof window.__belksRawFetch === 'function') {
+        var _opt2 = {
+          method: _opt.method,
+          headers: {
+            'apikey': SUPA_KEY,
+            'Authorization': 'Bearer ' + SUPA_KEY,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          body: _opt.body
+        };
+        resp = await window.__belksRawFetch(_ziel, _opt2);
+        try { window.__pushWeg = 'OHNE Aufsatz erfolgreich - der Aufsatz ist die Ursache'; } catch(e8){}
+      } else {
+        throw eNetz;
+      }
+    }
     if (!resp || !resp.ok) {
       var _grund = '';
       try {
