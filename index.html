@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v283</title>
+<title>eatDeSi POS v284</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v283"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v284"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27283,8 +27283,42 @@ async function syncTableOrders() {
   try {
     // App speichert Tische unter 'eatdesi_tableorders' (klein!) via LS.set
     var local = JSON.parse(localStorage.getItem('eatdesi_tableorders') || '{}');
-    var remote = await pullStateWithTime('tableOrders');
-    var rmetaRow = await pullStateWithTime('tableordersmeta');
+    /* v284: Tische UND Marken in EINER Abfrage holen. Sie werden immer
+       zusammen gebraucht; zwei Anfragen alle 3 Sekunden sind 40 pro Minute,
+       eine sind 20 - bei gleicher Frische. Gemessen am 08.08.: die Tische
+       waren mit 2 Abfragen pro Runde der groesste Einzelposten. */
+    var remote = null, rmetaRow = null;
+    try {
+      var _r = await supaFetch('/rest/v1/pos_state?key=in.(' +
+        encodeURIComponent('"' + LOCATION_ID + '_tableOrders","' + LOCATION_ID + '_tableordersmeta"') +
+        ')&select=key,value,updated_at');
+      if (_r && (_r.status === 401 || _r.status === 403)) {
+        window.__belksRechteFehler = true;
+        try { console.warn('Keine Berechtigung (' + _r.status + ') fuer Tische - Anmeldung pruefen'); } catch(e){}
+        try { window.belksAuthRefresh && window.belksAuthRefresh(); } catch(e){}
+      } else if (_r && _r.ok) {
+        window.__belksRechteFehler = false;
+        /* Beide Schluessel gelten jetzt als gelesen - die Wache weiter unten
+           prueft genau das, bevor irgendetwas hochgeladen wird. */
+        try {
+          window.__belksGelesen = window.__belksGelesen || {};
+          window.__belksGelesen['tableOrders'] = true;
+          window.__belksGelesen['tableordersmeta'] = true;
+        } catch(e){}
+        var _rows = await _r.json();
+        (_rows || []).forEach(function(row){
+          if (!row || !row.value) return;
+          var _obj = null;
+          try { _obj = { value: JSON.parse(row.value), updated_at: new Date(row.updated_at).getTime() }; } catch(e){ return; }
+          if (row.key === LOCATION_ID + '_tableOrders') remote = _obj;
+          else if (row.key === LOCATION_ID + '_tableordersmeta') rmetaRow = _obj;
+        });
+      } else {
+        try { window.__reqFehl = (window.__reqFehl||0) + 1; } catch(e){}
+      }
+    } catch (eT) {
+      try { window.__reqFehl = (window.__reqFehl||0) + 1; } catch(e){}
+    }
     /* v272: remote ist auch dann null, wenn die ABFRAGE FEHLSCHLAEGT -
        abgelaufene Anmeldung (401), fehlende Berechtigung (403), Netzaussetzer.
        Bisher wurde trotzdem "Cloud gelesen" gemeldet. Die Folge: toMerge
