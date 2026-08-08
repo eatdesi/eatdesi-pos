@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v284</title>
+<title>eatDeSi POS v285</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v284"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v285"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -28222,16 +28222,43 @@ try {
 
 setInterval(runSync, 3000);
 
+/* v285: RICHTIG aufwachen.
+   Android friert bei ausgeschaltetem Bildschirm alle Zeitgeber ein - oft
+   MITTEN in einem Durchgang. Die Sperre _syncRunning bleibt dann auf "laeuft
+   gerade" stehen. Beim Einschalten sah runSync diese Sperre und stieg sofort
+   wieder aus; die Notbremse greift erst nach 25 Sekunden. Dazu war der
+   Schluessel-Rundlauf (seit v283 alle 60 s) erst spaeter wieder dran.
+   Beides zusammen ergab: Geraet eingeschaltet, und es dauerte.
+   Jetzt: haengende Sperre loesen, Rundlauf erzwingen, sofort abgleichen -
+   und nach 1,5 Sekunden ein zweites Mal, weil das Netz nach dem Aufwachen
+   oft noch nicht steht. */
+window.belksWachSync = function(grund){
+  try {
+    var laeuft = (typeof _syncRunning !== 'undefined') && _syncRunning;
+    var seit = Date.now() - (window.__syncStart || 0);
+    if (laeuft && seit > 4000) {
+      try { console.warn('Aufwachen (' + grund + '): haengende Sperre nach ' + Math.round(seit/1000) + 's geloest'); } catch(e){}
+      _syncRunning = false;
+      window.__syncStart = 0;
+    }
+    /* Rundlauf erzwingen: nach dem Aufwachen soll ALLES einmal frisch geholt
+       werden, nicht nur Tische und Takeaway. */
+    try { _langsamZaehler = 0; } catch(e){}
+    runSync();
+    setTimeout(function(){ try { runSync(); } catch(e){} }, 1500);
+  } catch(e) {}
+};
+
 // Android WebView pausiert setInterval im Hintergrund -> bei Rueckkehr sofort syncen
 document.addEventListener('visibilitychange', function(){
   if (document.visibilityState === 'visible') {
-    try { runSync(); } catch(e) {}
+    window.belksWachSync('Bildschirm an');
   }
 });
 // Auch bei Fokus (App nach vorne geholt) sofort syncen
-window.addEventListener('focus', function(){ try { runSync(); } catch(e) {} });
+window.addEventListener('focus', function(){ window.belksWachSync('App im Vordergrund'); });
 // Wenn Geraet wieder online geht -> sofort syncen
-window.addEventListener('online', function(){ try { runSync(); } catch(e) {} });
+window.addEventListener('online', function(){ window.belksWachSync('wieder online'); });
 
 console.log('Sync Engine gestartet - Geraet: ' + window._deviceId);
 
