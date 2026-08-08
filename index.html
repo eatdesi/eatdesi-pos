@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v275</title>
+<title>eatDeSi POS v277</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v275"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v277"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22909,6 +22909,12 @@ function App() {
                 };
                 _dg.push('Marken offen:  ' + _liste(_lm.ts));
                 _dg.push('Grabsteine:  ' + _liste(_lm.del));
+                /* v276: Warteschlange und letzter Push-Fehler. Damit trennt sich
+                   endlich "es wurde nie gesendet" von "es wurde abgelehnt". */
+                var _wq = [];
+                try { _wq = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]') || []; } catch(e){}
+                _dg.push('Warteschlange: ' + (_wq.length ? _wq.length + ' Eintraege' : 'leer'));
+                _dg.push('Letzter Sendefehler: ' + (window.__pushFehler ? String(window.__pushFehler).slice(0,60) : 'keiner'));
                 _txt = _txt + '\n\n' + _dg.join('\n');
               } catch(e){}
               if (typeof toast === 'function') toast(_txt); else window.alert(_txt);
@@ -26770,6 +26776,7 @@ async function pushStateToSupabase(key, value) {
     // v190 (1) HYDRATIONS-SPERRE: erst lesen, dann schreiben.
     if (!window.__belksHydrated) {
       console.warn('Hochladen blockiert (' + key + '): Cloud wurde noch nicht gelesen');
+      try { window.__pushFehler = key + ': Cloud noch nicht gelesen'; } catch(e9){}
       return;
     }
     // v206: Einstellungen erst hochladen, wenn die Cloud bekannt ist
@@ -26827,11 +26834,24 @@ async function pushStateToSupabase(key, value) {
         updated_at: stamp
       })
     });
-    if (!resp || !resp.ok) { throw new Error('HTTP ' + (resp ? resp.status : '?')); }
+    if (!resp || !resp.ok) {
+      var _grund = '';
+      try {
+        var _txt = await resp.text();
+        var _j = null; try { _j = JSON.parse(_txt); } catch(eJ){}
+        _grund = (_j && (_j.message || _j.hint || _j.details)) ? (_j.message || _j.hint || _j.details)
+                                                               : String(_txt || '').slice(0, 120);
+      } catch(eT) {}
+      throw new Error('HTTP ' + (resp ? resp.status : '?') + (_grund ? ' - ' + _grund : ''));
+    }
     // eigenen Zeitstempel mitfuehren, damit der eigene Push nicht zurueckgezogen wird
     try { localStorage.setItem('eatdesi_stamp_' + key, String(new Date(stamp).getTime())); } catch(e2) {}
   } catch(e) {
     console.warn('pushState error:', e.message);
+    /* v276: Bisher verschwand der Grund im Konsolen-Log. Auf dem Handy ist der
+       nicht erreichbar - der Knopf meldete weiter "Schon aktuell", waehrend in
+       Wahrheit nichts hochging. Jetzt wird der letzte Fehler gemerkt. */
+    try { window.__pushFehler = key + ': ' + (e && e.message ? e.message : String(e)); } catch(e9){}
     // FEHLER: in Warteschlange legen, damit beim naechsten Online-Versuch erneut gepusht wird (Daten gehen NICHT verloren)
     try {
       var pend = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]');
