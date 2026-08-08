@@ -1,31 +1,32 @@
 /* BELKS POS · Service Worker
    ---------------------------------------------------------------
-   Diese Datei wird EINMAL neben index.html abgelegt und danach nicht
-   mehr angefasst. Updates laufen weiter allein ueber index.html.
+   Diese Datei liegt neben index.html. Updates laufen weiter allein
+   ueber index.html.
 
-   Warum eine eigene Datei:
-   Vorher wurde der Service Worker im HTML zusammengebaut und ueber eine
-   blob:-Adresse registriert. Browser lassen das nicht zu - die
-   Registrierung schlug immer fehl, der Fehler wurde verschluckt. Ergebnis:
-   ohne Internet startete die Kasse gar nicht ("Webseite nicht verfuegbar").
-   Ein Service Worker muss von derselben Herkunft und aus einer echten
-   Datei kommen.
+   WARUM ES DIESE FASSUNG GIBT (08.08.2026):
+   Die erste Fassung speicherte JEDE GET-Anfrage, die keine Seite war -
+   also auch die Datenbank-Abrufe:
+       GET /rest/v1/pos_state?key=eq.test-cafe_tableOrders&...
+   Diese Adresse ist bei jedem Abruf identisch. Nach dem ERSTEN Mal kam
+   die Antwort fuer immer aus dem Speicher, das Geraet fragte die Cloud
+   nie wieder. Folge: offene Tische eines Geraets erschienen auf keinem
+   anderen mehr, obwohl die App "Cloud gelesen: ja" meldete - gelesen
+   wurde der Speicher.
+   Das fiel erst jetzt auf, weil der Service Worker vorher ueber eine
+   blob:-Adresse registriert war und darum NIE lief.
 
-   Was er tut:
-   - Die Seite selbst wird bei jedem Start frisch geholt (damit neue
-     Versionen sofort ankommen) und dabei mitgespeichert.
-   - Ist kein Netz da, kommt die zuletzt gespeicherte Fassung.
-   - Alles andere (React, Babel, Schriften, Bilder) wird beim ersten
-     erfolgreichen Laden mitgespeichert und danach aus dem Speicher
-     bedient. Genau das fehlte bisher: die Bibliotheken kamen von
-     fremden Servern und waren ohne Netz nicht da - die App blieb leer.
+   REGEL AB JETZT:
+   - Datenbank und Anmeldung (Supabase) werden NIEMALS gespeichert.
+   - Gespeichert werden nur echte Bausteine: Skripte, Stile, Schriften,
+     Bilder. Genau die braucht die Kasse, um ohne Internet zu starten.
+   - Die Seite selbst kommt zuerst aus dem Netz, damit neue Versionen
+     sofort ankommen; ohne Netz die zuletzt gespeicherte Fassung.
 */
 
-var CACHE = 'belks-pos-v1';
+var CACHE = 'belks-pos-v2';   // v2: loescht die alten, mitgespeicherten Datenbank-Antworten
 
 /* Der Ordner, in dem diese Datei liegt. Auf GitHub Pages ist das
-   /eatdesi-pos/ - deshalb NICHT '/' fest verdrahten, sonst landet man
-   im Wurzelverzeichnis und speichert die falsche Seite. */
+   /eatdesi-pos/ - deshalb NICHT '/' fest verdrahten. */
 var BASIS = new URL('./', self.location).pathname;
 
 self.addEventListener('install', function (e) {
@@ -40,25 +41,43 @@ self.addEventListener('install', function (e) {
 self.addEventListener('activate', function (e) {
   e.waitUntil(
     caches.keys().then(function (keys) {
+      /* ALLE alten Speicher loeschen - auch 'belks-pos-v1'. Dort liegen
+         die faelschlich gespeicherten Datenbank-Antworten. */
       return Promise.all(keys.map(function (k) {
-        // Reste der alten, blob-basierten Fassung entfernen
-        if (k !== CACHE && k.indexOf('eatdesi-') === 0) return caches.delete(k);
+        if (k !== CACHE) return caches.delete(k);
       }));
     })
   );
   self.clients.claim();
 });
 
+/* Gehoert diese Adresse zur Datenbank oder Anmeldung?
+   Solche Antworten duerfen NIE aus dem Speicher kommen. */
+function istDaten(url) {
+  try {
+    if (url.hostname.indexOf('supabase.co') >= 0) return true;
+    if (url.pathname.indexOf('/rest/v1/') === 0) return true;
+    if (url.pathname.indexOf('/auth/v1/') === 0) return true;
+    if (url.pathname.indexOf('/storage/v1/') === 0) return true;
+    if (url.pathname.indexOf('/functions/v1/') === 0) return true;
+  } catch (e) {}
+  return false;
+}
+
 self.addEventListener('fetch', function (e) {
   var req = e.request;
   if (req.method !== 'GET') return;
 
-  var istSeite = (req.mode === 'navigate') || (req.destination === 'document');
+  var url;
+  try { url = new URL(req.url); } catch (err) { return; }
 
+  /* 1) Datenbank/Anmeldung: gar nicht anfassen - immer direkt ans Netz. */
+  if (istDaten(url)) return;
+
+  /* 2) Die Seite selbst: zuerst Netz (neue Version sofort da),
+        sonst die gespeicherte Fassung (Kasse laeuft offline weiter). */
+  var istSeite = (req.mode === 'navigate') || (req.destination === 'document');
   if (istSeite) {
-    /* Seite: zuerst aus dem Netz, damit eine neue Version sofort da ist.
-       Klappt das nicht, kommt die gespeicherte Fassung - die Kasse
-       laeuft dann ohne Internet weiter. */
     e.respondWith(
       fetch(req).then(function (r) {
         try {
@@ -80,8 +99,14 @@ self.addEventListener('fetch', function (e) {
     return;
   }
 
-  /* Alles andere: erst im Speicher nachsehen, sonst laden UND mitspeichern.
-     Ohne das Mitspeichern fehlten React und Babel offline komplett. */
+  /* 3) NUR echte Bausteine speichern: Skripte, Stile, Schriften, Bilder.
+        Alles andere (auch Aufrufe ohne erkennbaren Zweck, wie fetch() an
+        fremde Server) laeuft unangetastet ans Netz. Das ist die Lehre aus
+        dem Tisch-Fehler: lieber zu wenig speichern als falsche Daten
+        ausliefern. */
+  var d = req.destination;
+  if (d !== 'script' && d !== 'style' && d !== 'font' && d !== 'image') return;
+
   e.respondWith(
     caches.match(req).then(function (treffer) {
       if (treffer) return treffer;
