@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v279</title>
+<title>eatDeSi POS v280</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v279"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v280"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27904,7 +27904,7 @@ LS.set = function(key, value) {
      dann schon der neue. Ergebnis: kein Unterschied gefunden, also nichts
      hochgeladen. Genau deshalb kam ein neuer Kellner nie in der Tabelle an. */
   var _vorherStr = null;
-  if (key === 'eatdesi_users' || key === 'eatdesi_customers') {
+  if (key === 'eatdesi_users' || key === 'eatdesi_customers' || key === 'eatdesi_tableorders') {
     try { _vorherStr = localStorage.getItem(key); } catch(e){}
   }
   _origLSSet(key, value);
@@ -27988,15 +27988,32 @@ LS.set = function(key, value) {
          hochgeladen und taucht auf keinem zweiten Geraet auf. Hochgeladen
          wird weiterhin nicht; das erledigt syncTableOrders, sobald die Cloud
          gelesen ist. */
-      try { toMetaStampChanges(value, _toVorher); } catch(e){}
+      var _altStart = _toVorher;
+      try { if (_vorherStr != null) _altStart = JSON.parse(_vorherStr) || {}; } catch(e){}
+      try { toMetaStampChanges(value, _altStart); } catch(e){}
       try { _toVorher = JSON.parse(JSON.stringify(value||{})); } catch(e){ _toVorher = {}; }
       return;
     }
     // eigenen Zeitstempel JETZT setzen, damit der eigene Push nicht zurueckgeholt wird
     _setLocalStamp('tableOrders', Date.now());
+    /* v280: Vergleichsgrundlage ist jetzt der ECHTE Speicherstand von vor
+       diesem Schreibvorgang - nicht mehr die Variable _toVorher.
+       WARUM: syncTableOrders schreibt den zusammengefuehrten Stand direkt mit
+       localStorage.setItem und laeuft dabei NICHT durch diesen Hook. _toVorher
+       blieb also auf einem aelteren Stand stehen. Entfernte der Abgleich einen
+       Tisch (weil ein anderes Geraet ihn geloescht hat), schrieb React die nun
+       kuerzere Liste hierher - und der Vergleich gegen das veraltete _toVorher
+       meldete "Tisch ist verschwunden" und erzeugte einen FRISCHEN Grabstein.
+       Der schlug wegen des neuen Zeitstempels alles, wurde hochgeladen, loeschte
+       den Tisch auf dem anderen Geraet - und von dort kam dasselbe zurueck.
+       Ein sich selbst erneuernder Kreislauf: genau das Bild von 13:31, als das
+       Tablet Tisch 18 stempelte und in derselben Sekunde Tisch 20 begrub.
+       Der echte Speicherstand kann nicht veralten - der Abgleich haelt ihn aktuell. */
+    var _altStand = _toVorher;
+    try { if (_vorherStr != null) _altStand = JSON.parse(_vorherStr) || {}; } catch(e){}
     // v190: geaenderte/geloeschte Tische einzeln markieren
     var _meta = null;
-    try { _meta = toMetaStampChanges(value, _toVorher); } catch(e){}
+    try { _meta = toMetaStampChanges(value, _altStand); } catch(e){}
     try { _toVorher = JSON.parse(JSON.stringify(value||{})); } catch(e){ _toVorher = {}; }
     (function(val, mt){
       setTimeout(function(){
