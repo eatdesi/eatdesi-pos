@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v281</title>
+<title>eatDeSi POS v283</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v281"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v283"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27688,9 +27688,33 @@ async function syncOneStateKey(lsKey) {
 }
 
 // Alle sync-faehigen Keys durchgehen
+/* v282: Nicht mehr ALLE Schluessel alle 3 Sekunden abfragen.
+   GEMESSEN am 08.08.: rund 300-400 Anfragen pro Minute, etwa 6 pro Sekunde.
+   Bei zwei Geraeten waeren 30-50 angemessen - wir lagen beim Zehnfachen.
+   Sobald das Netz schwaechelt, kippt das in "Failed to fetch", Sendungen
+   bleiben in der Warteschlange liegen und Loeschungen erreichen das andere
+   Geraet nie. Genau das Bild von heute Nachmittag.
+   Speisekarte, Firmendaten, Drucker, Gutscheine, Fahrer und Treue-Einstellungen
+   aendern sich fast nie - die brauchen keinen 3-Sekunden-Takt.
+   SCHNELL bleiben nur die Dinge, die im Betrieb wirklich zaehlen.
+   Tische und Bestellungen laufen ohnehin ueber eigene Wege und sind hier
+   nicht betroffen. */
+var _TO_SCHNELL = { 'eatdesi_takeaway': 1 };   /* v283: Reservierungen raus - die
+   werden Stunden im Voraus angelegt, ein Takt von 60 s reicht voellig. Sie
+   allein kosteten 20 Abfragen pro Minute. */
+var _langsamZaehler = 0;
 async function syncAllStateKeys() {
   var keys = _getSyncableKeys();
+  _langsamZaehler++;
+  /* Alle 10 Runden (also etwa alle 30 Sekunden) einmal komplett durchgehen,
+     dazwischen nur die schnellen. Wer im Menue etwas aendert, sieht es also
+     spaetestens nach einer Minute auf dem anderen Geraet - und die Kasse hat
+     den Rest der Zeit Luft fuer das, was eilt. */
+  var alle = (_langsamZaehler % 20 === 1);   /* v283: 60 s statt 30 s. Darueber
+     bringt es nichts mehr, weil der Rundlauf dann ohnehin nur noch einmal pro
+     Minute stattfindet. */
   for (var i = 0; i < keys.length; i++) {
+    if (!alle && !_TO_SCHNELL[keys[i]]) continue;
     await syncOneStateKey(keys[i]);
   }
 }
