@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v291</title>
+<title>eatDeSi POS v292</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21081,7 +21081,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v291"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v292"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22993,7 +22993,12 @@ function App() {
                    endlich "es wurde nie gesendet" von "es wurde abgelehnt". */
                 var _wq = [];
                 try { _wq = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]') || []; } catch(e){}
-                _dg.push('Warteschlange: ' + (_wq.length ? _wq.length + ' Eintraege' : 'leer'));
+                /* v292: Die blosse Anzahl sagt nicht, WAS haengen bleibt.
+                   Mit den Namen sieht man sofort, ob es die Tische sind. */
+                _dg.push('Warteschlange: ' + (_wq.length ? _wq.length + ' Eintraege' : 'leer')
+                         + (_wq.length ? ' (' + _wq.map(function(p){
+                             return (p && p.key) ? p.key : ('Bon ' + ((p && p.bonNr) || '?'));
+                           }).slice(0,6).join(', ') + ')' : ''));
                 _dg.push('Letzter Sendefehler: ' + (window.__pushFehler ? String(window.__pushFehler).slice(0,60) : 'keiner'));
                 if (window.__pushWeg) _dg.push('Sendeweg: ' + String(window.__pushWeg).slice(0,70));
                 _dg.push('Anfragen seit letztem Druck: ' + (window.__reqGes||0) + ', davon Fehler: ' + (window.__reqFehl||0));
@@ -26884,26 +26889,31 @@ function _istLeer(v){
     return false;
   } catch(e){ return false; }
 }
+/* v292: Diese Funktion gab bisher NICHTS zurueck. Der Aufrufer konnte
+   deshalb nicht unterscheiden zwischen "hochgeladen", "gesperrt" und
+   "fehlgeschlagen" - und liess erledigte Eintraege fuer immer in der
+   Warteschlange liegen. Ab jetzt: true = wirklich in der Cloud,
+   false = nicht (egal ob gesperrt oder kaputt). */
 async function pushStateToSupabase(key, value) {
   try {
     // v185: Geraet ist noch nicht angemeldet -> NICHTS in die Cloud schreiben.
     try {
-      if (localStorage.getItem('eatdesi_tenant_ok_' + LOCATION_ID) !== '1') return;
+      if (localStorage.getItem('eatdesi_tenant_ok_' + LOCATION_ID) !== '1') return false;
       // v190 (3): waehrend der Abmeldung nichts hochladen – sonst
       // ueberschreibt der leere Start-Zustand die offenen Tische.
-      if (localStorage.getItem('eatdesi_full_logout') === '1') return;
+      if (localStorage.getItem('eatdesi_full_logout') === '1') return false;
     } catch(e00) {}
     // v190 (1) HYDRATIONS-SPERRE: erst lesen, dann schreiben.
     if (!window.__belksHydrated) {
       console.warn('Hochladen blockiert (' + key + '): Cloud wurde noch nicht gelesen');
       try { window.__pushFehler = key + ': Cloud noch nicht gelesen'; } catch(e9){}
-      return;
+      return false;
     }
     // v206: Einstellungen erst hochladen, wenn die Cloud bekannt ist
     try {
       if (typeof _darfSchreiben === 'function' && !_darfSchreiben('eatdesi_' + key)) {
         console.warn('Hochladen von ' + key + ' gesperrt – Cloud-Bestand unbekannt');
-        return;
+        return false;
       }
     } catch(e0) {}
     // v195: Diesen einen Schluessel nie leeren, solange er nicht gelesen wurde.
@@ -26913,7 +26923,7 @@ async function pushStateToSupabase(key, value) {
                   (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0);
       if (_leer && !(window.__belksGelesen && window.__belksGelesen[key])) {
         console.warn('Leeres ' + key + ' NICHT hochgeladen – noch nie aus der Cloud gelesen');
-        return;
+        return false;
       }
     } catch(e0) {}
     // v184 NOTBREMSE: Daten gehoeren einer anderen Tochter -> NIE hochladen.
@@ -26921,13 +26931,13 @@ async function pushStateToSupabase(key, value) {
       var _own = localStorage.getItem('eatdesi_data_owner');
       if (_own && _own !== LOCATION_ID) {
         console.warn('pushState blockiert: Daten gehoeren ' + _own + ', aktiv ist ' + LOCATION_ID);
-        return;
+        return false;
       }
     } catch(e0) {}
     // SCHUTZ: leere kritische Liste nicht in die Cloud schreiben (sonst Datenverlust)
     if (_NEVER_EMPTY_KEYS[key] && Array.isArray(value) && value.filter(function(e){return e && !e.deleted;}).length === 0) {
       console.warn('pushState blockiert: leere ' + key + '-Liste wuerde Cloud-Daten loeschen');
-      return;
+      return false;
     }
     // v160 (MENUE-SCHUTZ): leeres/Platzhalter-Menue NIE in die Cloud schreiben —
     // sonst loescht ein frisches Geraet das importierte Tochter-Menue!
@@ -26935,7 +26945,7 @@ async function pushStateToSupabase(key, value) {
       try {
         var _mm = (typeof value === 'string') ? JSON.parse(value) : value;
         var _cnt = _mm ? Object.keys(_mm).reduce(function(a, c) { return a + (((_mm[c] || []).length) || 0); }, 0) : 0;
-        if (_cnt === 0) { console.warn('pushState blockiert: leeres Menue wird nicht gesynct (' + key + ')'); return; }
+        if (_cnt === 0) { console.warn('pushState blockiert: leeres Menue wird nicht gesynct (' + key + ')'); return false; }
       } catch (e) {}
     }
     var stamp = new Date().toISOString();
@@ -26968,18 +26978,32 @@ async function pushStateToSupabase(key, value) {
          Tisch, falls es am Aufsatz lag. */
       try { window.__pushWeg = 'Aufsatz fehlgeschlagen (' + (eNetz && eNetz.message ? eNetz.message : eNetz) + ')'; } catch(e8){}
       if (typeof window.__belksRawFetch === 'function') {
+        /* v292: Der Notweg umgeht den Aufsatz - und damit auch die Stelle,
+           die das Benutzer-Token setzt. Bisher stand hier der anon-Schluessel:
+           die Datenbank hielt uns fuer einen Fremden, und ein Fremder darf
+           tableOrders nicht schreiben ("new row violates row-level security").
+           Der Notweg hat den Tisch also nie gerettet, sondern verloren.
+           Jetzt traegt er die echte Anmeldung mit. */
+        var _tokNot = null;
+        try { _tokNot = window.belksAuthToken(); } catch(eT0){}
         var _opt2 = {
           method: _opt.method,
           headers: {
             'apikey': SUPA_KEY,
-            'Authorization': 'Bearer ' + SUPA_KEY,
+            'Authorization': 'Bearer ' + (_tokNot || SUPA_KEY),
             'Content-Type': 'application/json',
             'Prefer': 'resolution=merge-duplicates'
           },
           body: _opt.body
         };
         resp = await window.__belksRawFetch(_ziel, _opt2);
-        try { window.__pushWeg = 'OHNE Aufsatz erfolgreich - der Aufsatz ist die Ursache'; } catch(e8){}
+        /* v292: Erfolg erst behaupten, wenn die Antwort auch in Ordnung ist.
+           Vorher stand hier "erfolgreich", selbst wenn 401 zurueckkam. */
+        try {
+          window.__pushWeg = (resp && resp.ok)
+            ? ('OHNE Aufsatz erfolgreich' + (_tokNot ? ' (mit Anmeldung)' : ' (OHNE Anmeldung!)'))
+            : ('OHNE Aufsatz abgewiesen: HTTP ' + (resp ? resp.status : '?'));
+        } catch(e8){}
       } else {
         throw eNetz;
       }
@@ -26996,6 +27020,7 @@ async function pushStateToSupabase(key, value) {
     }
     // eigenen Zeitstempel mitfuehren, damit der eigene Push nicht zurueckgezogen wird
     try { localStorage.setItem('eatdesi_stamp_' + key, String(new Date(stamp).getTime())); } catch(e2) {}
+    return true;                      // v292: wirklich in der Cloud angekommen
   } catch(e) {
     console.warn('pushState error:', e.message);
     /* v276: Bisher verschwand der Grund im Konsolen-Log. Auf dem Handy ist der
@@ -27010,6 +27035,7 @@ async function pushStateToSupabase(key, value) {
       pend.push({ key: key, value: value, ts: Date.now() });
       localStorage.setItem('eatdesi_pending_push', JSON.stringify(pend));
     } catch(e3) {}
+    return false;
   }
 }
 
@@ -27098,7 +27124,25 @@ function mergeRemoteOrders(remoteOrders) {
   return true;
 }
 
-// Pending orders + state queue
+/* ═══ v292: DIE WARTESCHLANGE WIRD WIEDER LEER ═══
+   Der alte Schlussteil las die Warteschlange NEU aus dem Speicher und behielt
+   ALLE Zustands-Schluessel, die darin standen. Erfolgreich hochgeladene
+   Eintraege nahm niemand heraus - pushStateToSupabase entfernt sie nicht, und
+   sie gab auch nicht zurueck, ob es geklappt hat.
+   Folge: ein einziger Netzaussetzer, und das Geraet schickte von da an alle
+   fuenf Sekunden fuer immer dieselbe EINGEFRORENE Tischliste aus dem Moment
+   des Aussetzers in die Cloud. Das andere Geraet las diesen alten Stand.
+   Neu und Alt kaempften gegeneinander - genau das "erst zwanzig Minuten
+   nichts, dann ploetzlich beide Tische".
+   Jetzt: erledigt heisst raus. Nur wirklich Fehlgeschlagenes bleibt liegen,
+   und waehrend des Laufs neu dazugekommene Eintraege gehen nicht verloren. */
+function _wsIdent(p){
+  try {
+    if (p && p.key && ('value' in p)) return 'Z:' + p.key;         // Zustands-Schluessel
+    if (p && p.bonNr) return 'B:' + String(p.bonNr);               // Bestellung
+    return 'X:' + JSON.stringify(p).slice(0, 120);
+  } catch(e) { return 'X:?'; }
+}
 async function pushPendingOrders() {
   var pending = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]');
   if (!pending.length) return;
@@ -27107,18 +27151,31 @@ async function pushPendingOrders() {
     var p = pending[i];
     if (p && p.key && 'value' in p) {
       // State-Eintrag (z.B. users, floors) erneut pushen
-      try { await pushStateToSupabase(p.key, p.value); } catch(e) { keep.push(p); }
+      var okS = false;
+      try { okS = await pushStateToSupabase(p.key, p.value); } catch(e) { okS = false; }
+      if (!okS) keep.push(p);
     } else {
       // Order-Eintrag
       var ok = await pushOrderToSupabase(p);
       if (!ok) keep.push(p);
     }
   }
-  // pushStateToSupabase legt bei erneutem Fehler selbst wieder in die Queue -> hier nur Order-Fehler behalten
-  var current = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]');
-  var stateKeysStillPending = current.filter(function(p){ return p && p.key && 'value' in p; });
-  var orderKeep = keep.filter(function(p){ return !(p && p.key && 'value' in p); });
-  localStorage.setItem('eatdesi_pending_push', JSON.stringify(stateKeysStillPending.concat(orderKeep)));
+  /* Waehrend des Laufs kann neue Arbeit dazugekommen sein (eine frische
+     Bestellung, ein fehlgeschlagener Push aus einer anderen Ecke). Was wir
+     nicht selbst in der Hand hatten, bleibt unangetastet. */
+  var current = [];
+  try { current = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]') || []; } catch(e){}
+  var angefasst = {};
+  pending.forEach(function(p){ angefasst[_wsIdent(p)] = 1; });
+  var neuDazu = current.filter(function(p){ return !angefasst[_wsIdent(p)]; });
+  // doppelte Eintraege zusammenfassen, der spaetere gewinnt
+  var zusammen = keep.concat(neuDazu), gesehen = {}, ergebnis = [];
+  for (var j = zusammen.length - 1; j >= 0; j--) {
+    var id = _wsIdent(zusammen[j]);
+    if (gesehen[id]) continue;
+    gesehen[id] = 1; ergebnis.unshift(zusammen[j]);
+  }
+  localStorage.setItem('eatdesi_pending_push', JSON.stringify(ergebnis));
 }
 
 // ═══ v190 (1) HYDRATIONS-SPERRE: erst LESEN, dann SCHREIBEN ═══
