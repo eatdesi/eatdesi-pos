@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v290</title>
+<title>eatDeSi POS v291</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -973,29 +973,68 @@ window.belksSicherungWaehlen = function(){
     return null;                                 // abgelaufen -> vorerst anon
   };
 
-  var _refreshing = false;
+  // ═══ v291: SELBSTHEILUNG STUFE 1 ═══
+  // Bisher wurde bei 401 zwar eine Erneuerung ANGESTOSSEN, die abgewiesene
+  // Abfrage aber trotzdem als Fehler verbucht. Und scheiterte die Erneuerung
+  // selbst, sagte das NIEMAND - ein leeres .catch verschluckte alles.
+  // Genau so entsteht "ein Geraet 180 Anfragen / 45 Fehler", das nur auffaellt,
+  // wenn jemand hinschaut. Der Kellner schaut nicht hin. Ab jetzt:
+  //  - die Sperre loest sich selbst (dieselbe Falle wie _syncRunning in v285),
+  //  - jeder Versuch hinterlaesst ein Ergebnis in window.__authStand,
+  //  - ein toter Erneuerungsschluessel wird als solcher erkannt.
+  var _refreshing = false, _refreshBis = 0, _letzterVersuch = 0;
+  window.__authStand = { zeit:0, ok:null, status:0, text:'noch nicht versucht' };
+  window.__authOk = 0; window.__authFehl = 0; window.__authWdh = 0;
+  window.__belksAnmeldungTot = false;
   window.belksAuthRefresh = function(){
-    if(_refreshing) return;
+    // Haengende Sperre nach 20 s loesen - ein eingefrorener Aufruf darf die
+    // Erneuerung nicht fuer immer blockieren.
+    if(_refreshing && Date.now() > _refreshBis) _refreshing = false;
+    if(_refreshing) return Promise.resolve(false);
+    // Nicht haemmern: hoechstens alle 5 Sekunden ein Versuch.
+    if(Date.now() - _letzterVersuch < 5000) return Promise.resolve(false);
     var a = _read();
-    if(!a || !a.refresh_token) return;
-    _refreshing = true;
+    if(!a || !a.refresh_token){
+      window.__authStand = { zeit:Date.now(), ok:false, status:0,
+                             text:'kein Erneuerungsschluessel - echte Anmeldung noetig' };
+      window.__belksAnmeldungTot = true;
+      return Promise.resolve(false);
+    }
     var base = window.RESTAURANT.SUPA_URL, key = window.RESTAURANT.SUPA_KEY;
     var _fx = window.__belksRawFetch || window.fetch;
-    if(typeof _fx !== 'function'){ _refreshing=false; return; }
-    _fx(base+'/auth/v1/token?grant_type=refresh_token',{
+    if(typeof _fx !== 'function') return Promise.resolve(false);
+    _refreshing = true; _refreshBis = Date.now() + 20000; _letzterVersuch = Date.now();
+    return _fx(base+'/auth/v1/token?grant_type=refresh_token',{
       method:'POST',
       headers:{ apikey:key, 'Content-Type':'application/json' },
       body: JSON.stringify({ refresh_token: a.refresh_token })
-    }).then(function(r){ return r.ok ? r.json() : null; })
-     .then(function(j){
-       if(j && j.access_token){
-         var akt = '';
-         try{ akt = localStorage.getItem('eatdesi_location_id') || window.RESTAURANT.LOCATION_ID || ''; }catch(e){}
-         window.belksAuthSave(j, akt);   // v203: Erneuerung gehoert zur AKTIVEN Tochter
-       }
-     })
-     .catch(function(){})
-     .then(function(){ _refreshing = false; });
+    }).then(function(r){
+      return r.text().then(function(t){ return { status:r.status, ok:r.ok, text:t }; });
+    }).then(function(res){
+      var j = null;
+      try { j = JSON.parse(res.text); } catch(e){}
+      if(res.ok && j && j.access_token){
+        var akt = '';
+        try{ akt = localStorage.getItem('eatdesi_location_id') || window.RESTAURANT.LOCATION_ID || ''; }catch(e){}
+        window.belksAuthSave(j, akt);   // v203: Erneuerung gehoert zur AKTIVEN Tochter
+        window.__authOk = (window.__authOk||0) + 1;
+        window.__belksAnmeldungTot = false;
+        window.__authStand = { zeit:Date.now(), ok:true, status:res.status, text:'erneuert' };
+        return true;
+      }
+      window.__authFehl = (window.__authFehl||0) + 1;
+      // 400/401 an DIESER Stelle heisst: der Erneuerungsschluessel selbst ist
+      // ungueltig. Wiederholen hilft dann nicht mehr, nur eine echte Anmeldung.
+      if(res.status === 400 || res.status === 401) window.__belksAnmeldungTot = true;
+      window.__authStand = { zeit:Date.now(), ok:false, status:res.status,
+                             text:String(res.text||'').slice(0,90) };
+      return false;
+    }).catch(function(e){
+      window.__authFehl = (window.__authFehl||0) + 1;
+      window.__authStand = { zeit:Date.now(), ok:false, status:0,
+                             text:'Netz: ' + ((e && e.message) || String(e)).slice(0,80) };
+      return false;
+    }).then(function(v){ _refreshing = false; return v; });
   };
 
   // ── fetch-Aufsatz: EIN Ort statt 15 Einzelstellen ──
@@ -1004,22 +1043,48 @@ window.belksSicherungWaehlen = function(){
   if(typeof window.fetch !== 'function') return;   // v186: kein fetch -> Aufsatz ueberspringen
   var _raw = window.fetch.bind(window);
   window.__belksRawFetch = _raw;
+  // Kopf mit gueltigem Token bauen, ohne das uebergebene init zu zerstoeren
+  function _mitToken(input, init, tok){
+    var n = {};
+    try { for(var k in (init||{})) n[k] = init[k]; } catch(e){}
+    var h = new Headers((init && init.headers) || (typeof input !== 'string' && input ? input.headers : null) || {});
+    h.set('apikey', window.RESTAURANT.SUPA_KEY);
+    h.set('Authorization', 'Bearer ' + tok);
+    n.headers = h;
+    return n;
+  }
   window.fetch = function(input, init){
+    var istDaten = false, tokAlt = null;
     try{
       var base = window.RESTAURANT.SUPA_URL;
       var url  = (typeof input === 'string') ? input : (input && input.url) || '';
-      if(base && url.indexOf(base) === 0 && url.indexOf('/auth/v1/') < 0){
-        var tok = window.belksAuthToken();
-        if(tok){
-          init = init || {};
-          var h = new Headers((init && init.headers) || (typeof input !== 'string' && input ? input.headers : null) || {});
-          h.set('apikey', window.RESTAURANT.SUPA_KEY);
-          h.set('Authorization', 'Bearer ' + tok);
-          init.headers = h;
-        }
+      istDaten = !!(base && url.indexOf(base) === 0 && url.indexOf('/auth/v1/') < 0);
+      if(istDaten){
+        tokAlt = window.belksAuthToken();
+        if(tokAlt) init = _mitToken(input, init, tokAlt);
       }
     }catch(e){}
-    return _raw(input, init);
+    if(!istDaten) return _raw(input, init);
+    /* v291: Der eigentliche Selbstheilungs-Schritt. Wird eine Datenabfrage
+       mit 401/403 abgewiesen, wird EINMAL die Anmeldung erneuert und die
+       Abfrage danach WIEDERHOLT. Vorher zaehlte genau das als Fehler, und
+       die Kasse stand mit falschen Tischsummen da, ohne dass jemand etwas
+       merkte. Nur bei Text-Adressen wiederholen: ein Request-Objekt hat
+       seinen Koerper nach dem ersten Versuch bereits verbraucht. */
+    return _raw(input, init).then(function(r){
+      if(!r || (r.status !== 401 && r.status !== 403)) return r;
+      if(typeof input !== 'string') return r;
+      return window.belksAuthRefresh().then(function(){
+        var t2 = null;
+        try { t2 = window.belksAuthToken(); } catch(e){}
+        /* Nur wiederholen, wenn wirklich ein ANDERES Token vorliegt.
+           Sonst wuerde dieselbe abgewiesene Abfrage ein zweites Mal mit
+           demselben Token laufen - doppelte Last, gleiches Ergebnis. */
+        if(!t2 || t2 === tokAlt) return r;      // nichts gewonnen -> Original zurueck
+        try { window.__authWdh = (window.__authWdh||0) + 1; } catch(e){}
+        return _raw(input, _mitToken(input, init, t2));
+      }).catch(function(){ return r; });
+    });
   };
 
   // v192: Beim Start SOFORT erneuern – nicht erst kurz vor Ablauf.
@@ -21016,7 +21081,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v290"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v291"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22932,6 +22997,17 @@ function App() {
                 _dg.push('Letzter Sendefehler: ' + (window.__pushFehler ? String(window.__pushFehler).slice(0,60) : 'keiner'));
                 if (window.__pushWeg) _dg.push('Sendeweg: ' + String(window.__pushWeg).slice(0,70));
                 _dg.push('Anfragen seit letztem Druck: ' + (window.__reqGes||0) + ', davon Fehler: ' + (window.__reqFehl||0));
+                /* v291: Die Anmeldung ist der haeufigste Grund fuer Fehler auf
+                   NUR EINEM Geraet. Ohne diese zwei Zeilen sieht man nur die
+                   Zahl der Fehler, aber nicht ihren Grund. */
+                try {
+                  var _as = window.__authStand || {};
+                  _dg.push('Anmeldung: ' + (typeof window.belksAuthStatus === 'function' ? window.belksAuthStatus() : '?'));
+                  _dg.push('Erneuerung: ' + (_as.zeit ? _uhr(_as.zeit) : 'nie') + ' '
+                           + (_as.ok ? 'ok' : 'FEHLER ' + (_as.status || '') + ' ' + (_as.text || ''))
+                           + '  (gut ' + (window.__authOk||0) + ' / schlecht ' + (window.__authFehl||0)
+                           + ' / wiederholt ' + (window.__authWdh||0) + ')');
+                } catch(e){}
                 _dg.push('Bildschirm wach: ' + (window.__wachSperre ? 'ja' : 'nein'));
                 try { window.__reqGes = 0; window.__reqFehl = 0; } catch(e){}
                 _txt = _txt + '\n\n' + _dg.join('\n');
