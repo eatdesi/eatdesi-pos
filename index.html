@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v285</title>
+<title>eatDeSi POS v290</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21016,7 +21016,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v285"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v290"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21801,14 +21801,29 @@ function App() {
         items,
         time: x.time || new Date()
       } : x));
-    } else setTableOrders(p => ({
-      ...p,
-      [tid]: {
-        ...p[tid],
-        items,
-        time: p[tid]?.time || new Date()
-      }
-    }));
+    } else setTableOrders(p => {
+      /* v290: Hier laufen ALLE Artikeländerungen eines Tisches zusammen -
+         der richtige Ort, um jeder Zeile eine eigene Kennung und einen
+         eigenen Zeitstempel zu geben. Erst dadurch kann der Abgleich
+         Artikelzeilen vereinigen statt ganze Tische auszuwaehlen.
+         Gestrichene Zeilen bekommen sofort eine Loeschmarke, sonst kaeme
+         die Zeile beim naechsten Abgleich vom anderen Geraet zurueck. */
+      var alt = (p[tid] && p[tid].items) || [];
+      var neu = items;
+      try { neu = belksZeilenStempeln(items, alt); } catch(e) { neu = items; }
+      try {
+        var weg = belksZeilenWeg(alt, neu);
+        if (weg.length) belksZeilenMarkeSetzen(tid, weg);
+      } catch(e) {}
+      return {
+        ...p,
+        [tid]: {
+          ...p[tid],
+          items: neu,
+          time: p[tid]?.time || new Date()
+        }
+      };
+    });
   };
   const saveOrder = (tid, lieferFee=0) => {
     const bonNr = genNr();
@@ -22917,6 +22932,7 @@ function App() {
                 _dg.push('Letzter Sendefehler: ' + (window.__pushFehler ? String(window.__pushFehler).slice(0,60) : 'keiner'));
                 if (window.__pushWeg) _dg.push('Sendeweg: ' + String(window.__pushWeg).slice(0,70));
                 _dg.push('Anfragen seit letztem Druck: ' + (window.__reqGes||0) + ', davon Fehler: ' + (window.__reqFehl||0));
+                _dg.push('Bildschirm wach: ' + (window.__wachSperre ? 'ja' : 'nein'));
                 try { window.__reqGes = 0; window.__reqFehl = 0; } catch(e){}
                 _txt = _txt + '\n\n' + _dg.join('\n');
               } catch(e){}
@@ -27102,17 +27118,29 @@ var TO_META = 'eatdesi_to_meta';           // { ts:{Tisch:ms}, del:{Tisch:ms} }
    stand wieder offen da. Sieben Tage decken Ruhetage und Urlaub ab. */
 var TO_TOMB_MS = 24*60*60*1000;   // v279: 24 Stunden statt 7 Tage - lange genug, dass kein Geraet einen Tisch zurueckholt, kurz genug, dass nichts liegen bleibt
 
+/* v290: idel = Loeschmarken einzelner Artikelzeilen, nach Tisch geordnet:
+   { "1": { "<Zeilen-Kennung>": Zeitpunkt } } */
 function toMetaRead(){
-  try { var m = JSON.parse(localStorage.getItem(TO_META)||'{}'); return { ts:m.ts||{}, del:m.del||{} }; }
-  catch(e){ return { ts:{}, del:{} }; }
+  /* v290: idel MUSS mitgelesen und mitgeschrieben werden. Ohne das ginge
+     jede Loeschmarke einer einzelnen Artikelzeile beim naechsten Schreiben
+     verloren - die gestrichene Zeile kaeme dann vom anderen Geraet zurueck. */
+  try { var m = JSON.parse(localStorage.getItem(TO_META)||'{}'); return { ts:m.ts||{}, del:m.del||{}, idel:m.idel||{} }; }
+  catch(e){ return { ts:{}, del:{}, idel:{} }; }
 }
 function toMetaWrite(m){
-  try { localStorage.setItem(TO_META, JSON.stringify({ ts:m.ts||{}, del:m.del||{} })); } catch(e){}
+  try { localStorage.setItem(TO_META, JSON.stringify({ ts:m.ts||{}, del:m.del||{}, idel:m.idel||{} })); } catch(e){}
 }
 // Alte Loeschmarken wegraeumen, damit die Liste nicht ewig waechst
 function toMetaPurge(m){
   var grenze = Date.now() - TO_TOMB_MS;
   Object.keys(m.del||{}).forEach(function(k){ if (m.del[k] < grenze) delete m.del[k]; });
+  /* v290: auch die Loeschmarken einzelner Artikelzeilen aufraeumen. Ohne das
+     waechst die Marken-Datei mit jeder gestrichenen Zeile weiter. */
+  Object.keys(m.idel||{}).forEach(function(k){
+    var t = m.idel[k] || {};
+    Object.keys(t).forEach(function(i){ if (t[i] < grenze) delete t[i]; });
+    if (!Object.keys(t).length) delete m.idel[k];
+  });
   return m;
 }
 // Was hat sich lokal geaendert? -> Zeitstempel bzw. Loeschmarke setzen
@@ -27129,11 +27157,136 @@ function toMetaStampChanges(neu, alt){
   return m;
 }
 // Zwei Staende Tisch fuer Tisch zusammenfuehren – der juengste Eintrag gewinnt
+/* ============================================================
+   v290: ZUSAMMENFUEHRUNG AUF ARTIKEL-EBENE
+
+   BISHER entschied der Zeitstempel ueber den GANZEN Tisch: wer zuletzt
+   gebucht hatte, dessen Tisch gewann - die Artikel des anderen Geraets waren
+   weg. Bewiesen am 09.08.: Handy Tisch 1 = 7,90 EUR, Tablet Tisch 1 =
+   11,90 EUR (Salat dazu), beide naeherten sich nie an.
+   Bei zwei Kellnern an einem Tisch ging also immer eine Buchung verloren.
+   Dasselbe Muster wie beim Kellner-Verlust und bei Lizas Punkten, nur eine
+   Ebene tiefer.
+
+   JETZT bekommt jede Artikelzeile eine eigene Kennung (_iid) und einen
+   eigenen Zeitstempel (_ts). Zusammengefuehrt werden ZEILEN, nicht Tische:
+   was auf einem Geraet dazukommt, bleibt erhalten, egal was das andere tut.
+   Gestrichene Zeilen bekommen eigene Loeschmarken (meta.idel), damit sie
+   nicht ueber den Abgleich zurueckkommen.
+   ============================================================ */
+
+/* Eindeutige Kennung fuer eine Artikelzeile: Geraet + Zeit + Zaehler.
+   Das Geraet ist noetig, damit zwei Kellner, die in derselben Millisekunde
+   buchen, nicht dieselbe Kennung erzeugen. */
+var _zeilenZaehler = 0;
+function _neueZeilenId(){
+  var g = 'x';
+  try { g = String(window._deviceId || 'x').replace(/[^A-Za-z0-9]/g,'').slice(-6) || 'x'; } catch(e){}
+  _zeilenZaehler++;
+  return g + '-' + Date.now().toString(36) + '-' + _zeilenZaehler;
+}
+
+/* Vergleicht, ob sich eine Zeile inhaltlich geaendert hat. Nur dann bekommt
+   sie einen neuen Zeitstempel - sonst wuerde jede Bildschirmaktualisierung
+   sie kuenstlich "neu" machen und die Buchung des anderen Geraets schlagen. */
+function _zeileGleich(a, b){
+  if (!a || !b) return false;
+  return (a.qty === b.qty)
+      && (String(a.note||'') === String(b.note||''))
+      && (String(a.kitchenNote||'') === String(b.kitchenNote||''))
+      && (Number(a.finalPrice||0) === Number(b.finalPrice||0));
+}
+
+/* Vergibt Kennungen und Zeitstempel. alt = Stand vor dieser Aenderung. */
+function belksZeilenStempeln(neu, alt){
+  neu = Array.isArray(neu) ? neu : [];
+  alt = Array.isArray(alt) ? alt : [];
+  var altNach = {};
+  alt.forEach(function(z){ if (z && z._iid) altNach[z._iid] = z; });
+  var jetzt = Date.now();
+  return neu.map(function(z){
+    if (!z) return z;
+    if (!z._iid) {
+      /* Neue Zeile - oder eine aus der Zeit vor v290. Beide bekommen jetzt
+         eine Kennung. */
+      return Object.assign({}, z, { _iid: _neueZeilenId(), _ts: jetzt });
+    }
+    var vorher = altNach[z._iid];
+    if (vorher && _zeileGleich(z, vorher)) {
+      return Object.assign({}, z, { _ts: z._ts || vorher._ts || jetzt });
+    }
+    return Object.assign({}, z, { _ts: jetzt });
+  });
+}
+
+/* Welche Zeilen sind verschwunden? Die brauchen eine Loeschmarke. */
+function belksZeilenWeg(alt, neu){
+  alt = Array.isArray(alt) ? alt : [];
+  neu = Array.isArray(neu) ? neu : [];
+  var da = {};
+  neu.forEach(function(z){ if (z && z._iid) da[z._iid] = 1; });
+  var weg = [];
+  alt.forEach(function(z){ if (z && z._iid && !da[z._iid]) weg.push(z._iid); });
+  return weg;
+}
+
+/* Loeschmarken fuer einzelne Zeilen in der Marken-Datei ablegen. */
+function belksZeilenMarkeSetzen(tid, iids){
+  if (!iids || !iids.length) return;
+  try {
+    var m = toMetaRead();
+    m.idel = m.idel || {};
+    m.idel[tid] = m.idel[tid] || {};
+    var jetzt = Date.now();
+    iids.forEach(function(id){ m.idel[tid][id] = jetzt; });
+    toMetaWrite(m);
+  } catch(e){}
+}
+
+/* Zwei Artikellisten desselben Tisches vereinigen. */
+function belksZeilenMischen(a, b, geloescht, aIstNeuer){
+  a = Array.isArray(a) ? a : [];
+  b = Array.isArray(b) ? b : [];
+  geloescht = geloescht || {};
+  var raus = {}, ohneA = [], ohneB = [];
+  function rein(z, ausA){
+    if (!z) return;
+    if (!z._iid) { (ausA ? ohneA : ohneB).push(z); return; }   // Altbestand ohne Kennung
+    var tot = geloescht[z._iid] || 0;
+    if (tot && tot >= (z._ts || 0)) return;           // geloescht und seitdem nicht angefasst
+    var vorhanden = raus[z._iid];
+    if (!vorhanden || (z._ts || 0) > (vorhanden._ts || 0)) raus[z._iid] = z;
+  }
+  a.forEach(function(z){ rein(z, true); });
+  b.forEach(function(z){ rein(z, false); });
+  var liste = Object.keys(raus).map(function(k){ return raus[k]; });
+
+  /* Zeilen aus der Zeit vor v290 haben keine Kennung. Beide Geraete haben
+     dieselben Zeilen als getrennte Objekte - ohne Zusammenfassung wuerde der
+     Gast alles doppelt bezahlen. Deshalb nach Inhalt zusammenfassen und nur
+     EINE Seite nehmen, naemlich die neuere. Sobald eine Zeile einmal
+     angefasst wird, bekommt sie ohnehin eine Kennung und der Sonderfall
+     erledigt sich von selbst. */
+  var altbestand = aIstNeuer ? ohneA : ohneB;
+  if (!altbestand.length) altbestand = ohneA.length ? ohneA : ohneB;
+  if (altbestand.length) {
+    var gesehen = {};
+    altbestand.forEach(function(z){
+      var ik = z._key || ((z.nr||'') + '_' + (z.name||'') + '_' + (z.note||'') + '_' + (z.finalPrice||0));
+      if (gesehen[ik]) return;
+      gesehen[ik] = 1;
+      liste.push(z);
+    });
+  }
+  liste.sort(function(x,y){ return (x._ts||0) - (y._ts||0); });
+  return liste;
+}
+
 function toMerge(local, lmeta, remote, rmeta){
   local=local||{}; remote=remote||{};
-  lmeta = { ts:(lmeta&&lmeta.ts)||{}, del:(lmeta&&lmeta.del)||{} };
-  rmeta = { ts:(rmeta&&rmeta.ts)||{}, del:(rmeta&&rmeta.del)||{} };
-  var out={}, meta={ ts:{}, del:{} }, keys={};
+  lmeta = { ts:(lmeta&&lmeta.ts)||{}, del:(lmeta&&lmeta.del)||{}, idel:(lmeta&&lmeta.idel)||{} };
+  rmeta = { ts:(rmeta&&rmeta.ts)||{}, del:(rmeta&&rmeta.del)||{}, idel:(rmeta&&rmeta.idel)||{} };
+  var out={}, meta={ ts:{}, del:{}, idel:{} }, keys={};
   Object.keys(local).forEach(function(k){ keys[k]=1; });
   Object.keys(remote).forEach(function(k){ keys[k]=1; });
   Object.keys(lmeta.del).forEach(function(k){ keys[k]=1; });
@@ -27163,15 +27316,36 @@ function toMerge(local, lmeta, remote, rmeta){
       var bezahltAm = window.belksTischBezahltAm ? window.belksTischBezahltAm(k) : 0;
       if (bezahltAm && bezahltAm >= best) { meta.del[k] = bezahltAm; return; }
     } catch(e) {}
-    var gewaehlt = null, gts = 0;
-    if (best===lt && (k in local)) { gewaehlt = local[k]; gts = lt; }
-    else if (k in remote)          { gewaehlt = remote[k]; gts = rt; }
-    else return;
+    /* v290: Nicht mehr EINEN Tisch auswaehlen, sondern die ARTIKELZEILEN
+       beider Seiten vereinigen. Nur so ueberlebt die Buchung von Kellner A,
+       wenn Kellner B zeitgleich am selben Tisch bucht. */
+    var lTisch = (k in local) ? local[k] : null;
+    var rTisch = (k in remote) ? remote[k] : null;
+    if (!lTisch && !rTisch) return;
+
+    var totL = (lmeta.idel && lmeta.idel[k]) || {};
+    var totR = (rmeta.idel && rmeta.idel[k]) || {};
+    var tot = {};
+    Object.keys(totL).forEach(function(i){ tot[i] = totL[i]; });
+    Object.keys(totR).forEach(function(i){ if (!tot[i] || totR[i] > tot[i]) tot[i] = totR[i]; });
+
+    var zeilen = belksZeilenMischen(lTisch && lTisch.items, rTisch && rTisch.items, tot, (lt >= rt));
+
     /* Leere Tische gar nicht erst uebernehmen. Sie entstehen, wenn ein Tisch
        geoeffnet und ohne Buchung wieder verlassen wird - sie belegen dann
        einen Platz in der Liste, ohne irgendwo sichtbar zu sein. */
-    if (!gewaehlt || !gewaehlt.items || gewaehlt.items.length === 0) { return; }
-    out[k] = gewaehlt; meta.ts[k] = gts;
+    if (!zeilen.length) return;
+
+    /* Die uebrigen Angaben des Tisches (Zeit, Gast, Notiz) vom neueren Stand. */
+    var rahmen = (best===lt && lTisch) ? lTisch : (rTisch || lTisch);
+    out[k] = Object.assign({}, rahmen, { items: zeilen });
+    meta.ts[k] = Math.max(lt, rt);
+    /* Loeschmarken der Zeilen mitfuehren, damit sie nicht ueber ein drittes
+       Geraet zurueckkommen. */
+    if (Object.keys(tot).length) {
+      meta.idel = meta.idel || {};
+      meta.idel[k] = tot;
+    }
   });
   return { tables: out, meta: toMetaPurge(meta) };
 }
@@ -28259,6 +28433,40 @@ document.addEventListener('visibilitychange', function(){
 window.addEventListener('focus', function(){ window.belksWachSync('App im Vordergrund'); });
 // Wenn Geraet wieder online geht -> sofort syncen
 window.addEventListener('online', function(){ window.belksWachSync('wieder online'); });
+
+/* v286: Bildschirm wach halten, solange die Kasse offen ist.
+   GRUND: Android friert bei ausgeschaltetem Bildschirm alle Zeitgeber ein -
+   der Abgleich steht dann still. Im Betrieb legen Kellner das Geraet weg, der
+   Bildschirm geht aus, und beim naechsten Griff fehlen Buchungen.
+   Das ist ein Notbehelf, kein Ersatz fuer den Umbau auf Artikel-Ebene: er
+   verhindert das Einschlafen, nicht den Datenverlust bei zwei Kellnern am
+   selben Tisch.
+   Die Sperre gilt nur, solange die Seite sichtbar ist - das gibt der Browser so
+   vor. Deshalb wird sie bei jeder Rueckkehr neu angefordert. */
+(function(){
+  var sperre = null;
+  async function halten(){
+    try {
+      if (!('wakeLock' in navigator)) return;
+      if (document.visibilityState !== 'visible') return;
+      if (sperre && !sperre.released) return;
+      sperre = await navigator.wakeLock.request('screen');
+      window.__wachSperre = true;
+      sperre.addEventListener('release', function(){ window.__wachSperre = false; });
+      try { console.log('Bildschirm wird wach gehalten'); } catch(e){}
+    } catch(e) {
+      window.__wachSperre = false;
+      /* Kann fehlschlagen bei niedrigem Akku oder wenn das Geraet es nicht
+         unterstuetzt. Dann laeuft die Kasse einfach wie bisher weiter. */
+      try { console.warn('Wachhaltung nicht moeglich:', e && e.message); } catch(e2){}
+    }
+  }
+  halten();
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState === 'visible') halten();
+  });
+  window.addEventListener('focus', halten);
+})();
 
 console.log('Sync Engine gestartet - Geraet: ' + window._deviceId);
 
