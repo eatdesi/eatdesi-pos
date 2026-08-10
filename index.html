@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v295</title>
+<title>eatDeSi POS v301</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7911,6 +7911,73 @@ function belksStationNotiz(note, station){
   var c = String(note||''), m = belksStationMarke(station);
   return c.indexOf(m) !== -1 ? c : (c + ' ' + m).trim();
 }
+/* ═══ v297: DIE STATIONEN BEWEGEN DEN KDS PRO ═══
+   Kueche und Bar wussten bisher nichts vom KDS Pro. Der Koch hakte ab, und
+   die Karte im KDS Pro stand weiter auf "Neu" - jemand musste sie ein zweites
+   Mal von Hand weiterschieben. Wer das vergass, hatte am naechsten Tag noch
+   die Karte von gestern.
+   Jetzt ergibt sich die Stufe aus der Arbeit selbst: solange irgendeine
+   Station noch etwas offen hat -> "In Arbeit". Ist alles abgehakt -> "Fertig".
+   Nur der letzte Schritt (ausgeliefert/abgeholt) bleibt Handarbeit - den
+   kann keine Kueche wissen. */
+function belksKdsStufeAus(items){
+  var offen = false;
+  (items||[]).forEach(function(i){
+    if (istBar(i)) { if (!i._barSent) offen = true; }
+    else           { if (!i._kitchenSent) offen = true; }
+  });
+  return offen ? 'working' : 'ready';
+}
+/* Dasselbe fuer Webshop-Auftraege, die ihre Marken in der Notiz tragen.
+   Eine Bestellung ganz ohne Getraenke wartet nicht auf die Bar. */
+function belksWebshopStufe(order, notiz){
+  try {
+    var items = (order && order.items) || [];
+    var hatSpeisen   = items.some(function(i){ return !istBar(i); });
+    var hatGetraenke = items.some(function(i){ return  istBar(i); });
+    var kOk = !hatSpeisen   || belksStationFertig({note:notiz}, 'kueche');
+    var bOk = !hatGetraenke || belksStationFertig({note:notiz}, 'bar');
+    return (kOk && bOk) ? 'ready' : 'working';
+  } catch(e) { return 'working'; }
+}
+
+/* ═══ v300: WEBSHOP-LIEFERUNGEN GEHOEREN AUCH ZUM FAHRER ═══
+   Die Fahreransicht las nur die Takeaway-Liste. Eine Lieferung aus dem
+   eigenen Webshop lebt aber in den abgeschlossenen Bestellungen - der Fahrer
+   sah sie nie und konnte sie nicht abhaken.
+   Damit die Fahrerarbeit ueberall gleich funktioniert, bekommt auch der
+   Webshop seine Marken in der Notiz - denselben Weg gehen schon die
+   Stationen (v295) und die KDS-Stufe. Die Notiz wird bereits synchronisiert,
+   und setKdsMarkerInNote laesst fremde Marken in Ruhe. */
+function belksFahrerAusNotiz(note){
+  var m = String(note||'').match(/\[FAHRER:([^\]]*)\]/);
+  return (m && m[1]) ? m[1] : null;
+}
+function belksFahrerNotiz(note, name){
+  var c = String(note||'').replace(/\s*\[FAHRER:[^\]]*\]/g,'').trim();
+  return name ? (c + ' [FAHRER:' + name + ']').trim() : c;
+}
+function belksBarAusNotiz(note){
+  var m = String(note||'').match(/\[BAR:([0-9]+(?:\.[0-9]+)?)\]/);
+  return m ? parseFloat(m[1]) : 0;
+}
+function belksBarNotiz(note, betrag){
+  var c = String(note||'').replace(/\s*\[BAR:[^\]]*\]/g,'').trim();
+  return (c + ' [BAR:' + (Number(betrag)||0).toFixed(2) + ']').trim();
+}
+
+/* v301: Entfernt Fahrer- und Bargeld-Marke restlos aus der Notiz.
+   Die Bestellung selbst - Betrag, Artikel, Zahlart, TSE-Signatur - wird
+   dabei NICHT angefasst. Das darf sie auch nicht: das ist die Buchfuehrung,
+   die bleibt. Weg kommt nur der Merkzettel der Fahrerabrechnung. */
+function belksFahrerSpurenLoeschen(note){
+  return String(note||'')
+    .replace(/\s*\[FAHRER:[^\]]*\]/g,'')
+    .replace(/\s*\[BAR:[^\]]*\]/g,'')
+    .replace(/\s·\s·\s/g,' · ')
+    .trim();
+}
+
 /* Die noch offenen Webshop-Auftraege einer Station. */
 function belksWebshopOffen(completedOrders, station){
   try {
@@ -14333,9 +14400,11 @@ function OrderListView({
             bonLines += "<div class=\"row bold\" style=\"font-size:16px\"><span>GESAMT</span><span>"+fmt(o.total||0)+"</span></div>";
             if(o.trinkgeld>0) bonLines += "<div class=\"row\"><span>Trinkgeld</span><span>"+fmt(o.trinkgeld)+"</span></div>";
             if(o.payMethod) bonLines += "<div class=\"row bold\"><span>Zahlung:</span><span>"+o.payMethod+"</span></div>";
-            const title = "💳 ZAHLUNG — " + (o.tableId ? "Tisch "+o.tableId : "Takeaway");
+            /* v296: gleiche Beschriftung wie beim ersten Druck */
+            const _oTyp = (o.orderType === "Lieferung" || o.customerStreet) ? "Lieferung" : "Abholung";
+            const title = "💳 ZAHLUNG — " + (o.tableId ? "Tisch "+o.tableId : ("Takeaway " + _oTyp));
             const delivery = o.customerName ? {name:o.customerName,phone:o.customerPhone,street:o.customerStreet,city:o.customerCity} : null;
-            printBon(title, bonLines, o.label||(o.tableId?"Tisch "+o.tableId:"Takeaway"), o.bonNr||"?", new Date(o.time), delivery, printerSettings, o.tse, 'kunde');
+            printBon(title, bonLines, o.tableId?("Tisch "+o.tableId):("Takeaway "+_oTyp), o.bonNr||"?", new Date(o.time), delivery, printerSettings, o.tse, 'kunde');
           },
           style:{padding:"10px 4px",borderRadius:10,border:"2px solid #C84B31",background:"#fff5f0",color:"#C84B31",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12}
         }, "\uD83D\uDDA8\uFE0F Drucken"),
@@ -19294,7 +19363,7 @@ function FloorsView({ floors, onSave }) {
 
 /* ===== \uD83D\uDEF5 FAHRER-ANSICHT =====
    Fuer das eigene Handy des Fahrers. Zeigt alle offenen Lieferungen. */
-function FahrerView({ takeaway, setTakeaway, loggedInUser, printerSettings }) {
+function FahrerView({ takeaway, setTakeaway, completedOrders, setCompletedOrders, loggedInUser, printerSettings }) {
   const ich = (loggedInUser && loggedInUser.name) || "Fahrer";
   const [nurMeine, setNurMeine] = React.useState(false);
 
@@ -19302,16 +19371,89 @@ function FahrerView({ takeaway, setTakeaway, loggedInUser, printerSettings }) {
     .filter(Boolean).join(", ");
   const summe = (t) => (t.items || []).reduce((s, i) => s + (i.finalPrice || i.price || 0) * (i.qty || 0), 0);
 
+  /* v300: Webshop-Lieferungen sehen fuer den Fahrer genauso aus wie
+     Takeaway-Lieferungen. Ihr Zustand steht nicht in eigenen Feldern,
+     sondern in der Notiz - darum hier einmal uebersetzt. */
+  const wsAlle = (completedOrders || [])
+    .filter(o => o && o.customerStreet && kdsStageOf(o))
+    .map(o => ({
+      id: 'ws_' + o.bonNr, _ws: true, bonNr: o.bonNr, note: o.note,
+      customerName: o.customerName, customerPhone: o.customerPhone,
+      customerStreet: o.customerStreet, customerPlz: o.customerPlz, customerCity: o.customerCity,
+      items: o.items || [], time: o.time,
+      fahrer: belksFahrerAusNotiz(o.note),
+      geliefert: kdsStageOf(o) === 'delivered'
+        ? { von: belksFahrerAusNotiz(o.note), zeit: o.time, bar: belksBarAusNotiz(o.note) }
+        : null
+    }));
   // Offene Lieferungen: haben eine Adresse und sind noch nicht abgeschlossen
-  const alle = (takeaway || []).filter(t => t && !t.done && (t.items || []).length > 0 && adresse(t));
+  const alle = (takeaway || []).filter(t => t && !t.done && (t.items || []).length > 0 && adresse(t))
+    .concat(wsAlle.filter(t => (t.items || []).length > 0 && adresse(t)));
   const offen = alle.filter(t => !t.geliefert);
   const liste = (nurMeine ? offen.filter(t => t.fahrer === ich) : offen)
     .sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
   const meineFertig = alle.filter(t => t.geliefert && t.geliefert.von === ich);
   const meineKasse = meineFertig.reduce((s, t) => s + (Number(t.geliefert.bar) || 0), 0);
 
-  const uebernehmen = (id) => setTakeaway(p => p.map(t => t.id === id
-    ? { ...t, fahrer: t.fahrer === ich ? null : ich, fahrerZeit: new Date().toISOString() } : t));
+  /* v301: Fuer die Abrechnung zaehlen ALLE Fahrer, nicht nur der eigene. */
+  const alleFertig = alle.filter(t => t.geliefert);
+  const kasseGesamt = alleFertig.reduce((s, t) => s + (Number(t.geliefert.bar) || 0), 0);
+  const darfAbrechnen = !!loggedInUser &&
+    (loggedInUser.role === "Admin" || loggedInUser.role === "Manager");
+
+  const abrechnungAbschliessen = () => {
+    if (!window.confirm(
+      "Fahrer-Abrechnung abschlie\u00DFen?\n\n" +
+      alleFertig.length + " Lieferung(en) \u00B7 Bar gesamt " + fmt(kasseGesamt) + "\n\n" +
+      "Die Fahrersummen werden auf null gesetzt \u2013 auf allen Ger\u00E4ten.\n" +
+      "Die Bestellungen selbst bleiben vollst\u00E4ndig erhalten.")) return;
+    // Takeaway: erledigte Lieferungen aus der Arbeitsliste nehmen
+    const wegIds = {};
+    alleFertig.forEach(t => { if (!t._ws) wegIds[t.id] = 1; });
+    if (Object.keys(wegIds).length) setTakeaway(p => (p || []).filter(x => !wegIds[x.id]));
+    // Webshop: die Marken aus der Notiz entfernen
+    alleFertig.filter(t => t._ws).forEach(t => {
+      const nn = belksFahrerSpurenLoeschen(t.note);
+      setCompletedOrders(list => list.map(x => String(x.bonNr) === String(t.bonNr) ? { ...x, note: nn } : x));
+      if (typeof updateOrderNoteInSupabase === 'function') updateOrderNoteInSupabase(t.bonNr, nn);
+    });
+  };
+
+  /* ═══ v299: DER FAHRER BEWEGT DIE KARTE MIT ═══
+     Bisher lebte die Fahreransicht fuer sich: der Fahrer nahm eine Lieferung
+     an und brachte sie weg, im KDS Pro stand die Karte weiter unveraendert
+     da. Am Abend musste jemand von Hand aufraeumen - und wer das vergass,
+     hatte am naechsten Tag die Karte von gestern.
+     Uebernehmen heisst: es ist in Arbeit. Es heisst NICHT "fertig gekocht" -
+     darum wird eine Karte, die schon auf "Fertig" steht, nicht wieder
+     zurueckgestuft. Nach unten korrigieren duerfen wir nie: die Kueche weiss
+     besser, was fertig ist, als die Fahrertuer. */
+  /* v300: Webshop-Auftraege werden ueber die Notiz uebernommen. */
+  const wsNotizSchreiben = (bon, nn) => {
+    setCompletedOrders(list => list.map(x => String(x.bonNr) === String(bon) ? { ...x, note: nn } : x));
+    if (typeof updateOrderNoteInSupabase === 'function') updateOrderNoteInSupabase(bon, nn);
+  };
+  const uebernehmen = (id) => {
+    if (String(id).indexOf('ws_') === 0) {
+      const bon = String(id).slice(3);
+      const o = (completedOrders || []).find(x => String(x.bonNr) === bon);
+      if (!o) return;
+      const nimmt = belksFahrerAusNotiz(o.note) !== ich;
+      let nn = belksFahrerNotiz(o.note, nimmt ? ich : null);
+      if (nimmt && kdsStageOf({ note: nn }) === 'new') nn = setKdsMarkerInNote(nn, 'working');
+      wsNotizSchreiben(bon, nn);
+      return;
+    }
+    setTakeaway(p => p.map(t => {
+    if (t.id !== id) return t;
+    const nimmt = t.fahrer !== ich;                       // sonst: abgeben
+    const st = t.kdsStatus || 'new';
+    return { ...t,
+      fahrer: nimmt ? ich : null,
+      fahrerZeit: new Date().toISOString(),
+      kdsStatus: (nimmt && st === 'new') ? 'working' : st };
+  }));
+  };
 
   const geliefert = (t) => {
     const vorschlag = summe(t).toFixed(2);
@@ -19320,8 +19462,23 @@ function FahrerView({ takeaway, setTakeaway, loggedInUser, printerSettings }) {
       vorschlag);
     if (ein === null) return;
     const bar = Math.max(0, parseFloat(String(ein).replace(",", ".")) || 0);
+    if (t._ws) {
+      /* v300: gleiche Wirkung wie bei Takeaway - ausgeliefert und zu. */
+      let nn = belksFahrerNotiz(t.note, ich);
+      nn = belksBarNotiz(nn, bar);
+      nn = setKdsMarkerInNote(nn, 'delivered');
+      wsNotizSchreiben(t.bonNr, nn);
+      return;
+    }
+    /* v299: Geliefert ist das Ende der Reise. Die Karte im KDS Pro geht auf
+       "ausgeliefert" und verschwindet - niemand muss sie ein zweites Mal von
+       Hand weiterschieben. Die Bestellung selbst bleibt vollstaendig
+       erhalten, samt kassiertem Bargeld fuer die Fahrerabrechnung. */
     setTakeaway(p => p.map(x => x.id === t.id
-      ? { ...x, geliefert: { von: ich, zeit: new Date().toISOString(), bar: bar } } : x));
+      ? { ...x,
+          geliefert: { von: ich, zeit: new Date().toISOString(), bar: bar },
+          kdsStatus: 'delivered',
+          kdsHidden: true } : x));
   };
 
   const knopf = (text, hg, farbe, onClick) => /*#__PURE__*/React.createElement("button", {
@@ -19399,6 +19556,33 @@ function FahrerView({ takeaway, setTakeaway, loggedInUser, printerSettings }) {
         style: { background: "#fff8e1", border: "2px solid #ffc107", borderRadius: 10, padding: "10px 12px",
                  marginTop: 8, fontSize: 12.5, color: "#795548", lineHeight: 1.5 }
       }, "\u2139\uFE0F Das Geld an der Kasse abgeben \u2013 dort werden die Bestellungen abgeschlossen und gebucht.")
+    ),
+
+    /* ═══ v301: ABRECHNUNG ABSCHLIESSEN ═══
+       Am Tagesende gibt der Fahrer das Bargeld ab. Danach sollen die Summen
+       wieder bei null stehen - sonst zaehlt die Ansicht morgen das Geld von
+       gestern mit und niemand traut ihr mehr.
+       Bewusst nur fuer Admin und Manager: wer selbst faehrt, soll nicht die
+       eigene Summe loeschen koennen, bevor das Geld in der Kasse liegt.
+       Und ebenso bewusst wird nur der Merkzettel geloescht - die
+       Bestellungen bleiben vollstaendig in der Bestellliste. Sie sind die
+       Buchfuehrung, sie duerfen nie verschwinden. */
+    darfAbrechnen && alleFertig.length > 0 && /*#__PURE__*/React.createElement("div", {
+      style: { marginTop: 22, borderTop: "1px solid #e0e0e0", paddingTop: 14 }
+    },
+      /*#__PURE__*/React.createElement("div", {
+        style: { fontSize: 12.5, color: "#666", marginBottom: 8, lineHeight: 1.5 }
+      }, "\uD83E\uDDFE ", alleFertig.length, " Lieferung(en) abgerechnet \u00B7 Bar gesamt ",
+         /*#__PURE__*/React.createElement("b", null, fmt(kasseGesamt))),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: abrechnungAbschliessen,
+        style: { width: "100%", padding: 12, borderRadius: 10, border: "2px solid #e65100",
+                 background: "#fff3e0", color: "#e65100", fontFamily: "inherit",
+                 fontWeight: 800, fontSize: 13.5, cursor: "pointer" }
+      }, "\uD83E\uDDFE Abrechnung abschlie\u00DFen \u2013 Summen auf null"),
+      /*#__PURE__*/React.createElement("div", {
+        style: { fontSize: 11.5, color: "#888", marginTop: 6, lineHeight: 1.5 }
+      }, "Setzt nur die Fahrersummen zur\u00FCck. Die Bestellungen bleiben vollst\u00E4ndig in der Bestellliste.")
     )
   );
 }
@@ -21124,7 +21308,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v295"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v301"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22055,7 +22239,12 @@ function App() {
           try {
             const bonLines = buildZahlungLines(ta.items||[], orderTotal, trinkgeld, payMethod);
             const delivery = ta.customerName ? {name:ta.customerName,phone:ta.customerPhone,street:ta.customerStreet,city:ta.customerCity} : null;
-            printBon("💳 ZAHLUNG — Takeaway", bonLines, ta.label||"Takeaway", _bonNr, new Date(), delivery, printerSettings, _tse, 'kunde');
+            /* v296: "Takeaway" allein sagt dem Fahrer und dem Gast nichts.
+               Auf dem Bon muss stehen, ob abgeholt oder geliefert wird. */
+            const _taTyp = ta.customerStreet ? "Lieferung" : "Abholung";
+            printBon("💳 ZAHLUNG — Takeaway " + _taTyp, bonLines,
+                     "Takeaway " + _taTyp + " #" + taId, _bonNr, new Date(),
+                     delivery, printerSettings, _tse, 'kunde');
           } catch(e){ console.warn("Bondruck:", e); }
         }
         // Auto Loyalty Points
@@ -22382,6 +22571,35 @@ function App() {
     return loggedInUser.role === "Admin" || loggedInUser.role === "Manager";
   };
   const doAbschluss = () => {
+    /* ═══ v298: ZUERST DEN KDS PRO SCHLIESSEN ═══
+       Der Abschluss leerte completedOrders nur auf diesem Geraet. Die Cloud
+       ist aber der Master und liefert die letzten SIEBEN TAGE zurueck - jede
+       Bestellung, die noch [KOCHT] oder [FERTIG] in der Notiz trug, stand
+       danach wieder im KDS Pro. Wer abends eine Karte vergessen hatte, fand
+       sie am naechsten Morgen erneut vor.
+       Darum: alles, was noch im KDS Pro haengt, wird beim Abschluss in der
+       CLOUD auf "ausgeliefert" gesetzt. Danach kann es nicht zurueckkommen.
+       Die Bestellung selbst bleibt vollstaendig erhalten - es aendert sich
+       nur die Bearbeitungs-Marke, nichts an Betrag, Artikeln oder TSE. */
+    try {
+      var _offen = (completedOrders || []).filter(function(o){ return isKdsActive(o); });
+      _offen.forEach(function(o){
+        /* v301: beim Abschluss auch die Fahrer-Merkzettel entfernen */
+        var nn = setKdsMarkerInNote(belksFahrerSpurenLoeschen(o.note), 'delivered');
+        if (typeof updateOrderNoteInSupabase === 'function') updateOrderNoteInSupabase(o.bonNr, nn);
+      });
+      /* Und die bereits ausgelieferten Webshop-Auftraege ebenso saeubern. */
+      try {
+        (completedOrders || []).forEach(function(o){
+          if (!o || isKdsActive(o)) return;
+          var alt = String(o.note || '');
+          if (alt.indexOf('[FAHRER:') < 0 && alt.indexOf('[BAR:') < 0) return;
+          var nn2 = belksFahrerSpurenLoeschen(alt);
+          if (typeof updateOrderNoteInSupabase === 'function') updateOrderNoteInSupabase(o.bonNr, nn2);
+        });
+      } catch(e2) {}
+      if (_offen.length) console.log('Tagesabschluss: ' + _offen.length + ' offene KDS-Karten geschlossen');
+    } catch(e) { console.warn('KDS-Abschluss:', e); }
     // 1) lokal archivieren + leeren
     const key = new Date().toLocaleDateString("de-DE");
     const arch = LS.get("eatdesi_archive", []) || [];
@@ -23246,22 +23464,32 @@ function App() {
            der KDS Pro schon benutzt, und damit auf allen Geraeten sichtbar. */
         const bon = String(id).slice(3);
         const o = (completedOrders || []).find(x => String(x.bonNr) === bon);
-        const nn = belksStationNotiz(o && o.note, "kueche");
+        /* v297: erst die Stations-Marke, dann daraus die KDS-Stufe */
+        const nn = setKdsMarkerInNote(
+          belksStationNotiz(o && o.note, "kueche"),
+          belksWebshopStufe(o, belksStationNotiz(o && o.note, "kueche"))
+        );
         setCompletedOrders(list => list.map(x => String(x.bonNr) === bon ? { ...x, note: nn } : x));
         if (typeof updateOrderNoteInSupabase === "function") updateOrderNoteInSupabase(bon, nn);
       } else if (String(id).startsWith("ta_")) {
         const taId = parseInt(String(id).replace("ta_", ""));
-        setTakeaway(t => t.map(x => x.id === taId ? {
-          ...x,
-          kitchenDone: true,
-          items: x.items.map(i => !isDrink(i) ? {...i, _kitchenSent: true} : i)
-        } : x));
+        setTakeaway(t => t.map(x => {
+          if (x.id !== taId) return x;
+          /* v297: istBar statt isDrink. Die Anzeige entscheidet mit istBar
+             (beachtet auch den handgesetzten Bon-Weg eines Artikels), das
+             Abhaken tat es mit isDrink (reine Steuerfrage). Ein Getraenk, das
+             auf "Kueche" gestellt war, wurde also angezeigt, liess sich aber
+             nie abhaken - es blieb ewig stehen. */
+          const ni = x.items.map(i => !istBar(i) ? {...i, _kitchenSent: true} : i);
+          return { ...x, kitchenDone: true, items: ni,
+                   kdsStatus: x.kdsStatus === 'delivered' ? 'delivered' : belksKdsStufeAus(ni) };
+        }));
       } else setTableOrders(p => ({
         ...p,
         [id]: {
           ...p[id],
           kitchenDone: true,
-          items: (p[id]?.items||[]).map(i => !isDrink(i) ? {...i, _kitchenSent: true} : i)
+          items: (p[id]?.items||[]).map(i => !istBar(i) ? {...i, _kitchenSent: true} : i)
         }
       }));
     }
@@ -23273,22 +23501,26 @@ function App() {
       if (String(id).startsWith("ws_")) {
         const bon = String(id).slice(3);
         const o = (completedOrders || []).find(x => String(x.bonNr) === bon);
-        const nn = belksStationNotiz(o && o.note, "bar");
+        const nn = setKdsMarkerInNote(
+          belksStationNotiz(o && o.note, "bar"),
+          belksWebshopStufe(o, belksStationNotiz(o && o.note, "bar"))
+        );
         setCompletedOrders(list => list.map(x => String(x.bonNr) === bon ? { ...x, note: nn } : x));
         if (typeof updateOrderNoteInSupabase === "function") updateOrderNoteInSupabase(bon, nn);
       } else if (String(id).startsWith("ta_")) {
         const taId = parseInt(String(id).replace("ta_", ""));
-        setTakeaway(t => t.map(x => x.id === taId ? {
-          ...x,
-          barDone: true,
-          items: x.items.map(i => isDrink(i) ? {...i, _barSent: true} : i)
-        } : x));
+        setTakeaway(t => t.map(x => {
+          if (x.id !== taId) return x;
+          const ni = x.items.map(i => istBar(i) ? {...i, _barSent: true} : i);
+          return { ...x, barDone: true, items: ni,
+                   kdsStatus: x.kdsStatus === 'delivered' ? 'delivered' : belksKdsStufeAus(ni) };
+        }));
       } else setTableOrders(p => ({
         ...p,
         [id]: {
           ...p[id],
           barDone: true,
-          items: (p[id]?.items||[]).map(i => isDrink(i) ? {...i, _barSent: true} : i)
+          items: (p[id]?.items||[]).map(i => istBar(i) ? {...i, _barSent: true} : i)
         }
       }));
     }
@@ -23331,6 +23563,8 @@ function App() {
   }), view === "fahrer" && /*#__PURE__*/React.createElement(FahrerView, {
     takeaway: takeaway,
     setTakeaway: setTakeaway,
+    completedOrders: completedOrders,
+    setCompletedOrders: setCompletedOrders,
     loggedInUser: loggedInUser,
     printerSettings: printerSettings
   }), view === "delivery" && /*#__PURE__*/React.createElement(DeliveryPersonView, {
@@ -26812,7 +27046,14 @@ async function pushOrderToSupabase(order) {
       body: JSON.stringify({
         location_id: LOCATION_ID,
         bon_nr: String(order.bonNr || ''),
-        table_id: String(order.tableId || order.id || ''),
+        /* ═══ v296 ═══
+           Hier stand: String(order.tableId || order.id || '').
+           Eine Takeaway-Bestellung hat KEINE tableId - also fiel die Zeile auf
+           order.id zurueck, die laufende Takeaway-Nummer. In der Datenbank
+           stand danach table_id="5", und beim Zurueckladen wurde daraus
+           "Tisch 5". So bekam eine Abholung im Kassenbuch einen Tisch, den es
+           nie gab. Jetzt steht dort, was es wirklich ist. */
+        table_id: belksAusserHausKennung(order),
         items: JSON.stringify(order.items || []),
         total: parseFloat(order.total) || 0,
         payment: order.payMethod || order.payment || 'bar',
@@ -26858,6 +27099,21 @@ async function updateOrderInSupabase(order) {
 
 // Online-Bestellung: nur das note-Feld aktualisieren (Annahme/Ablehnung).
 // newNote z.B. "[OK:30] · 🥡 ABHOLUNG ..." oder "[ABGELEHNT] ..."
+/* v296: Ein Name fuer Aussenbestellungen, der auch nach dem Zurueckladen
+   noch verstaendlich ist. Wird in table_id abgelegt - das Feld gibt es
+   bereits und es wird bereits synchronisiert. */
+function belksAusserHausKennung(order){
+  try {
+    var ta = order && (order.isTakeaway || String(order.label||'').indexOf('Takeaway')===0);
+    if (!ta) return String((order && order.tableId) || '');
+    var typ = (order.orderType === 'Lieferung' || order.customerStreet) ? 'Lieferung' : 'Abholung';
+    return 'Takeaway ' + typ;
+  } catch(e) { return String((order && order.tableId) || ''); }
+}
+/* Erkennt beim Zurueckladen, dass es gar kein Tisch war. */
+function belksIstAusserHaus(tid){
+  return typeof tid === 'string' && tid.indexOf('Takeaway') === 0;
+}
 async function updateOrderNoteInSupabase(bonNr, newNote) {
   if (!bonNr) return false;
   try {
@@ -27136,8 +27392,13 @@ function mergeRemoteOrders(remoteOrders) {
         return it;
       });
     } catch(e){}
+    /* v296: Steht "Takeaway ..." im Tischfeld, war es nie ein Tisch. */
+    var _ausser = belksIstAusserHaus(ro.table_id);
+    var _typ = _ausser ? (String(ro.table_id).indexOf('Lieferung') >= 0 ? 'Lieferung' : 'Abholung') : null;
     remoteByBon[String(ro.bon_nr || '')] = {
-      bonNr: ro.bon_nr, tableId: ro.table_id, items: items, total: ro.total,
+      bonNr: ro.bon_nr, tableId: _ausser ? null : ro.table_id, items: items, total: ro.total,
+      isTakeaway: _ausser || undefined, orderType: _typ || undefined,
+      label: _ausser ? ('Takeaway ' + _typ) : undefined,
       payMethod: ro.payment, customerName: ro.customer_name, customerPhone: ro.customer_phone,
       customerEmail: ro.customer_email || (function(){ try{ var m=(ro.note||'').match(/✉️\s*([^\s·]+@[^\s·]+)/); return m?m[1]:null; }catch(e){return null;} })(),
       customerStreet: ro.customer_street || null, note: ro.note || '',
