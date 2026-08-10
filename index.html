@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v301</title>
+<title>eatDeSi POS v302</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7868,6 +7868,21 @@ function isAcceptedOnline(o){ return o && typeof o.note === 'string' && o.note.i
 function onlinePrepMin(o){ try{ var m=(o.note||'').match(/\[OK:(\d+)\]/); return m?parseInt(m[1]):null; }catch(e){return null;} }
 function isOnlineDeliv(o){ return o && ((o.customerStreet) || (typeof o.note==='string' && o.note.indexOf('LIEFERUNG')!==-1) || (typeof o.tableId==='string' && o.tableId.indexOf('Lieferung')!==-1)); }
 
+/* v302: Kueche und Bar schrieben nur "Takeaway #1". Der Koch sah damit nicht,
+   ob das Essen abgeholt oder gefahren wird - im KDS Pro stand es laengst
+   richtig. Ab jetzt benutzen alle drei Ansichten dieselbe Beschriftung:
+   Typ (Lieferung/Abholung) + die richtige Nummer. */
+function belksTaLabel(t){
+  var deliv = !!(t && (t.orderType === 'Lieferung' || t.customerStreet));
+  return (deliv ? '\uD83D\uDEF5 Lieferung' : '\uD83E\uDD61 Abholung') + ' #' + ((t && t.id) || '');
+}
+function belksWsLabel(o){
+  var deliv = isOnlineDeliv(o);
+  var src = (o && o.source) || 'Webshop';
+  return '\uD83C\uDF10 ' + src + ((o && o.bonNr) ? (' ' + o.bonNr) : '') +
+         (deliv ? ' \u00B7 Lieferung' : ' \u00B7 Abholung');
+}
+
 // ===== KDS-STATUS über note-Marker (Single Source of Truth, sync zu Supabase -> Website liest mit) =====
 // Pipeline: [OK:min] (=Neu/akzeptiert) -> [KOCHT] -> [FERTIG] -> [GELIEFERT] (=erledigt/geschlossen)
 function kdsStageOf(o){
@@ -12878,13 +12893,13 @@ function KitchenView({
     kitchenDone: o.kitchenDone
   })), ...takeaway.filter(t => t.items?.length > 0 && !t.done).map(t => ({
     oid: `ta_${t.id}`,
-    label: `🥡 Takeaway #${t.id}`,
+    label: belksTaLabel(t),
     items: t.items.filter(i => isFood(i) && !i._kitchenSent),
     time: t.time,
     kitchenDone: t.kitchenDone
   })), ...(webshop || []).map(o => ({
     oid: `ws_${o.bonNr}`,
-    label: `\uD83C\uDF10 ${o.source || "Webshop"}${o.bonNr ? " " + o.bonNr : ""}`,
+    label: belksWsLabel(o),
     items: (o.items || []).filter(isFood),
     time: o.time || new Date(),
     kitchenDone: false
@@ -13030,13 +13045,13 @@ function BarView({
     barDone: o.barDone
   })), ...takeaway.filter(t => t.items?.length > 0 && !t.done).map(t => ({
     oid: `ta_${t.id}`,
-    label: `🥡 Takeaway #${t.id}`,
+    label: belksTaLabel(t),
     items: t.items.filter(i => istBar(i) && !i._barSent),
     time: t.time,
     barDone: t.barDone
   })), ...(webshop || []).map(o => ({
     oid: `ws_${o.bonNr}`,
-    label: `\uD83C\uDF10 ${o.source || "Webshop"}${o.bonNr ? " " + o.bonNr : ""}`,
+    label: belksWsLabel(o),
     items: (o.items || []).filter(i => istBar(i)),
     time: o.time || new Date(),
     barDone: false
@@ -18378,11 +18393,14 @@ function UserManagementView({
     onUpdate(bearbIdx, { ...u, name: nm, pin: p || u.pin, role: bRole });
     setBearbIdx(null);
   };
-  const ROLES = ["Kellner", "Küche", "Bar", "Manager", "Admin"];
+  /* v302: Der Fahrer ist eine eigene Aufgabe, keine Nebensache des
+     Kellners. Bar bleibt unveraendert bestehen. */
+  const ROLES = ["Kellner", "Küche", "Bar", "Fahrer", "Manager", "Admin"];
   const roleColors = {
     "Kellner": C.blue,
     "Küche": C.orange,
     "Bar": C.purple,
+    "Fahrer": "#00838f",
     "Manager": C.pink,
     "Admin": C.red
   };
@@ -21308,7 +21326,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v301"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v302"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21680,7 +21698,7 @@ function App() {
   }, []);
   const [loyaltySettings, setLoyaltySettings] = useState(() => LS.get("eatdesi_loyalty_settings", { pointsPerEuro:3, redeemRate:100, minRedeem:100, active:true }));
   const [happyHours, setHappyHours] = useState(() => LS.get("eatdesi_happyhours", []));
-  const [printerSettings, setPrinterSettings] = useState(() => { const saved = Object.assign({}, LS.get("eatdesi_printer", {}), (window.belksFirmaLesen ? window.belksFirmaLesen() : {})); const _isBW = (LOCATION_ID === "eatdesi-bw"); const _ti = window.TENANT_INFO || {}; const _tn = (typeof tenantDisplayName === "function") ? tenantDisplayName() : "eatDeSi"; const merged = Object.assign({ name: _isBW ? "eatDeSi" : _tn, address: _isBW ? "Brunnenallee 30 · 34537 Bad Wildungen" : ([_ti.street, _ti.city].filter(Boolean).join(" · ")), phone: _isBW ? "05621 9449087" : (_ti.phone || ""), footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: _isBW ? "Belks Direktvertrieb GmbH" : (_ti.name || _tn), firmaZusatz: _isBW ? "eatDeSi – Fusion Kitchen & Grill" : "", firmaStrasse: _isBW ? "Brunnenallee 30" : (_ti.street || ""), firmaPlzOrt: _isBW ? "34537 Bad Wildungen" : (_ti.city || ""), firmaStNr: _isBW ? "26/229/25450" : "", firmaUst: _isBW ? "DE361161517" : "", firmaGericht: _isBW ? "Amtsgericht Kassel" : "", firmaEmail: _isBW ? "eatdesi.bw@gmail.com" : "", firmaWeb: _isBW ? "www.eatdesi-bw.de" : "", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal", notifVolume: "laut", emailOn: true, emailServiceId: "service_b27x5h9", emailTemplateId: "template_6d8or1d", emailPublicKey: "eYBKtltVeOaq9pa0B", waOn: true, waAuto: true }, saved); if (!merged.emailServiceId) merged.emailServiceId = "service_b27x5h9"; if (!merged.emailTemplateId) merged.emailTemplateId = "template_6d8or1d"; if (!merged.emailPublicKey) merged.emailPublicKey = "eYBKtltVeOaq9pa0B"; if (!merged.width || merged.width < 384) merged.width = 384; return merged; });
+  const [printerSettings, setPrinterSettings] = useState(() => { const saved = Object.assign({}, (function(){ try{ return JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer")) || "{}" ) || {}; }catch(e){ return {}; } })(), (window.belksFirmaLesen ? window.belksFirmaLesen() : {})); const _isBW = (LOCATION_ID === "eatdesi-bw"); const _ti = window.TENANT_INFO || {}; const _tn = (typeof tenantDisplayName === "function") ? tenantDisplayName() : "eatDeSi"; const merged = Object.assign({ name: _isBW ? "eatDeSi" : _tn, address: _isBW ? "Brunnenallee 30 · 34537 Bad Wildungen" : ([_ti.street, _ti.city].filter(Boolean).join(" · ")), phone: _isBW ? "05621 9449087" : (_ti.phone || ""), footer: "Danke & bis bald! 🙏", width: 384, method: "browser", ip: "", copies: { gast: 1, kuche: 1, bar: 1 }, firmaName: _isBW ? "Belks Direktvertrieb GmbH" : (_ti.name || _tn), firmaZusatz: _isBW ? "eatDeSi – Fusion Kitchen & Grill" : "", firmaStrasse: _isBW ? "Brunnenallee 30" : (_ti.street || ""), firmaPlzOrt: _isBW ? "34537 Bad Wildungen" : (_ti.city || ""), firmaStNr: _isBW ? "26/229/25450" : "", firmaUst: _isBW ? "DE361161517" : "", firmaGericht: _isBW ? "Amtsgericht Kassel" : "", firmaEmail: _isBW ? "eatdesi.bw@gmail.com" : "", firmaWeb: _isBW ? "www.eatdesi-bw.de" : "", sumupMode: "same", geminiKey: "", aiLang: "de", bonFontSize: "normal", notifVolume: "laut", emailOn: true, emailServiceId: "service_b27x5h9", emailTemplateId: "template_6d8or1d", emailPublicKey: "eYBKtltVeOaq9pa0B", waOn: true, waAuto: true }, saved); if (!merged.emailServiceId) merged.emailServiceId = "service_b27x5h9"; if (!merged.emailTemplateId) merged.emailTemplateId = "template_6d8or1d"; if (!merged.emailPublicKey) merged.emailPublicKey = "eYBKtltVeOaq9pa0B"; if (!merged.width || merged.width < 384) merged.width = 384; return merged; });
   // ANFRAGE-Pull: Setter global verfügbar machen + alle 8s aus Cloud holen
   React.useEffect(() => {
     window._setWebRequests = setWebRequests;
