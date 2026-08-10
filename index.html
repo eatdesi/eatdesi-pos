@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v302</title>
+<title>eatDeSi POS v303</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7216,10 +7216,26 @@ function planVorgabe(ids){
   }
   return reihen.length ? reihen : [[null]];
 }
-function planLesen(){
+/* v303: Jeder Bereich (Innen, Aussen, Terrasse ...) hat seinen eigenen Plan.
+   Ohne Bereich bleibt alles beim alten Schluessel - vorhandene Plaene der
+   Restaurants gehen damit nicht verloren. */
+function planKey(bid){ return bid ? ('eatdesi_tischplan_' + bid) : 'eatdesi_tischplan'; }
+function belksTischListe(txt){
+  var out = [];
+  String(txt || '').split(',').forEach(function(teil){
+    teil = String(teil).trim(); if(!teil) return;
+    var m = teil.match(/^(\d+)\s*-\s*(\d+)$/);
+    if(m){ var a = +m[1], b = +m[2]; if(a > b){ var t = a; a = b; b = t; }
+           for(var i = a; i <= b; i++) out.push(i); }
+    else if(/^\d+$/.test(teil)) out.push(+teil);
+  });
   var ids = TABLES.map(function(t){ return t.id; });
+  return out.filter(function(v, i){ return out.indexOf(v) === i && ids.indexOf(v) >= 0; });
+}
+function planLesen(bid, idListe){
+  var ids = (idListe && idListe.length) ? idListe.slice() : TABLES.map(function(t){ return t.id; });
   var plan = null;
-  try{ plan = JSON.parse(localStorage.getItem('eatdesi_tischplan') || 'null'); }catch(e){}
+  try{ plan = JSON.parse(localStorage.getItem(planKey(bid)) || 'null'); }catch(e){}
   if(!Array.isArray(plan) || !plan.length) return planVorgabe(ids);
   // Nur Zeilen behalten, die auch Zeilen sind
   plan = plan.filter(function(r){ return Array.isArray(r); });
@@ -7246,8 +7262,8 @@ function planLesen(){
   }
   return plan;
 }
-function planSpeichern(plan){
-  try{ localStorage.setItem('eatdesi_tischplan', JSON.stringify(plan)); }catch(e){}
+function planSpeichern(plan, bid){
+  try{ localStorage.setItem(planKey(bid), JSON.stringify(plan)); }catch(e){}
   try{ window.dispatchEvent(new CustomEvent('belks_plan_neu')); }catch(e){}
 }
 window.planLesen = planLesen; window.planSpeichern = planSpeichern;
@@ -12135,6 +12151,7 @@ function TableView({
   onSelect,
   onNewTakeaway,
   floors,
+  setFloors,
   reservations
 }) {
   /* Zustand fuer den Tischplan. Muss HIER stehen - in v241 war er
@@ -12151,7 +12168,11 @@ function TableView({
   }, []);
   const todayIso = new Date().toISOString().slice(0, 10);
   const todayRes = (reservations || []).filter(r => r.date === todayIso);
-  const [viewMode, setViewMode] = React.useState("grid"); // grid | map
+  /* v303: Der Plan zeigt den Raum so, wie er wirklich aussieht - das ist
+     die Ansicht, mit der gearbeitet wird. Die Liste bleibt als Zweitweg. */
+  const [viewMode, setViewMode] = React.useState("map"); // map | grid
+  const [bereichIdx, setBereichIdx] = React.useState(0);
+  const [zieh, setZieh] = React.useState(null);
 
   const renderTable = (t) => {
     const order = orders[t.id];
@@ -12181,96 +12202,222 @@ function TableView({
     ) : tableRes.length === 0 && /*#__PURE__*/React.createElement("div", { style: { color: "#ccc", fontSize: 9, marginTop: 3 } }, "frei"));
   };
 
-  // Map view - Anordnung kommt aus dem gespeicherten Plan
+  // ── v303: BEREICHE + TISCHE ZIEHEN ──────────────────────────────────────
+  //  Bisher war der Plan EIN grosses Raster fuer das ganze Haus. Wer innen und
+  //  aussen bewirtet, sah beides untereinander und musste scrollen, um einen
+  //  Tisch zu finden. Jetzt zeigt der Plan immer GENAU EINEN Bereich, und die
+  //  Tische lassen sich mit dem Finger dorthin ziehen, wo sie wirklich stehen.
+  const bereicheBauen = () => {
+    const alle = TABLES.map(t => t.id);
+    const liste = [];
+    (floors || []).forEach(f => {
+      liste.push({
+        key: 'f' + f.id, fid: f.id, name: f.name || 'Bereich', icon: f.icon || "\uD83C\uDFE0",
+        ids: (f.tables || []).filter(id => alle.indexOf(id) >= 0).sort((a, b) => a - b)
+      });
+    });
+    if (!liste.length) return [{ key: null, fid: null, name: 'Alle Tische', icon: "\uD83E\uDE91", ids: alle }];
+    const zug = liste.reduce((s2, b) => s2.concat(b.ids), []);
+    const rest = alle.filter(id => zug.indexOf(id) < 0);
+    if (rest.length) liste.push({ key: 'rest', fid: null, name: 'Ohne Bereich', icon: "\uD83E\uDE91", ids: rest });
+    return liste;
+  };
+
+  const bereichNeu = () => {
+    const nm = window.prompt("Name des Bereichs (z.B. Innen, Au\u00DFen, Terrasse):", "");
+    if (!nm || !nm.trim()) return;
+    const tx = window.prompt("Welche Tische geh\u00F6ren hierher?\n\nz.B.  1-10   oder   1,2,5,8\n(leer lassen und sp\u00E4ter zuordnen)", "");
+    const ids = belksTischListe(tx);
+    if (typeof setFloors !== "function") { window.alert("Bereiche k\u00F6nnen hier gerade nicht angelegt werden."); return; }
+    /* Ein Tisch darf nur in EINEM Bereich stehen - sonst taucht er zweimal auf
+       und zwei Kellner buchen am selben Tisch, ohne es zu merken. */
+    setFloors(p => (p || []).map(f => Object.assign({}, f, {
+      tables: (f.tables || []).filter(id => ids.indexOf(id) < 0)
+    })).concat([{ id: Date.now(), name: nm.trim(), icon: "\uD83C\uDFE0", tables: ids, hidden: [] }]));
+    setBereichIdx((floors || []).length);
+  };
+
+  const bereichLoeschen = (b) => {
+    if (!b || !b.fid || typeof setFloors !== "function") return;
+    if (!window.confirm("Bereich \u201E" + b.name + "\u201C entfernen?\n\nDie Tische bleiben bestehen und stehen danach unter \u201EOhne Bereich\u201C.")) return;
+    setFloors(p => (p || []).filter(f => f.id !== b.fid));
+    setBereichIdx(0);
+  };
+
   const renderMapView = () => {
-    const rows = planLesen();
+    const bereiche = bereicheBauen();
+    const b = bereiche[Math.min(bereichIdx, bereiche.length - 1)] || bereiche[0];
+    const rows = planLesen(b.key, b.ids);
+
     const tausche = (ri, ci) => {
-      const p = planLesen().map(r => r.slice());
-      if(!planWahl){ if(p[ri][ci] !== null) setPlanWahl({ri, ci}); return; }
-      if(planWahl.ri === ri && planWahl.ci === ci){ setPlanWahl(null); return; }
+      const p = planLesen(b.key, b.ids).map(r => r.slice());
+      if (!planWahl) { if (p[ri][ci] !== null) setPlanWahl({ ri, ci }); return; }
+      if (planWahl.ri === ri && planWahl.ci === ci) { setPlanWahl(null); return; }
       const a = p[planWahl.ri][planWahl.ci];
       p[planWahl.ri][planWahl.ci] = p[ri][ci];
       p[ri][ci] = a;
-      planSpeichern(p); setPlanWahl(null);
+      planSpeichern(p, b.key); setPlanWahl(null);
     };
-    return React.createElement("div", { style:{ padding:8 } },
+
+    // -- Ziehen: der Finger nimmt den Tisch mit, losgelassen wird getauscht --
+    const zellePos = (el) => {
+      while (el && el.nodeType !== 1) el = el.parentNode;
+      while (el && !el.getAttribute("data-zelle")) el = el.parentElement;
+      if (!el) return null;
+      const teile = String(el.getAttribute("data-zelle")).split(",");
+      return { ri: parseInt(teile[0], 10), ci: parseInt(teile[1], 10) };
+    };
+    const zeigerRunter = (ri, ci, ev) => {
+      if (!planEdit) return;
+      try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch (e) {}
+      setZieh({ ri: ri, ci: ci, sx: ev.clientX, sy: ev.clientY, mx: ev.clientX, my: ev.clientY, bewegt: false });
+    };
+    const zeigerBewegt = (ev) => {
+      setZieh(z => {
+        if (!z) return z;
+        const weit = Math.abs(ev.clientX - z.sx) > 8 || Math.abs(ev.clientY - z.sy) > 8;
+        return Object.assign({}, z, { mx: ev.clientX, my: ev.clientY, bewegt: z.bewegt || weit });
+      });
+    };
+    const zeigerHoch = (ri, ci, ev) => {
+      const z = zieh;
+      setZieh(null);
+      if (!z) return;
+      if (!z.bewegt) { tausche(ri, ci); return; }   // reiner Tipp: alte Tausch-Logik
+      let ziel = null;
+      try { ziel = zellePos(document.elementFromPoint(ev.clientX, ev.clientY)); } catch (e) {}
+      if (!ziel || (ziel.ri === z.ri && ziel.ci === z.ci)) return;
+      const p = planLesen(b.key, b.ids).map(r => r.slice());
+      if (!p[z.ri] || !p[ziel.ri]) return;
+      const a = p[z.ri][z.ci];
+      p[z.ri][z.ci] = p[ziel.ri][ziel.ci];
+      p[ziel.ri][ziel.ci] = a;
+      planSpeichern(p, b.key); setPlanWahl(null);
+    };
+
+    const zellStil = { width: 52, height: 52, borderRadius: 8, display: "flex", flexDirection: "column",
+                       alignItems: "center", justifyContent: "center", fontSize: 10 };
+
+    return React.createElement("div", { style: { padding: 8 } },
+      // ---- Bereiche ----
+      React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap", alignItems: "center" } },
+        bereiche.map((bx, bi) =>
+          React.createElement("button", {
+            key: bx.key || ("b" + bi),
+            onClick: () => { setBereichIdx(bi); setPlanWahl(null); },
+            style: { padding: "7px 13px", borderRadius: 20, cursor: "pointer", fontFamily: "inherit",
+                     fontWeight: 700, fontSize: 12.5,
+                     border: "2px solid " + (bi === bereichIdx ? C.green : "#ddd"),
+                     background: bi === bereichIdx ? "#e8f5e9" : "#fff",
+                     color: bi === bereichIdx ? C.green : "#666" }
+          }, bx.icon + " " + bx.name + " (" + bx.ids.length + ")")
+        ),
+        planEdit && React.createElement("button", {
+          onClick: bereichNeu,
+          style: { padding: "7px 13px", borderRadius: 20, border: "2px dashed #bbb", background: "#fff",
+                   color: "#666", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12.5 }
+        }, "\u2795 Bereich"),
+        planEdit && b.fid && React.createElement("button", {
+          onClick: () => bereichLoeschen(b),
+          style: { padding: "7px 11px", borderRadius: 20, border: "2px solid #ffcdd2", background: "#fff",
+                   color: "#c62828", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12.5 }
+        }, "\uD83D\uDDD1 " + b.name)
+      ),
       // ---- Bearbeiten-Leiste ----
-      React.createElement("div", { style:{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap", alignItems:"center" } },
-        React.createElement("button", { onClick:()=>{ setPlanEdit(e=>!e); setPlanWahl(null); },
-          style:{ padding:"8px 14px", borderRadius:9, border:"none", cursor:"pointer", fontFamily:"inherit",
-                  fontWeight:700, fontSize:12.5, background: planEdit ? C.green : "#eee", color: planEdit ? "#fff" : "#555" }
+      React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap", alignItems: "center" } },
+        React.createElement("button", { onClick: () => { setPlanEdit(e => !e); setPlanWahl(null); setZieh(null); },
+          style: { padding: "8px 14px", borderRadius: 9, border: "none", cursor: "pointer", fontFamily: "inherit",
+                   fontWeight: 700, fontSize: 12.5, background: planEdit ? C.green : "#eee", color: planEdit ? "#fff" : "#555" }
         }, planEdit ? "\u2705 Fertig" : "\u270F\uFE0F Plan bearbeiten"),
-        planEdit && React.createElement("button", { onClick:()=>{ const p=planLesen().map(r=>r.slice()); p.push([null,null,null,null,null]); planSpeichern(p); },
-          style:{ padding:"8px 12px", borderRadius:9, border:"1.5px solid #ddd", background:"#fff", color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
-        }, "\u2795 Durchgang"),
-        planEdit && React.createElement("button", { onClick:()=>{ const p=planLesen().map(r=>r.slice()); p.push([null,null,null,null,null]); planSpeichern(p); },
-          style:{ padding:"8px 12px", borderRadius:9, border:"1.5px solid #ddd", background:"#fff", color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
+        planEdit && React.createElement("button", { onClick: () => { const p = planLesen(b.key, b.ids).map(r => r.slice()); p.push([null, null, null, null, null]); planSpeichern(p, b.key); },
+          style: { padding: "8px 12px", borderRadius: 9, border: "1.5px solid #ddd", background: "#fff", color: "#555", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12 }
         }, "\u2795 Reihe"),
-        planEdit && React.createElement("button", { onClick:()=>{ if(window.confirm("Plan auf die Vorgabe zur\u00FCcksetzen?\nAlle Tische, f\u00FCnf pro Reihe.")){ try{ localStorage.removeItem('eatdesi_tischplan'); }catch(e){} try{ window.dispatchEvent(new CustomEvent('belks_plan_neu')); }catch(e){} setPlanWahl(null); } },
-          style:{ padding:"8px 12px", borderRadius:9, border:"1.5px solid #ffcdd2", background:"#fff", color:"#c62828", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
+        planEdit && React.createElement("button", { onClick: () => { if (window.confirm("Plan dieses Bereichs auf die Vorgabe zur\u00FCcksetzen?\nAlle Tische, f\u00FCnf pro Reihe.")) { try { localStorage.removeItem(planKey(b.key)); } catch (e) {} try { window.dispatchEvent(new CustomEvent('belks_plan_neu')); } catch (e) {} setPlanWahl(null); } },
+          style: { padding: "8px 12px", borderRadius: 9, border: "1.5px solid #ffcdd2", background: "#fff", color: "#c62828", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12 }
         }, "\u21BA Vorgabe")
       ),
-      planEdit && React.createElement("div", { style:{ background:"#e3f2fd", border:"2px solid #1565c0", borderRadius:10, padding:"9px 12px", marginBottom:10, fontSize:12.5, color:"#0d47a1", lineHeight:1.5 } },
+      planEdit && React.createElement("div", { style: { background: "#e3f2fd", border: "2px solid #1565c0", borderRadius: 10, padding: "9px 12px", marginBottom: 10, fontSize: 12.5, color: "#0d47a1", lineHeight: 1.5 } },
         planWahl
-          ? "\uD83D\uDC46 Jetzt das Ziel antippen \u2013 die beiden tauschen den Platz. (Leerer Platz = dorthin schieben)"
-          : "Tisch antippen, dann das Ziel antippen. Mit \u2795 Reihe / Durchgang wird der Raum nachgebaut."),
-      // Legend
-      React.createElement("div", { style:{ display:"flex", gap:8, marginBottom:10, flexWrap:"wrap" } },
-        [["#fff","#ddd","Frei"],["#fce4ec",C.pink,"Belegt"],["#e8f5e9",C.green,"BON"],["#fff8e1",C.orange,"Reserviert"]].map(([bg,border,label]) =>
-          React.createElement("div", { key:label, style:{ display:"flex", alignItems:"center", gap:4, fontSize:10 } },
-            React.createElement("div", { style:{ width:14, height:14, background:bg, border:`2px solid ${border}`, borderRadius:3 } }),
-            React.createElement("span", { style:{ color:"#666" } }, label)
+          ? "\uD83D\uDC46 Jetzt das Ziel antippen \u2013 die beiden tauschen den Platz."
+          : "Tisch mit dem Finger an seinen Platz ZIEHEN. Antippen geht auch: erst der Tisch, dann das Ziel."),
+      // Legende
+      React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" } },
+        [["#fff", "#ddd", "Frei"], ["#fce4ec", C.pink, "Belegt"], ["#e8f5e9", C.green, "BON"], ["#fff8e1", C.orange, "Reserviert"]].map(([bg, border, label]) =>
+          React.createElement("div", { key: label, style: { display: "flex", alignItems: "center", gap: 4, fontSize: 10 } },
+            React.createElement("div", { style: { width: 14, height: 14, background: bg, border: "2px solid " + border, borderRadius: 3 } }),
+            React.createElement("span", { style: { color: "#666" } }, label)
           )
         )
       ),
-      React.createElement("div", { style:{ background:"#f5f0e8", borderRadius:12, padding:10, border:"2px solid #d7ccc8" } },
-        React.createElement("div", { style:{ textAlign:"center", fontSize:10, color:"#a1887f", fontWeight:700, marginBottom:8, letterSpacing:2 } }, "🚪 EINGANG"),
+      React.createElement("div", { style: { background: "#f5f0e8", borderRadius: 12, padding: 10, border: "2px solid #d7ccc8" } },
+        React.createElement("div", { style: { textAlign: "center", fontSize: 10, color: "#a1887f", fontWeight: 700, marginBottom: 8, letterSpacing: 2 } }, "\uD83D\uDEAA EINGANG"),
+        b.ids.length === 0 && React.createElement("div", { style: { textAlign: "center", color: "#a1887f", fontSize: 12, padding: "18px 6px", lineHeight: 1.6 } },
+          "Diesem Bereich ist noch kein Tisch zugeordnet.", React.createElement("br", null),
+          "\u2630 Men\u00FC \u2192 Floors / Bereiche"),
         rows.map((row, ri) =>
-          React.createElement("div", { key:ri, style:{ display:"flex", gap:6, marginBottom:6, justifyContent:"center", flexWrap:"wrap" } },
+          React.createElement("div", { key: ri, style: { display: "flex", gap: 6, marginBottom: 6, justifyContent: "center", flexWrap: "wrap" } },
             (row.every(v => v === null) && !planEdit)
-              ? React.createElement("div", { style:{ height:8, width:"100%", background:"rgba(0,0,0,.05)", borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center" } },
-                  React.createElement("span", { style:{ fontSize:8, color:"#bbb" } }, "— Durchgang —")
+              ? React.createElement("div", { style: { height: 8, width: "100%", background: "rgba(0,0,0,.05)", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center" } },
+                  React.createElement("span", { style: { fontSize: 8, color: "#bbb" } }, "\u2014 Durchgang \u2014")
                 )
               : row.map((tid, ci) => {
                 if (tid === null) {
-                  // Leerer Platz: im Bearbeiten-Modus antippbar, sonst nur Luecke
+                  // Leerer Platz: im Bearbeiten-Modus Ziel zum Ablegen, sonst nur Luecke
                   return React.createElement("div", {
-                    key:"l"+ci,
-                    onClick: planEdit ? (()=>tausche(ri, ci)) : undefined,
-                    style:{ width:52, height:planEdit?52:8, borderRadius:8,
-                            border: planEdit ? "2px dashed #bbb" : "none",
-                            background: planEdit ? "rgba(0,0,0,.02)" : "transparent",
-                            cursor: planEdit ? "pointer" : "default",
-                            display:"flex", alignItems:"center", justifyContent:"center",
-                            fontSize:10, color:"#bbb" }
+                    key: "l" + ci,
+                    "data-zelle": ri + "," + ci,
+                    onClick: planEdit ? (() => tausche(ri, ci)) : undefined,
+                    style: Object.assign({}, zellStil, {
+                      height: planEdit ? 52 : 8,
+                      border: planEdit ? "2px dashed #bbb" : "none",
+                      background: planEdit ? "rgba(0,0,0,.02)" : "transparent",
+                      cursor: planEdit ? "pointer" : "default",
+                      color: "#bbb"
+                    })
                   }, planEdit ? "+" : null);
                 }
-                const t = TABLES.find(x=>x.id===tid);
+                const t = TABLES.find(x => x.id === tid);
                 if (!t) return null;
                 const order = orders[t.id];
                 const has = order?.items?.length > 0;
                 const saved = order?.saved;
-                const res = todayRes.filter(r=>String(r.tableId)===String(t.id));
-                const total = has ? order.items.reduce((s,i)=>s+i.finalPrice*i.qty,0) : 0;
+                const res = todayRes.filter(r => String(r.tableId) === String(t.id));
+                const total = has ? order.items.reduce((s2, i) => s2 + i.finalPrice * i.qty, 0) : 0;
                 const gewaehlt = planEdit && planWahl && planWahl.ri === ri && planWahl.ci === ci;
-                return React.createElement("div", {
-                  key:tid, onClick:()=> planEdit ? tausche(ri, ci) : onSelect(t.id),
-                  style:{ width:52, height:52, background: gewaehlt ? "#e3f2fd" : (saved?"#e8f5e9":has?"#fce4ec":res.length>0?"#fff8e1":"#fff"),
-                    border:`${gewaehlt?3:2}px solid ${gewaehlt?"#1565c0":(saved?C.green:has?C.pink:res.length>0?C.orange:"#d7ccc8")}`,
-                    borderRadius:8, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-                    boxShadow:"0 1px 3px #0002", fontSize:10
-                  }
-                },
-                  React.createElement("div", { style:{ fontWeight:800, color:saved?C.green:has?C.pink:"#888", fontSize:12 } }, t.id),
-                  has ? React.createElement("div", { style:{ color:saved?C.green:C.pink, fontSize:9, fontWeight:700 } }, fmt(total))
-                    : res.length>0 ? React.createElement("div", { style:{ color:C.orange, fontSize:8 } }, "📅")
-                    : React.createElement("div", { style:{ color:"#ccc", fontSize:8 } }, "frei")
+                const inHand = zieh && zieh.bewegt && zieh.ri === ri && zieh.ci === ci;
+                return React.createElement("div", Object.assign({
+                  key: tid,
+                  "data-zelle": ri + "," + ci,
+                  style: Object.assign({}, zellStil, {
+                    background: gewaehlt ? "#e3f2fd" : (saved ? "#e8f5e9" : has ? "#fce4ec" : res.length > 0 ? "#fff8e1" : "#fff"),
+                    border: (gewaehlt ? 3 : 2) + "px solid " + (gewaehlt ? "#1565c0" : (saved ? C.green : has ? C.pink : res.length > 0 ? C.orange : "#d7ccc8")),
+                    cursor: "pointer", boxShadow: "0 1px 3px #0002",
+                    opacity: inHand ? 0.35 : 1,
+                    touchAction: planEdit ? "none" : "auto"
+                  })
+                }, planEdit
+                  ? { onPointerDown: (ev) => zeigerRunter(ri, ci, ev),
+                      onPointerMove: zeigerBewegt,
+                      onPointerUp: (ev) => zeigerHoch(ri, ci, ev),
+                      onPointerCancel: () => setZieh(null) }
+                  : { onClick: () => onSelect(t.id) }),
+                  React.createElement("div", { style: { fontWeight: 800, color: saved ? C.green : has ? C.pink : "#888", fontSize: 12 } }, t.id),
+                  has ? React.createElement("div", { style: { color: saved ? C.green : C.pink, fontSize: 9, fontWeight: 700 } }, fmt(total))
+                    : res.length > 0 ? React.createElement("div", { style: { color: C.orange, fontSize: 8 } }, "\uD83D\uDCC5")
+                    : React.createElement("div", { style: { color: "#ccc", fontSize: 8 } }, "frei")
                 );
               })
           )
         ),
-        React.createElement("div", { style:{ textAlign:"center", fontSize:10, color:"#a1887f", fontWeight:700, marginTop:8, letterSpacing:2 } }, "🍳 KÜCHE")
-      )
+        React.createElement("div", { style: { textAlign: "center", fontSize: 10, color: "#a1887f", fontWeight: 700, marginTop: 8, letterSpacing: 2 } }, "\uD83C\uDF73 K\u00DCCHE")
+      ),
+      // Der Tisch, der gerade am Finger haengt
+      zieh && zieh.bewegt && React.createElement("div", {
+        style: { position: "fixed", left: zieh.mx - 26, top: zieh.my - 26, width: 52, height: 52,
+                 borderRadius: 8, background: "#fff", border: "3px solid #1565c0", boxShadow: "0 4px 14px #0004",
+                 display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800,
+                 color: "#1565c0", fontSize: 14, pointerEvents: "none", zIndex: 4000 }
+      }, (rows[zieh.ri] || [])[zieh.ci])
     );
   };
 
@@ -19588,10 +19735,8 @@ function FahrerView({ takeaway, setTakeaway, completedOrders, setCompletedOrders
     darfAbrechnen && alleFertig.length > 0 && /*#__PURE__*/React.createElement("div", {
       style: { marginTop: 22, borderTop: "1px solid #e0e0e0", paddingTop: 14 }
     },
-      /*#__PURE__*/React.createElement("div", {
-        style: { fontSize: 12.5, color: "#666", marginBottom: 8, lineHeight: 1.5 }
-      }, "\uD83E\uDDFE ", alleFertig.length, " Lieferung(en) abgerechnet \u00B7 Bar gesamt ",
-         /*#__PURE__*/React.createElement("b", null, fmt(kasseGesamt))),
+      /* v303: Die Zwischensumme stand doppelt - oben im gruenen Balken steht
+         bereits, was kassiert wurde. Hier bleibt nur der Knopf. */
       /*#__PURE__*/React.createElement("button", {
         onClick: abrechnungAbschliessen,
         style: { width: "100%", padding: 12, borderRadius: 10, border: "2px solid #e65100",
@@ -21326,7 +21471,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v302"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v303"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21355,21 +21500,22 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
         "4\uFE0F\u20E3 \uD83C\uDF10 Webshop-Einstellungen: \u00d6ffnungszeiten & Liefergebiet")
     ) : null,
 
-    // Stats Grid
-    React.createElement("div", { style:{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" } },
+    /* v303: Die Kacheln standen in einer umbrechenden Reihe - "Bestellungen"
+       rutschte allein in die zweite Zeile und sah aus wie ein Fehler.
+       Jetzt ein festes Raster: immer zwei nebeneinander. */
+    React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:12, marginBottom:16 } },
       pendingOnlineOrders.length > 0 && card("🔔", "Online NEU", pendingOnlineOrders.length, "#e53935", "Annehmen!", () => setView("online_orders")),
       card("🪑", "Tische", openTables.length, C2.green, openTables.length + " belegt", () => setView("tables")),
-      card("🥡", "Takeaway", activeTakeaway.length > 0 ? activeTakeaway.length : "+", C2.blue, activeTakeaway.length > 0 ? activeTakeaway.length + " aktiv" : "Neue Bestellung", () => activeTakeaway.length > 0 ? setShowTaList(true) : setShowTaCustomerSearch(true)),
-      card("📋", "Bestellungen", todayOrders.length, C2.red, "Heute", null)
+      card("🥡", "Takeaway", activeTakeaway.length > 0 ? activeTakeaway.length : "+", C2.blue, activeTakeaway.length > 0 ? activeTakeaway.length + " aktiv" : "Neue Bestellung", () => activeTakeaway.length > 0 ? setShowTaList(true) : setShowTaCustomerSearch(true))
     ),
 
     // Quick Actions
     React.createElement("div", { style:{ background:"#fff", borderRadius:16, padding:"18px", marginBottom:16, boxShadow:"0 2px 8px #0001" } },
       React.createElement("div", { style:{ fontWeight:700, fontSize:14, marginBottom:14, color:"#333" } }, "⚡ Schnellzugriff"),
       React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10 } },
+        /* v303: Tische und Takeaway standen doppelt auf der Startseite -
+           einmal als Kachel oben, einmal hier. Hier fliegen sie raus. */
         [
-          { icon:"🪑", label:"Tische", id:"tables" },
-          { icon:"🥡", label:"Takeaway", id:"takeaway_new" },
           { icon:"🍳", label:"Küche", id:"kitchen" },
           { icon:"🍺", label:"Bar", id:"bar" },
           { icon:"🍳", label:"KDS Pro", id:"kds_pro" },
@@ -21412,19 +21558,28 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       )
     ),
 
-    // Active Takeaways
-    activeTakeaway.length > 0 && React.createElement("div", { style:{ background:"#fff", borderRadius:16, padding:"18px", marginBottom:16, boxShadow:"0 2px 8px #0001" } },
-      React.createElement("div", { style:{ fontWeight:700, fontSize:14, marginBottom:12, color:"#333" } }, "🥡 Offene Takeaways (" + activeTakeaway.length + ")"),
-      React.createElement("div", { style:{ display:"flex", flexWrap:"wrap", gap:8 } },
-        activeTakeaway.map(ta => React.createElement("div", {
-          key: ta.id,
-          onClick: () => openTable("ta_"+ta.id),
-          style:{ background:"#e3f2fd", border:"2px solid #1565c0", borderRadius:12, padding:"10px 14px", minWidth:80, textAlign:"center", cursor:"pointer" }
-        },
-          React.createElement("div", { style:{ fontWeight:700, color:"#1565c0", fontSize:14 } }, "#" + ta.id),
-          React.createElement("div", { style:{ fontSize:12, color:"#888", marginTop:2 } }, ta.customerName || "Gast"),
-          React.createElement("div", { style:{ fontSize:11, color:"#aaa", marginTop:1 } }, (ta.items||[]).length + " Pos.")
-        ))
+    /* v303: "Bestellungen heute" und "Offene Takeaways" standen als zwei
+       breite Bloecke untereinander und schoben alles nach unten. Jetzt
+       nebeneinander in einer Reihe - wie Tische und Takeaway darueber. */
+    React.createElement("div", { style:{ display:"grid", gridTemplateColumns: activeTakeaway.length > 0 ? "repeat(2,1fr)" : "1fr", gap:12, marginBottom:16 } },
+      React.createElement("div", { style:{ background:"#fff", borderRadius:16, padding:"18px", boxShadow:"0 2px 8px #0001" } },
+        React.createElement("div", { style:{ fontWeight:700, fontSize:14, marginBottom:12, color:"#333" } }, "📋 Bestellungen"),
+        React.createElement("div", { style:{ fontSize:30, fontWeight:800, color:C2.red, lineHeight:1 } }, todayOrders.length),
+        React.createElement("div", { style:{ fontSize:12, color:"#888", marginTop:4 } }, "Heute")
+      ),
+      activeTakeaway.length > 0 && React.createElement("div", { style:{ background:"#fff", borderRadius:16, padding:"18px", boxShadow:"0 2px 8px #0001" } },
+        React.createElement("div", { style:{ fontWeight:700, fontSize:14, marginBottom:12, color:"#333" } }, "🥡 Offene Takeaways (" + activeTakeaway.length + ")"),
+        React.createElement("div", { style:{ display:"flex", flexWrap:"wrap", gap:8 } },
+          activeTakeaway.map(ta => React.createElement("div", {
+            key: ta.id,
+            onClick: () => openTable("ta_"+ta.id),
+            style:{ background:"#e3f2fd", border:"2px solid #1565c0", borderRadius:12, padding:"10px 14px", minWidth:80, textAlign:"center", cursor:"pointer" }
+          },
+            React.createElement("div", { style:{ fontWeight:700, color:"#1565c0", fontSize:14 } }, "#" + ta.id),
+            React.createElement("div", { style:{ fontSize:12, color:"#888", marginTop:2 } }, ta.customerName || "Gast"),
+            React.createElement("div", { style:{ fontSize:11, color:"#aaa", marginTop:1 } }, (ta.items||[]).length + " Pos.")
+          ))
+        )
       )
     ),
 
@@ -23460,6 +23615,7 @@ function App() {
     onSelect: openTable,
     onNewTakeaway: () => setShowTaCustomerSearch(true),
     floors: floors,
+    setFloors: setFloors,
     reservations: reservations
   }), view === "order" && activeTable && /*#__PURE__*/React.createElement(OrderView, {
     tableId: activeTable,
