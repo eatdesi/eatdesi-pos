@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v293</title>
+<title>eatDeSi POS v295</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7891,6 +7891,35 @@ function setKdsMarkerInNote(note, stage){
 // Order ist im KDS aktiv (akzeptiert, aber noch nicht erledigt/geschlossen)
 function isKdsActive(o){ var s=kdsStageOf(o); return s && s!=='delivered'; }
 
+/* ═══ v295: WEBSHOP AUF KUECHE UND BAR ═══
+   Webshop-Bestellungen liefen bisher NUR in den KDS Pro. In einer Kueche mit
+   nur einem Bildschirm heisst das: der Koch sieht sie nie, wenn er auf dem
+   Kuechen-Monitor arbeitet. Ab jetzt erscheinen sie dort ebenso wie Tisch und
+   Takeaway.
+   Kueche und Bar sind getrennte Stationen - eine einzige Stufe (KOCHT/FERTIG)
+   kann nicht ausdruecken, dass die Kueche fertig ist und die Bar noch nicht.
+   Darum je Station eine eigene Marke in der Notiz. Die Notiz wird bereits
+   ueber updateOrderNoteInSupabase auf alle Geraete verteilt - kein neuer,
+   ungetesteter Weg. setKdsMarkerInNote entfernt nur KOCHT/FERTIG/GELIEFERT,
+   diese Marken bleiben also erhalten. */
+function belksStationMarke(station){ return station==='bar' ? '[BAR-OK]' : '[KUECHE-OK]'; }
+function belksStationFertig(o, station){
+  var n = (o && typeof o.note==='string') ? o.note : '';
+  return n.indexOf(belksStationMarke(station)) !== -1;
+}
+function belksStationNotiz(note, station){
+  var c = String(note||''), m = belksStationMarke(station);
+  return c.indexOf(m) !== -1 ? c : (c + ' ' + m).trim();
+}
+/* Die noch offenen Webshop-Auftraege einer Station. */
+function belksWebshopOffen(completedOrders, station){
+  try {
+    return (completedOrders||[]).filter(function(o){
+      return isKdsActive(o) && !belksStationFertig(o, station);
+    });
+  } catch(e) { return []; }
+}
+
 // KANAL eines Auftrags bestimmen (für Finanzamt-getrennte Umsatzauswertung).
 function orderChannel(o){
   if(!o) return 'tisch';
@@ -12769,6 +12798,7 @@ function OrderView({
 function KitchenView({
   orders,
   takeaway,
+  webshop,
   onMarkDone
 }) {
   const isFood = item => !istBar(item);
@@ -12785,6 +12815,12 @@ function KitchenView({
     items: t.items.filter(i => isFood(i) && !i._kitchenSent),
     time: t.time,
     kitchenDone: t.kitchenDone
+  })), ...(webshop || []).map(o => ({
+    oid: `ws_${o.bonNr}`,
+    label: `\uD83C\uDF10 ${o.source || "Webshop"}${o.bonNr ? " " + o.bonNr : ""}`,
+    items: (o.items || []).filter(isFood),
+    time: o.time || new Date(),
+    kitchenDone: false
   }))].filter(o => o.items.length > 0);
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -12916,6 +12952,7 @@ function KitchenView({
 function BarView({
   orders,
   takeaway,
+  webshop,
   onMarkDone
 }) {
   const all = [...Object.entries(orders).filter(([, o]) => o?.items?.length > 0).map(([id, o]) => ({
@@ -12930,6 +12967,12 @@ function BarView({
     items: t.items.filter(i => istBar(i) && !i._barSent),
     time: t.time,
     barDone: t.barDone
+  })), ...(webshop || []).map(o => ({
+    oid: `ws_${o.bonNr}`,
+    label: `\uD83C\uDF10 ${o.source || "Webshop"}${o.bonNr ? " " + o.bonNr : ""}`,
+    items: (o.items || []).filter(i => istBar(i)),
+    time: o.time || new Date(),
+    barDone: false
   }))].filter(o => o.items.length > 0);
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -21081,7 +21124,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v293"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v295"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22184,8 +22227,10 @@ function App() {
       items: []
     };
   };
-  const pendingKitchen = Object.values(tableOrders).filter(o => o?.items?.some(i => !isDrink(i) && !i._kitchenSent)).length + takeaway.filter(t => t.items?.some(i => !isDrink(i) && !i._kitchenSent) && !t.done).length;
-  const pendingBar = Object.values(tableOrders).filter(o => o?.items?.some(i => isDrink(i) && !i._barSent)).length + takeaway.filter(t => t.items?.some(i => isDrink(i) && !i._barSent) && !t.done).length;
+  /* v295: Der Webshop zaehlt jetzt mit. Eine Zahl am Reiter, die den Webshop
+     verschweigt, ist schlimmer als gar keine - der Koch verlaesst sich darauf. */
+  const pendingKitchen = Object.values(tableOrders).filter(o => o?.items?.some(i => !isDrink(i) && !i._kitchenSent)).length + takeaway.filter(t => t.items?.some(i => !isDrink(i) && !i._kitchenSent) && !t.done).length + belksWebshopOffen(completedOrders, "kueche").filter(o => (o.items||[]).some(i => !isDrink(i))).length;
+  const pendingBar = Object.values(tableOrders).filter(o => o?.items?.some(i => isDrink(i) && !i._barSent)).length + takeaway.filter(t => t.items?.some(i => isDrink(i) && !i._barSent) && !t.done).length + belksWebshopOffen(completedOrders, "bar").filter(o => (o.items||[]).some(i => isDrink(i))).length;
   const active = Object.values(tableOrders).filter(o => o?.items?.length > 0).length + takeaway.filter(t => t.items?.length > 0 && !t.done).length;
   const MENU_ITEMS = [{
     id: "dashboard",
@@ -23194,8 +23239,17 @@ function App() {
   }), view === "kitchen" && /*#__PURE__*/React.createElement(KitchenView, {
     orders: tableOrders,
     takeaway: takeaway,
+    webshop: belksWebshopOffen(completedOrders, "kueche"),
     onMarkDone: id => {
-      if (String(id).startsWith("ta_")) {
+      if (String(id).startsWith("ws_")) {
+        /* v295: Webshop wird ueber die Notiz abgehakt - derselbe Weg, den
+           der KDS Pro schon benutzt, und damit auf allen Geraeten sichtbar. */
+        const bon = String(id).slice(3);
+        const o = (completedOrders || []).find(x => String(x.bonNr) === bon);
+        const nn = belksStationNotiz(o && o.note, "kueche");
+        setCompletedOrders(list => list.map(x => String(x.bonNr) === bon ? { ...x, note: nn } : x));
+        if (typeof updateOrderNoteInSupabase === "function") updateOrderNoteInSupabase(bon, nn);
+      } else if (String(id).startsWith("ta_")) {
         const taId = parseInt(String(id).replace("ta_", ""));
         setTakeaway(t => t.map(x => x.id === taId ? {
           ...x,
@@ -23214,8 +23268,15 @@ function App() {
   }), view === "bar" && /*#__PURE__*/React.createElement(BarView, {
     orders: tableOrders,
     takeaway: takeaway,
+    webshop: belksWebshopOffen(completedOrders, "bar"),
     onMarkDone: id => {
-      if (String(id).startsWith("ta_")) {
+      if (String(id).startsWith("ws_")) {
+        const bon = String(id).slice(3);
+        const o = (completedOrders || []).find(x => String(x.bonNr) === bon);
+        const nn = belksStationNotiz(o && o.note, "bar");
+        setCompletedOrders(list => list.map(x => String(x.bonNr) === bon ? { ...x, note: nn } : x));
+        if (typeof updateOrderNoteInSupabase === "function") updateOrderNoteInSupabase(bon, nn);
+      } else if (String(id).startsWith("ta_")) {
         const taId = parseInt(String(id).replace("ta_", ""));
         setTakeaway(t => t.map(x => x.id === taId ? {
           ...x,
@@ -26104,18 +26165,18 @@ function KdsProView({ tableOrders, takeaway, setTableOrders, completedOrders, se
     };
   });
 
-  // 3) TISCH: aus tableOrders, Status im Feld kdsStatus (Default 'new')
-  var tableTickets = Object.entries(tableOrders||{}).filter(function(e){ return (e[1].items||[]).length>0 && !e[1].kdsHidden; }).map(function(e){
-    var tableId=e[0], order=e[1];
-    return {
-      id:'table_'+tableId, kind:'table', tableId:tableId,
-      source:'🪑 Tisch '+tableId,
-      items: order.items||[], status: order.kdsStatus || 'new',
-      time: order.time||new Date().toISOString()
-    };
-  });
-
-  var allTickets = onlineTickets.concat(taTickets).concat(tableTickets);
+  /* 3) TISCHE: ab v294 NICHT mehr hier.
+     Frueher liefen Tisch, Takeaway und Webshop alle in diesen einen Monitor.
+     Das ergab ein Durcheinander, in dem niemand mehr sah, was wohin gehoert -
+     und der Tisch stand hier ein zweites Mal, obwohl Kueche und Bar ihn
+     laengst richtig anzeigen.
+     Die Aufteilung ist jetzt nach ORT, nicht nach Ware:
+       Kueche / Bar  = was gemacht werden muss (Tisch und Takeaway)
+       KDS Pro       = was das Haus verlaesst (Takeaway und Webshop):
+                       wohin es geht, ob bezahlt ist, wer es faehrt.
+     Die Behandlung von kind==='table' bleibt weiter unten stehen: sollte
+     irgendwo noch ein altes Ticket auftauchen, laeuft es nicht ins Leere. */
+  var allTickets = onlineTickets.concat(taTickets);
 
   // Beim Ausliefern einer Online-Bestellung wird vor Ort kassiert -> TSE-Pflicht.
   // Erzeugt die TSE-Signatur (wie completeOrder) genau einmal, sofern noch keine
@@ -26192,7 +26253,7 @@ function KdsProView({ tableOrders, takeaway, setTableOrders, completedOrders, se
 
   return R.createElement('div', {style:{padding:12,overflowY:'auto',height:'calc(100vh - 90px)'}},
     R.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}},
-      R.createElement('div', {style:{fontWeight:800,fontSize:17,color:'#C84B31'}}, '🍳 KDS Pro - Küchenmonitor'),
+      R.createElement('div', {style:{fontWeight:800,fontSize:17,color:'#C84B31'}}, '🥟 KDS Pro — Außer Haus'),
       R.createElement('div',{style:{fontSize:12,color:'#888'}}, allTickets.length+' aktive Tickets')
     ),
     R.createElement('div', {style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}},
