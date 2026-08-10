@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v292</title>
+<title>eatDeSi POS v293</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21081,7 +21081,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v292"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v293"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27327,7 +27327,16 @@ function _zeileGleich(a, b){
   return (a.qty === b.qty)
       && (String(a.note||'') === String(b.note||''))
       && (String(a.kitchenNote||'') === String(b.kitchenNote||''))
-      && (Number(a.finalPrice||0) === Number(b.finalPrice||0));
+      && (Number(a.finalPrice||0) === Number(b.finalPrice||0))
+      /* v293: Auch das Abhaken in Kueche und Bar ist eine Aenderung.
+         Vorher stand es nicht in dieser Liste - "Serviert" bekam deshalb
+         KEINE neue Zeit, und der Abgleich hielt die Zeile fuer unveraendert.
+         Das andere Geraet hatte dieselbe Zeile mit derselben Zeit, nur ohne
+         Marke - und bei Gleichstand gewann die unservierte Fassung. Das
+         Getraenk tauchte in der Bar wieder auf und wurde ein zweites Mal
+         gemacht. */
+      && (!!a._barSent === !!b._barSent)
+      && (!!a._kitchenSent === !!b._kitchenSent);
 }
 
 /* Vergibt Kennungen und Zeitstempel. alt = Stand vor dieser Aenderung. */
@@ -27381,18 +27390,34 @@ function belksZeilenMischen(a, b, geloescht, aIstNeuer){
   a = Array.isArray(a) ? a : [];
   b = Array.isArray(b) ? b : [];
   geloescht = geloescht || {};
-  var raus = {}, ohneA = [], ohneB = [];
+  var raus = {}, ohneA = [], ohneB = [], serviert = {};
   function rein(z, ausA){
     if (!z) return;
     if (!z._iid) { (ausA ? ohneA : ohneB).push(z); return; }   // Altbestand ohne Kennung
     var tot = geloescht[z._iid] || 0;
     if (tot && tot >= (z._ts || 0)) return;           // geloescht und seitdem nicht angefasst
+    /* v293: Abhaken ist nicht umkehrbar. Was auf IRGENDEINEM Geraet einmal
+       serviert war, bleibt serviert - unabhaengig davon, welche Fassung der
+       Zeile sonst gewinnt. Sonst kann eine spaetere Mengenaenderung ein
+       laengst ausgeschenktes Getraenk in der Bar wieder auftauchen lassen. */
+    var s = serviert[z._iid] || (serviert[z._iid] = { bar:false, kueche:false });
+    if (z._barSent) s.bar = true;
+    if (z._kitchenSent) s.kueche = true;
     var vorhanden = raus[z._iid];
     if (!vorhanden || (z._ts || 0) > (vorhanden._ts || 0)) raus[z._iid] = z;
   }
   a.forEach(function(z){ rein(z, true); });
   b.forEach(function(z){ rein(z, false); });
-  var liste = Object.keys(raus).map(function(k){ return raus[k]; });
+  var liste = Object.keys(raus).map(function(k){
+    var z = raus[k], s = serviert[k];
+    if (!s) return z;
+    if ((s.bar && !z._barSent) || (s.kueche && !z._kitchenSent)) {
+      z = Object.assign({}, z);
+      if (s.bar)    z._barSent = true;
+      if (s.kueche) z._kitchenSent = true;
+    }
+    return z;
+  });
 
   /* Zeilen aus der Zeit vor v290 haben keine Kennung. Beide Geraete haben
      dieselben Zeilen als getrennte Objekte - ohne Zusammenfassung wuerde der
