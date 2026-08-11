@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v303</title>
+<title>eatDeSi POS v307</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7236,7 +7236,9 @@ function planLesen(bid, idListe){
   var ids = (idListe && idListe.length) ? idListe.slice() : TABLES.map(function(t){ return t.id; });
   var plan = null;
   try{ plan = JSON.parse(localStorage.getItem(planKey(bid)) || 'null'); }catch(e){}
-  if(!Array.isArray(plan) || !plan.length) return planVorgabe(ids);
+  /* v305: Kein vorzeitiges Ende mehr - auch der Vorgabeplan bekommt unten
+     seinen freien Platz. */
+  if(!Array.isArray(plan) || !plan.length) plan = planVorgabe(ids);
   // Nur Zeilen behalten, die auch Zeilen sind
   plan = plan.filter(function(r){ return Array.isArray(r); });
   // Tische, die es nicht mehr gibt, verschwinden; neue kommen hinten dazu.
@@ -7260,6 +7262,21 @@ function planLesen(bid, idListe){
     // Rest als neue Reihen anhaengen
     while(fehlen.length) plan.push(fehlen.splice(0, 5));
   }
+  /* ═══ v305: FREIER PLATZ ═══
+     Bisher war das Raster genau so gross wie die Tischzahl: 30 Tische,
+     30 Plaetze. Zum Umstellen fehlte dann jeder freie Platz - man konnte
+     nur tauschen, nie einen Raum wirklich nachbauen.
+     Regel ab jetzt: mindestens DOPPELT so viele Plaetze wie Tische.
+     10 Tische -> Platz fuer 20, 30 Tische -> Platz fuer 60. */
+  var BREITE = 5;
+  plan = plan.map(function(r){
+    var rr = r.slice();
+    while(rr.length < BREITE) rr.push(null);
+    return rr;
+  });
+  var plaetze = plan.reduce(function(sum, r){ return sum + r.length; }, 0);
+  var noetig = Math.max(ids.length * 2, BREITE * 4);
+  while(plaetze < noetig){ plan.push([null, null, null, null, null]); plaetze += BREITE; }
   return plan;
 }
 function planSpeichern(plan, bid){
@@ -11900,9 +11917,123 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
 }
 
 // --- BACKUP & RESTORE --------------------------------------------------------
+/* ═══ v306: TAGESEXPORT ═══
+   Fuer die Sicherung neben der Cloud. Bewusst NUR abgeschlossene, bezahlte
+   Bestellungen - keine Kunden, keine Mitarbeiter, keine Einstellungen.
+   Damit ist die Datei auch dann unbedenklich, wenn sie auf einer SD-Karte
+   oder einem USB-Stick liegt. */
+function belksTagVon(o){
+  try{
+    var d = new Date(o && o.time);
+    if(isNaN(d.getTime())) return "";
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  }catch(e){ return ""; }
+}
+function belksBezahlt(o){
+  /* Abgeschlossen ist eine Bestellung erst mit Zahlungsart. Stornos gehoeren
+     nicht in die Tagessicherung. */
+  if(!o || o.storniert) return false;
+  return !!(o.payMethod || o.bonNr);
+}
+function belksOrderSumme(o){
+  if(o && typeof o.total === "number") return o.total;
+  try{ return (o.items||[]).reduce(function(s2,i){ return s2 + (i.finalPrice||0) * (i.qty||0); }, 0); }
+  catch(e){ return 0; }
+}
+/* v307: Der Export haengt jetzt am Tagesabschluss. Damit nichts doppelt
+   gepflegt wird, bauen Abschluss, Nachhol-Banner und der Knopf im Backup
+   alle dieselbe Datei ueber diese eine Stelle. */
+function belksExportPaket(orders, bezeichnung){
+  var loc = "pos";
+  try{ loc = localStorage.getItem("eatdesi_location_id") || "pos"; }catch(e){}
+  var liste = (orders || []).filter(belksBezahlt);
+  var summe = liste.reduce(function(s2, o){ return s2 + belksOrderSumme(o); }, 0);
+  return {
+    loc: loc,
+    anzahl: liste.length,
+    summe: Math.round(summe * 100) / 100,
+    inhalt: {
+      typ: "belks_bestellungen",
+      restaurant: loc,
+      zeitraum: bezeichnung,
+      erstellt: new Date().toISOString(),
+      anzahl: liste.length,
+      summe: Math.round(summe * 100) / 100,
+      bestellungen: liste
+    }
+  };
+}
+/* Speichert den Tag und meldet zurueck, ob etwas zu speichern war. */
+function belksTagSichern(orders, tagText, dateiTeil){
+  var pk = belksExportPaket(orders, tagText);
+  if(!pk.anzahl) return { ok: true, anzahl: 0 };
+  try{
+    belksDateiSpeichern("belks_bestellungen_" + pk.loc + "_" + dateiTeil + ".json",
+                        JSON.stringify(pk.inhalt, null, 2));
+    return { ok: true, anzahl: pk.anzahl, summe: pk.summe };
+  }catch(e){ return { ok: false, anzahl: pk.anzahl }; }
+}
+/* Merkzettel: welcher Tag wurde noch nicht als Datei gesichert?
+   Der Auto-Abschluss um 04:00 kann keine Datei schreiben - dort wird nur
+   dieser Merkzettel gesetzt und morgens auf der Startseite angezeigt. */
+function belksExportOffenSetzen(datumDe){
+  try{ localStorage.setItem("eatdesi_export_offen", JSON.stringify(datumDe)); }catch(e){}
+}
+function belksExportOffenLesen(){
+  try{ var v = localStorage.getItem("eatdesi_export_offen"); return v ? JSON.parse(v) : null; }catch(e){ return null; }
+}
+function belksExportOffenLoeschen(){
+  try{ localStorage.removeItem("eatdesi_export_offen"); }catch(e){}
+}
+/* Holt die Bestellungen eines abgeschlossenen Tages aus dem Archiv zurueck. */
+function belksArchivTag(datumDe){
+  try{
+    var arch = JSON.parse(localStorage.getItem("eatdesi_archive") || "[]") || [];
+    var treffer = arch.filter(function(a){ return a && a.date === datumDe; });
+    if(!treffer.length) return [];
+    return treffer[treffer.length - 1].orders || [];
+  }catch(e){ return []; }
+}
+/* 11.8.2026 -> 2026-08-11 (fuer den Dateinamen) */
+function belksDeZuIso(datumDe){
+  var t = String(datumDe || "").split(".");
+  if(t.length !== 3) return String(datumDe || "");
+  return t[2] + "-" + String(t[1]).padStart(2, "0") + "-" + String(t[0]).padStart(2, "0");
+}
+
+function belksDateiSpeichern(name, inhalt){
+  var blob = new Blob([inhalt], { type: "application/json" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+}
+
 function BackupView({ data, onRestore }) {
   const [restoreText, setRestoreText] = React.useState("");
   const [msg, setMsg] = React.useState("");
+  const [tag, setTag] = React.useState(() => belksTagVon({ time: new Date() }));
+  const [tagMsg, setTagMsg] = React.useState("");
+  const alleBezahlt = (data.orders || []).filter(belksBezahlt);
+  const tagOrders = alleBezahlt.filter(o => belksTagVon(o) === tag);
+  const monatOrders = alleBezahlt.filter(o => belksTagVon(o).slice(0, 7) === String(tag).slice(0, 7));
+  const summe = (liste) => liste.reduce((s2, o) => s2 + belksOrderSumme(o), 0);
+  const tagExport = (liste, bezeichnung, dateiTeil) => {
+    if (!liste.length) { setTagMsg("\u2139\uFE0F F\u00FCr " + bezeichnung + " gibt es keine bezahlten Bestellungen."); return; }
+    let loc = "pos";
+    try { loc = localStorage.getItem("eatdesi_location_id") || "pos"; } catch (e) {}
+    const paket = {
+      typ: "belks_bestellungen",
+      restaurant: loc,
+      zeitraum: bezeichnung,
+      erstellt: new Date().toISOString(),
+      anzahl: liste.length,
+      summe: Math.round(summe(liste) * 100) / 100,
+      bestellungen: liste
+    };
+    belksDateiSpeichern("belks_bestellungen_" + loc + "_" + dateiTeil + ".json", JSON.stringify(paket, null, 2));
+    setTagMsg("\u2705 " + liste.length + " Bestellung(en) \u00B7 " + fmt(summe(liste)) + " gespeichert (Ordner \"Downloads\").");
+  };
   const lsKeys = ["eatdesi_orders","eatdesi_expenses","eatdesi_customers","eatdesi_inventory","eatdesi_drivers","eatdesi_floors","eatdesi_users","eatdesi_menu","eatdesi_printer"];
   const lsSize = lsKeys.reduce((s,k)=>{ try{return s+(localStorage.getItem(k)||"").length;}catch{return s;} },0);
   const exportAll = () => {
@@ -11929,6 +12060,35 @@ function BackupView({ data, onRestore }) {
   };
   return /*#__PURE__*/React.createElement("div", { style:{ padding:14, overflowY:"auto", height:"calc(100vh - 90px)" } },
     /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, color:C.green, fontSize:15, marginBottom:14 } }, "\uD83D\uDCBE Backup & Restore"),
+
+    // ── v306: Tagesexport: nur bezahlte Bestellungen ────────────────────
+    /*#__PURE__*/React.createElement("div", { style:{ background:"#e3f2fd", borderRadius:12, padding:14, marginBottom:12, border:"2px solid #90caf9" } },
+      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, marginBottom:6, color:"#0d47a1" } }, "\uD83D\uDCC5 Tagesexport \u2014 nur bezahlte Bestellungen"),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#555", marginBottom:10, lineHeight:1.5 } },
+        "Nur abgeschlossene, bezahlte Bestellungen \u2014 keine Kunden, keine Mitarbeiter, keine Einstellungen. Zum Ablegen auf SD-Karte, USB-Stick oder Google Drive."),
+      /*#__PURE__*/React.createElement("input", {
+        type: "date", value: tag,
+        onChange: e => { setTag(e.target.value); setTagMsg(""); },
+        style: { width:"100%", padding:10, borderRadius:9, border:"1.5px solid #90caf9", fontFamily:"inherit", fontSize:14, boxSizing:"border-box", marginBottom:10 }
+      }),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#0d47a1", marginBottom:10 } },
+        "\uD83D\uDCC6 Dieser Tag: ", /*#__PURE__*/React.createElement("b", null, tagOrders.length), " Bestellung(en) \u00B7 ", /*#__PURE__*/React.createElement("b", null, fmt(summe(tagOrders))),
+        " \u2014 Monat: ", /*#__PURE__*/React.createElement("b", null, monatOrders.length), " \u00B7 ", /*#__PURE__*/React.createElement("b", null, fmt(summe(monatOrders)))),
+      /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8 } },
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => tagExport(tagOrders, tag, tag),
+          style: { flex:2, padding:12, borderRadius:10, border:"none", background:"#1565c0", color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13.5 }
+        }, "\u2B07\uFE0F Tag speichern"),
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => tagExport(monatOrders, "Monat " + String(tag).slice(0,7), String(tag).slice(0,7)),
+          style: { flex:1, padding:12, borderRadius:10, border:"1.5px solid #1565c0", background:"#fff", color:"#1565c0", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13.5 }
+        }, "\uD83D\uDCC1 Monat")
+      ),
+      tagMsg && /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, marginTop:8, color:"#0d47a1" } }, tagMsg),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#607d8b", marginTop:8, lineHeight:1.5 } },
+        "\u2139\uFE0F Ersetzt weder TSE noch die Cloud \u2014 es ist eine zus\u00E4tzliche Sicherung. Das automatische Schreiben auf die SD-Karte kommt mit der echten Android-App.")
+    ),
+
     /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:12, padding:14, marginBottom:12, border:"2px solid #a5d6a7" } },
       /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, marginBottom:8 } }, "\uD83D\uDCE4 Export (Backup erstellen)"),
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#555", marginBottom:10 } }, "Alle Daten als JSON-Datei. LocalStorage: ", (lsSize/1024).toFixed(1), " KB"),
@@ -12172,7 +12332,95 @@ function TableView({
      die Ansicht, mit der gearbeitet wird. Die Liste bleibt als Zweitweg. */
   const [viewMode, setViewMode] = React.useState("map"); // map | grid
   const [bereichIdx, setBereichIdx] = React.useState(0);
-  const [zieh, setZieh] = React.useState(null);
+
+  /* ── v304: ZIEHEN MIT DEM FINGER ──────────────────────────────────────
+     v303 benutzte React-Zeigerereignisse. Auf dem Tablet passierte damit
+     nichts: React haengt touchmove als "passiv" an, dort laesst sich das
+     Scrollen NICHT verhindern - der Browser scrollt, und der Tisch bleibt
+     liegen. Deshalb jetzt echte Ereignisse direkt am Plan, mit
+     passive:false. Der Schwebe-Tisch wird per Ref bewegt, nicht ueber
+     React-Zustand: bei 100 Tischen waere ein Neuaufbau pro Fingerbewegung
+     viel zu langsam. */
+  const planRef = React.useRef(null);
+  const geistRef = React.useRef(null);
+  const editRef = React.useRef(false);
+  const bezugRef = React.useRef({ key: null, ids: [] });
+  /* Nach dem Loslassen schickt der Browser noch einen Klick hinterher.
+     Ohne Sperre waere der gezogene Tisch danach faelschlich "ausgewaehlt". */
+  const klickSperre = React.useRef(0);
+  editRef.current = planEdit;
+
+  React.useEffect(() => {
+    const el = planRef.current;
+    if (!el || viewMode !== "map") return;
+    let z = null;
+    const zelleAus = (n) => {
+      while (n && n.nodeType !== 1) n = n.parentNode;
+      while (n && !n.getAttribute("data-zelle")) n = n.parentElement;
+      if (!n) return null;
+      const teile = String(n.getAttribute("data-zelle")).split(",");
+      return { ri: parseInt(teile[0], 10), ci: parseInt(teile[1], 10), tid: n.getAttribute("data-tisch") };
+    };
+    const punkt = (e) => (e.touches && e.touches.length) ? e.touches[0]
+                       : (e.changedTouches && e.changedTouches.length) ? e.changedTouches[0] : e;
+    const geistZeigen = (x, y, tid) => {
+      const g = geistRef.current; if (!g) return;
+      g.style.display = "flex"; g.style.left = (x - 28) + "px"; g.style.top = (y - 28) + "px";
+      g.textContent = tid == null ? "" : String(tid);
+    };
+    const geistWeg = () => { const g = geistRef.current; if (g) g.style.display = "none"; };
+
+    const start = (e) => {
+      if (!editRef.current) return;
+      const zl = zelleAus(e.target);
+      if (!zl || zl.tid == null) return;          // leerer Platz: nur antippen
+      const pk = punkt(e);
+      z = { ri: zl.ri, ci: zl.ci, tid: zl.tid, sx: pk.clientX, sy: pk.clientY, bewegt: false };
+    };
+    const bewegen = (e) => {
+      if (!z) return;
+      const pk = punkt(e);
+      if (!z.bewegt && (Math.abs(pk.clientX - z.sx) > 8 || Math.abs(pk.clientY - z.sy) > 8)) z.bewegt = true;
+      if (!z.bewegt) return;
+      if (e.cancelable) e.preventDefault();       // sonst scrollt die Seite weg
+      geistZeigen(pk.clientX, pk.clientY, z.tid);
+    };
+    const ende = (e) => {
+      const zz = z; z = null; geistWeg();
+      if (!zz || !zz.bewegt) return;              // reiner Tipp: der Klick macht den Rest
+      klickSperre.current = Date.now();
+      const pk = punkt(e);
+      let ziel = null;
+      try { ziel = zelleAus(document.elementFromPoint(pk.clientX, pk.clientY)); } catch (x) {}
+      if (!ziel || (ziel.ri === zz.ri && ziel.ci === zz.ci)) return;
+      const bez = bezugRef.current || { key: null, ids: [] };
+      const pl = planLesen(bez.key, bez.ids).map(r => r.slice());
+      if (!pl[zz.ri] || !pl[ziel.ri]) return;
+      const a = pl[zz.ri][zz.ci];
+      pl[zz.ri][zz.ci] = pl[ziel.ri][ziel.ci];
+      pl[ziel.ri][ziel.ci] = a;
+      planSpeichern(pl, bez.key);
+      setPlanWahl(null);
+    };
+    const abbruch = () => { z = null; geistWeg(); };
+
+    el.addEventListener("touchstart", start, { passive: true });
+    el.addEventListener("touchmove", bewegen, { passive: false });
+    el.addEventListener("touchend", ende);
+    el.addEventListener("touchcancel", abbruch);
+    el.addEventListener("mousedown", start);
+    window.addEventListener("mousemove", bewegen);
+    window.addEventListener("mouseup", ende);
+    return () => {
+      el.removeEventListener("touchstart", start);
+      el.removeEventListener("touchmove", bewegen);
+      el.removeEventListener("touchend", ende);
+      el.removeEventListener("touchcancel", abbruch);
+      el.removeEventListener("mousedown", start);
+      window.removeEventListener("mousemove", bewegen);
+      window.removeEventListener("mouseup", ende);
+    };
+  }, [viewMode]);
 
   const renderTable = (t) => {
     const order = orders[t.id];
@@ -12247,9 +12495,25 @@ function TableView({
   const renderMapView = () => {
     const bereiche = bereicheBauen();
     const b = bereiche[Math.min(bereichIdx, bereiche.length - 1)] || bereiche[0];
-    const rows = planLesen(b.key, b.ids);
+    const rowsRoh = planLesen(b.key, b.ids);
+    bezugRef.current = { key: b.key, ids: b.ids };
+    /* Der freie Platz wird nur beim Bearbeiten gebraucht. Im Alltag soll der
+       Gastraum kompakt dastehen - sonst scrollt der Kellner an leeren
+       Kaesten vorbei, um Tisch 30 zu finden. Die Reihen-/Spaltennummern
+       bleiben dabei gleich, weil nur HINTEN abgeschnitten wird. */
+    let rows = rowsRoh;
+    if (!planEdit) {
+      let letzte = -1;
+      rowsRoh.forEach((r, i) => { if (r.some(v => v !== null)) letzte = i; });
+      rows = rowsRoh.slice(0, letzte + 1).map(r => {
+        let e = r.length;
+        while (e > 0 && r[e - 1] === null) e--;
+        return r.slice(0, e);
+      });
+    }
 
     const tausche = (ri, ci) => {
+      if (Date.now() - klickSperre.current < 500) return;   // kam vom Ziehen
       const p = planLesen(b.key, b.ids).map(r => r.slice());
       if (!planWahl) { if (p[ri][ci] !== null) setPlanWahl({ ri, ci }); return; }
       if (planWahl.ri === ri && planWahl.ci === ci) { setPlanWahl(null); return; }
@@ -12259,101 +12523,48 @@ function TableView({
       planSpeichern(p, b.key); setPlanWahl(null);
     };
 
-    // -- Ziehen: der Finger nimmt den Tisch mit, losgelassen wird getauscht --
-    const zellePos = (el) => {
-      while (el && el.nodeType !== 1) el = el.parentNode;
-      while (el && !el.getAttribute("data-zelle")) el = el.parentElement;
-      if (!el) return null;
-      const teile = String(el.getAttribute("data-zelle")).split(",");
-      return { ri: parseInt(teile[0], 10), ci: parseInt(teile[1], 10) };
-    };
-    const zeigerRunter = (ri, ci, ev) => {
-      if (!planEdit) return;
-      try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch (e) {}
-      setZieh({ ri: ri, ci: ci, sx: ev.clientX, sy: ev.clientY, mx: ev.clientX, my: ev.clientY, bewegt: false });
-    };
-    const zeigerBewegt = (ev) => {
-      setZieh(z => {
-        if (!z) return z;
-        const weit = Math.abs(ev.clientX - z.sx) > 8 || Math.abs(ev.clientY - z.sy) > 8;
-        return Object.assign({}, z, { mx: ev.clientX, my: ev.clientY, bewegt: z.bewegt || weit });
-      });
-    };
-    const zeigerHoch = (ri, ci, ev) => {
-      const z = zieh;
-      setZieh(null);
-      if (!z) return;
-      if (!z.bewegt) { tausche(ri, ci); return; }   // reiner Tipp: alte Tausch-Logik
-      let ziel = null;
-      try { ziel = zellePos(document.elementFromPoint(ev.clientX, ev.clientY)); } catch (e) {}
-      if (!ziel || (ziel.ri === z.ri && ziel.ci === z.ci)) return;
-      const p = planLesen(b.key, b.ids).map(r => r.slice());
-      if (!p[z.ri] || !p[ziel.ri]) return;
-      const a = p[z.ri][z.ci];
-      p[z.ri][z.ci] = p[ziel.ri][ziel.ci];
-      p[ziel.ri][ziel.ci] = a;
-      planSpeichern(p, b.key); setPlanWahl(null);
-    };
-
     const zellStil = { width: 52, height: 52, borderRadius: 8, display: "flex", flexDirection: "column",
                        alignItems: "center", justifyContent: "center", fontSize: 10 };
+    /* v304: Der Kopf nahm den halben Bildschirm ein - genau den Platz, den
+       man zum Verschieben braucht. Kleine Knoepfe, eine Zeile, und der
+       Hinweis nur als schmale Zeile waehrend des Bearbeitens. */
+    const miniKnopf = (rand, farbe) => ({ padding: "5px 10px", borderRadius: 16, cursor: "pointer",
+      fontFamily: "inherit", fontWeight: 700, fontSize: 11.5, border: "1.5px solid " + rand,
+      background: "#fff", color: farbe, whiteSpace: "nowrap" });
 
-    return React.createElement("div", { style: { padding: 8 } },
-      // ---- Bereiche ----
-      React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap", alignItems: "center" } },
+    return React.createElement("div", { style: { padding: "4px 8px 8px" } },
+      // ---- eine Zeile: Bereiche + Werkzeuge ----
+      React.createElement("div", { style: { display: "flex", gap: 5, marginBottom: 6, flexWrap: "wrap", alignItems: "center" } },
         bereiche.map((bx, bi) =>
           React.createElement("button", {
             key: bx.key || ("b" + bi),
             onClick: () => { setBereichIdx(bi); setPlanWahl(null); },
-            style: { padding: "7px 13px", borderRadius: 20, cursor: "pointer", fontFamily: "inherit",
-                     fontWeight: 700, fontSize: 12.5,
-                     border: "2px solid " + (bi === bereichIdx ? C.green : "#ddd"),
+            style: { padding: "5px 11px", borderRadius: 16, cursor: "pointer", fontFamily: "inherit",
+                     fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap",
+                     border: "1.5px solid " + (bi === bereichIdx ? C.green : "#ddd"),
                      background: bi === bereichIdx ? "#e8f5e9" : "#fff",
-                     color: bi === bereichIdx ? C.green : "#666" }
-          }, bx.icon + " " + bx.name + " (" + bx.ids.length + ")")
+                     color: bi === bereichIdx ? C.green : "#777" }
+          }, bx.icon + " " + bx.name + " " + bx.ids.length)
         ),
-        planEdit && React.createElement("button", {
-          onClick: bereichNeu,
-          style: { padding: "7px 13px", borderRadius: 20, border: "2px dashed #bbb", background: "#fff",
-                   color: "#666", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12.5 }
-        }, "\u2795 Bereich"),
-        planEdit && b.fid && React.createElement("button", {
-          onClick: () => bereichLoeschen(b),
-          style: { padding: "7px 11px", borderRadius: 20, border: "2px solid #ffcdd2", background: "#fff",
-                   color: "#c62828", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12.5 }
-        }, "\uD83D\uDDD1 " + b.name)
+        React.createElement("div", { style: { flex: 1 } }),
+        React.createElement("button", { onClick: () => { setPlanEdit(e => !e); setPlanWahl(null); },
+          style: Object.assign({}, miniKnopf(planEdit ? C.green : "#ddd", planEdit ? "#fff" : "#666"),
+                               { background: planEdit ? C.green : "#fff" })
+        }, planEdit ? "\u2705 Fertig" : "\u270F\uFE0F Plan")
       ),
-      // ---- Bearbeiten-Leiste ----
-      React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap", alignItems: "center" } },
-        React.createElement("button", { onClick: () => { setPlanEdit(e => !e); setPlanWahl(null); setZieh(null); },
-          style: { padding: "8px 14px", borderRadius: 9, border: "none", cursor: "pointer", fontFamily: "inherit",
-                   fontWeight: 700, fontSize: 12.5, background: planEdit ? C.green : "#eee", color: planEdit ? "#fff" : "#555" }
-        }, planEdit ? "\u2705 Fertig" : "\u270F\uFE0F Plan bearbeiten"),
-        planEdit && React.createElement("button", { onClick: () => { const p = planLesen(b.key, b.ids).map(r => r.slice()); p.push([null, null, null, null, null]); planSpeichern(p, b.key); },
-          style: { padding: "8px 12px", borderRadius: 9, border: "1.5px solid #ddd", background: "#fff", color: "#555", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12 }
-        }, "\u2795 Reihe"),
-        planEdit && React.createElement("button", { onClick: () => { if (window.confirm("Plan dieses Bereichs auf die Vorgabe zur\u00FCcksetzen?\nAlle Tische, f\u00FCnf pro Reihe.")) { try { localStorage.removeItem(planKey(b.key)); } catch (e) {} try { window.dispatchEvent(new CustomEvent('belks_plan_neu')); } catch (e) {} setPlanWahl(null); } },
-          style: { padding: "8px 12px", borderRadius: 9, border: "1.5px solid #ffcdd2", background: "#fff", color: "#c62828", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12 }
-        }, "\u21BA Vorgabe")
+      planEdit && React.createElement("div", { style: { display: "flex", gap: 5, marginBottom: 6, flexWrap: "wrap", alignItems: "center" } },
+        React.createElement("button", { onClick: bereichNeu, style: miniKnopf("#bbb", "#666") }, "\u2795 Bereich"),
+        b.fid && React.createElement("button", { onClick: () => bereichLoeschen(b), style: miniKnopf("#ffcdd2", "#c62828") }, "\uD83D\uDDD1 Bereich"),
+        React.createElement("button", { onClick: () => { const p = planLesen(b.key, b.ids).map(r => r.slice()); p.push([null, null, null, null, null]); planSpeichern(p, b.key); }, style: miniKnopf("#ddd", "#666") }, "\u2795 Reihe"),
+        React.createElement("button", { onClick: () => { if (window.confirm("Plan dieses Bereichs auf die Vorgabe zur\u00FCcksetzen?")) { try { localStorage.removeItem(planKey(b.key)); } catch (e) {} try { window.dispatchEvent(new CustomEvent('belks_plan_neu')); } catch (e) {} setPlanWahl(null); } }, style: miniKnopf("#ffcdd2", "#c62828") }, "\u21BA Vorgabe"),
+        React.createElement("span", { style: { fontSize: 11, color: "#1565c0", marginLeft: 2 } },
+          planWahl ? "\uD83D\uDC46 Ziel antippen" : "Tisch ziehen oder antippen")
       ),
-      planEdit && React.createElement("div", { style: { background: "#e3f2fd", border: "2px solid #1565c0", borderRadius: 10, padding: "9px 12px", marginBottom: 10, fontSize: 12.5, color: "#0d47a1", lineHeight: 1.5 } },
-        planWahl
-          ? "\uD83D\uDC46 Jetzt das Ziel antippen \u2013 die beiden tauschen den Platz."
-          : "Tisch mit dem Finger an seinen Platz ZIEHEN. Antippen geht auch: erst der Tisch, dann das Ziel."),
-      // Legende
-      React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" } },
-        [["#fff", "#ddd", "Frei"], ["#fce4ec", C.pink, "Belegt"], ["#e8f5e9", C.green, "BON"], ["#fff8e1", C.orange, "Reserviert"]].map(([bg, border, label]) =>
-          React.createElement("div", { key: label, style: { display: "flex", alignItems: "center", gap: 4, fontSize: 10 } },
-            React.createElement("div", { style: { width: 14, height: 14, background: bg, border: "2px solid " + border, borderRadius: 3 } }),
-            React.createElement("span", { style: { color: "#666" } }, label)
-          )
-        )
-      ),
-      React.createElement("div", { style: { background: "#f5f0e8", borderRadius: 12, padding: 10, border: "2px solid #d7ccc8" } },
-        React.createElement("div", { style: { textAlign: "center", fontSize: 10, color: "#a1887f", fontWeight: 700, marginBottom: 8, letterSpacing: 2 } }, "\uD83D\uDEAA EINGANG"),
+      // ---- der Raum ----
+      React.createElement("div", { ref: planRef, style: { background: "#f5f0e8", borderRadius: 12, padding: 10, border: "2px solid #d7ccc8" } },
+        React.createElement("div", { style: { textAlign: "center", fontSize: 9, color: "#a1887f", fontWeight: 700, marginBottom: 6, letterSpacing: 2 } }, "\uD83D\uDEAA EINGANG"),
         b.ids.length === 0 && React.createElement("div", { style: { textAlign: "center", color: "#a1887f", fontSize: 12, padding: "18px 6px", lineHeight: 1.6 } },
-          "Diesem Bereich ist noch kein Tisch zugeordnet.", React.createElement("br", null),
-          "\u2630 Men\u00FC \u2192 Floors / Bereiche"),
+          "Diesem Bereich ist noch kein Tisch zugeordnet."),
         rows.map((row, ri) =>
           React.createElement("div", { key: ri, style: { display: "flex", gap: 6, marginBottom: 6, justifyContent: "center", flexWrap: "wrap" } },
             (row.every(v => v === null) && !planEdit)
@@ -12362,17 +12573,17 @@ function TableView({
                 )
               : row.map((tid, ci) => {
                 if (tid === null) {
-                  // Leerer Platz: im Bearbeiten-Modus Ziel zum Ablegen, sonst nur Luecke
                   return React.createElement("div", {
                     key: "l" + ci,
                     "data-zelle": ri + "," + ci,
                     onClick: planEdit ? (() => tausche(ri, ci)) : undefined,
                     style: Object.assign({}, zellStil, {
                       height: planEdit ? 52 : 8,
-                      border: planEdit ? "2px dashed #bbb" : "none",
+                      border: planEdit ? "2px dashed #cfc4bd" : "none",
                       background: planEdit ? "rgba(0,0,0,.02)" : "transparent",
                       cursor: planEdit ? "pointer" : "default",
-                      color: "#bbb"
+                      color: "#c9bdb5",
+                      touchAction: planEdit ? "none" : "auto"
                     })
                   }, planEdit ? "+" : null);
                 }
@@ -12384,23 +12595,19 @@ function TableView({
                 const res = todayRes.filter(r => String(r.tableId) === String(t.id));
                 const total = has ? order.items.reduce((s2, i) => s2 + i.finalPrice * i.qty, 0) : 0;
                 const gewaehlt = planEdit && planWahl && planWahl.ri === ri && planWahl.ci === ci;
-                const inHand = zieh && zieh.bewegt && zieh.ri === ri && zieh.ci === ci;
-                return React.createElement("div", Object.assign({
+                return React.createElement("div", {
                   key: tid,
                   "data-zelle": ri + "," + ci,
+                  "data-tisch": String(tid),
+                  onClick: () => planEdit ? tausche(ri, ci) : onSelect(t.id),
                   style: Object.assign({}, zellStil, {
                     background: gewaehlt ? "#e3f2fd" : (saved ? "#e8f5e9" : has ? "#fce4ec" : res.length > 0 ? "#fff8e1" : "#fff"),
                     border: (gewaehlt ? 3 : 2) + "px solid " + (gewaehlt ? "#1565c0" : (saved ? C.green : has ? C.pink : res.length > 0 ? C.orange : "#d7ccc8")),
                     cursor: "pointer", boxShadow: "0 1px 3px #0002",
-                    opacity: inHand ? 0.35 : 1,
-                    touchAction: planEdit ? "none" : "auto"
+                    touchAction: planEdit ? "none" : "auto",
+                    userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none"
                   })
-                }, planEdit
-                  ? { onPointerDown: (ev) => zeigerRunter(ri, ci, ev),
-                      onPointerMove: zeigerBewegt,
-                      onPointerUp: (ev) => zeigerHoch(ri, ci, ev),
-                      onPointerCancel: () => setZieh(null) }
-                  : { onClick: () => onSelect(t.id) }),
+                },
                   React.createElement("div", { style: { fontWeight: 800, color: saved ? C.green : has ? C.pink : "#888", fontSize: 12 } }, t.id),
                   has ? React.createElement("div", { style: { color: saved ? C.green : C.pink, fontSize: 9, fontWeight: 700 } }, fmt(total))
                     : res.length > 0 ? React.createElement("div", { style: { color: C.orange, fontSize: 8 } }, "\uD83D\uDCC5")
@@ -12409,15 +12616,25 @@ function TableView({
               })
           )
         ),
-        React.createElement("div", { style: { textAlign: "center", fontSize: 10, color: "#a1887f", fontWeight: 700, marginTop: 8, letterSpacing: 2 } }, "\uD83C\uDF73 K\u00DCCHE")
+        React.createElement("div", { style: { textAlign: "center", fontSize: 9, color: "#a1887f", fontWeight: 700, marginTop: 6, letterSpacing: 2 } }, "\uD83C\uDF73 K\u00DCCHE")
       ),
-      // Der Tisch, der gerade am Finger haengt
-      zieh && zieh.bewegt && React.createElement("div", {
-        style: { position: "fixed", left: zieh.mx - 26, top: zieh.my - 26, width: 52, height: 52,
-                 borderRadius: 8, background: "#fff", border: "3px solid #1565c0", boxShadow: "0 4px 14px #0004",
-                 display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800,
-                 color: "#1565c0", fontSize: 14, pointerEvents: "none", zIndex: 4000 }
-      }, (rows[zieh.ri] || [])[zieh.ci])
+      // ---- Legende: klein, unter dem Plan ----
+      React.createElement("div", { style: { display: "flex", gap: 10, marginTop: 6, flexWrap: "wrap", justifyContent: "center" } },
+        [["#fff", "#ddd", "Frei"], ["#fce4ec", C.pink, "Belegt"], ["#e8f5e9", C.green, "BON"], ["#fff8e1", C.orange, "Reserviert"]].map(([bg, border, label]) =>
+          React.createElement("div", { key: label, style: { display: "flex", alignItems: "center", gap: 3, fontSize: 9.5 } },
+            React.createElement("div", { style: { width: 11, height: 11, background: bg, border: "2px solid " + border, borderRadius: 3 } }),
+            React.createElement("span", { style: { color: "#999" } }, label)
+          )
+        )
+      ),
+      // Der Tisch, der am Finger haengt (per Ref bewegt, kein Neuaufbau)
+      React.createElement("div", {
+        ref: geistRef,
+        style: { position: "fixed", left: 0, top: 0, width: 56, height: 56, display: "none",
+                 borderRadius: 9, background: "#fff", border: "3px solid #1565c0", boxShadow: "0 6px 18px #0005",
+                 alignItems: "center", justifyContent: "center", fontWeight: 800,
+                 color: "#1565c0", fontSize: 16, pointerEvents: "none", zIndex: 4000 }
+      })
     );
   };
 
@@ -21317,6 +21534,31 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
 
   return React.createElement("div", { style:{ padding:"16px", maxWidth:800, margin:"0 auto" } },
 
+    // v307: Offener Tagesexport (z.B. nach dem Auto-Abschluss um 04:00)
+    (() => {
+      const offen = belksExportOffenLesen();
+      if (!offen) return null;
+      const orders = belksArchivTag(offen);
+      const anzahl = (orders || []).filter(belksBezahlt).length;
+      if (!anzahl) { belksExportOffenLoeschen(); return null; }
+      return React.createElement("div", {
+        style:{ background:"#ffebee", border:"2px solid #c62828", borderRadius:12, padding:"10px 14px", marginBottom:12, display:"flex", alignItems:"center", gap:10 }
+      },
+        React.createElement("span", { style:{ fontSize:20 } }, "\uD83D\uDCBE"),
+        React.createElement("div", { style:{ flex:1 } },
+          React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#b71c1c" } }, "Tagesexport vom " + offen + " fehlt noch"),
+          React.createElement("div", { style:{ fontSize:11, color:"#888" } }, anzahl + " bezahlte Bestellung(en) \u2013 noch nicht als Datei gesichert")
+        ),
+        React.createElement("button", {
+          onClick: () => {
+            const erg = belksTagSichern(orders, offen, belksDeZuIso(offen));
+            if (erg.ok) { belksExportOffenLoeschen(); setView("home"); }
+          },
+          style:{ padding:"9px 14px", borderRadius:9, border:"none", background:"#c62828", color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5, whiteSpace:"nowrap" }
+        }, "Jetzt sichern")
+      );
+    })(),
+
     // Low stock warning banner
     lowStockItems.length > 0 && React.createElement("div", {
       onClick: () => setView("inventory"),
@@ -21471,7 +21713,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v303"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v307"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -21956,6 +22198,10 @@ function App() {
       const yKey = yesterday.toLocaleDateString("de-DE");
       arch.push({ date: yKey, orders: completedOrders, expenses, auto: true, time: now.toISOString() });
       LS.set("eatdesi_archive", arch);
+      /* v307: Um 04:00 tippt niemand auf den Bildschirm - ohne Fingertipp
+         darf der Browser keine Datei schreiben. Also nur vormerken; die
+         Startseite fragt spaeter nach. Die Bestellungen liegen im Archiv. */
+      try { if ((completedOrders || []).filter(belksBezahlt).length) belksExportOffenSetzen(yKey); } catch (e) {}
       setCompletedOrders([]);
       setExpenses([]);
       LS.set("eatdesi_last_autoclose", todayKey);
@@ -22778,6 +23024,16 @@ function App() {
     const arch = LS.get("eatdesi_archive", []) || [];
     arch.push({ date: key, orders: completedOrders, expenses: expenses });
     LS.set("eatdesi_archive", arch);
+    /* ═══ v307: TAGESEXPORT ZUERST ═══
+       Direkt danach wird completedOrders geleert - wer die Datei spaeter
+       schreibt, schreibt eine leere Datei. Der Merkzettel wird VOR dem
+       Speichern gesetzt und nur bei Erfolg wieder entfernt: bricht das
+       Speichern ab, meldet sich die Startseite am naechsten Morgen. */
+    try {
+      belksExportOffenSetzen(key);
+      const erg = belksTagSichern(completedOrders, key, belksDeZuIso(key));
+      if (erg.ok) belksExportOffenLoeschen();
+    } catch (e) { console.warn("Tagesexport:", e); }
     setCompletedOrders([]);
     setExpenses([]);
     setTableOrders({});      // alle Tische ebenfalls leeren
