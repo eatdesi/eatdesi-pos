@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v308</title>
+<title>eatDeSi POS v309</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -11966,12 +11966,14 @@ function belksExportPaket(orders, bezeichnung){
 /* Speichert den Tag und meldet zurueck, ob etwas zu speichern war. */
 function belksTagSichern(orders, tagText, dateiTeil){
   var pk = belksExportPaket(orders, tagText);
-  if(!pk.anzahl) return { ok: true, anzahl: 0 };
+  if(!pk.anzahl) return { ok: true, anzahl: 0, weg: 'leer' };
   try{
-    belksDateiSpeichern("belks_bestellungen_" + pk.loc + "_" + dateiTeil + ".json",
-                        JSON.stringify(pk.inhalt, null, 2));
-    return { ok: true, anzahl: pk.anzahl, summe: pk.summe };
-  }catch(e){ return { ok: false, anzahl: pk.anzahl }; }
+    var weg = belksDateiSpeichern("belks_bestellungen_" + pk.loc + "_" + dateiTeil + ".json",
+                                  JSON.stringify(pk.inhalt, null, 2));
+    /* Nur wenn wirklich geschrieben wurde, gilt der Tag als gesichert -
+       sonst bleibt der Merkzettel stehen und die Startseite erinnert. */
+    return { ok: weg !== 'app_ohne_plugin', anzahl: pk.anzahl, summe: pk.summe, weg: weg };
+  }catch(e){ return { ok: false, anzahl: pk.anzahl, weg: 'fehler' }; }
 }
 /* Merkzettel: welcher Tag wurde noch nicht als Datei gesichert?
    Der Auto-Abschluss um 04:00 kann keine Datei schreiben - dort wird nur
@@ -12001,12 +12003,52 @@ function belksDeZuIso(datumDe){
   return t[2] + "-" + String(t[1]).padStart(2, "0") + "-" + String(t[0]).padStart(2, "0");
 }
 
+/* ═══ v309: WARUM NICHTS ANKAM ═══
+   Ein <a download> mit blob:-Adresse ist eine Browser-Funktion. Die APK
+   laeuft in Androids WebView, und die hat von Haus aus keinen
+   DownloadListener - der Klick verpufft ohne Fehlermeldung. v306/307 haben
+   danach trotzdem "gespeichert" gemeldet: die Meldung stand hinter dem
+   Klick, ohne je zu pruefen, ob etwas geschrieben wurde. Das ist derselbe
+   Fehler wie das stille .catch() bei der Anmeldung - die Kasse behauptet
+   etwas, das sie nicht weiss. Ab jetzt sagt sie die Wahrheit. */
+function belksDateiWeg(){
+  var c = null;
+  try { c = window.Capacitor; } catch(e) {}
+  var nativ = false;
+  try { nativ = !!(c && c.isNativePlatform && c.isNativePlatform()); } catch(e) {}
+  if(!nativ) return 'browser';                       // Chrome/PWA: Download geht
+  var fs = null;
+  try { fs = c.Plugins && (c.Plugins.Filesystem || c.Plugins.FileSystem); } catch(e) {}
+  return fs ? 'plugin' : 'app_ohne_plugin';          // APK ohne Dateisystem-Plugin
+}
+/* Gibt zurueck, was WIRKLICH passiert ist: 'browser' | 'plugin' | 'app_ohne_plugin' */
 function belksDateiSpeichern(name, inhalt){
+  var weg = belksDateiWeg();
+  if(weg === 'app_ohne_plugin') return weg;          // gar nicht erst so tun als ob
+  if(weg === 'plugin'){
+    try{
+      var c = window.Capacitor;
+      var fs = c.Plugins.Filesystem || c.Plugins.FileSystem;
+      fs.writeFile({ path: name, data: inhalt, directory: 'DOCUMENTS', encoding: 'utf8' });
+      return 'plugin';
+    }catch(e){ return 'app_ohne_plugin'; }
+  }
   var blob = new Blob([inhalt], { type: "application/json" });
   var url = URL.createObjectURL(blob);
   var a = document.createElement("a");
   a.href = url; a.download = name; a.click();
   setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  return 'browser';
+}
+/* Ein Satz, der zu dem passt, was tatsaechlich geschah. */
+function belksSpeicherText(weg, anzahl, summeText){
+  if(weg === 'app_ohne_plugin')
+    return "\u26A0\uFE0F Diese App kann selbst noch keine Datei ablegen (Android-WebView). "
+         + "Bitte die Kasse einmal in Chrome \u00F6ffnen und dort speichern \u2013 oder auf die echte Android-App warten. "
+         + "Die Bestellungen bleiben in der Cloud und im Archiv.";
+  if(weg === 'plugin')
+    return "\u2705 " + anzahl + " Bestellung(en) \u00B7 " + summeText + " im Ordner \"Dokumente\" gespeichert.";
+  return "\u2705 " + anzahl + " Bestellung(en) \u00B7 " + summeText + " gespeichert (Ordner \"Downloads\").";
 }
 
 function BackupView({ data, onRestore }) {
@@ -12031,16 +12073,20 @@ function BackupView({ data, onRestore }) {
       summe: Math.round(summe(liste) * 100) / 100,
       bestellungen: liste
     };
-    belksDateiSpeichern("belks_bestellungen_" + loc + "_" + dateiTeil + ".json", JSON.stringify(paket, null, 2));
-    setTagMsg("\u2705 " + liste.length + " Bestellung(en) \u00B7 " + fmt(summe(liste)) + " gespeichert (Ordner \"Downloads\").");
+    const weg = belksDateiSpeichern("belks_bestellungen_" + loc + "_" + dateiTeil + ".json", JSON.stringify(paket, null, 2));
+    setTagMsg(belksSpeicherText(weg, liste.length, fmt(summe(liste))));
   };
   const lsKeys = ["eatdesi_orders","eatdesi_expenses","eatdesi_customers","eatdesi_inventory","eatdesi_drivers","eatdesi_floors","eatdesi_users","eatdesi_menu","eatdesi_printer"];
   const lsSize = lsKeys.reduce((s,k)=>{ try{return s+(localStorage.getItem(k)||"").length;}catch{return s;} },0);
   const exportAll = () => {
+    /* v309: Der Knopf gab bisher ueberhaupt keine Rueckmeldung. In der APK
+       sah es deshalb genauso aus wie ein erfolgreicher Download. */
     const json = JSON.stringify({ ...data, exportDate:new Date().toISOString(), version:"v13" }, null, 2);
-    const blob = new Blob([json],{type:"application/json"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href=url; a.download=`eatdesi_backup_${new Date().toLocaleDateString("de-DE").replace(/\./g,"-")}.json`; a.click(); URL.revokeObjectURL(url);
+    const weg = belksDateiSpeichern(`eatdesi_backup_${new Date().toLocaleDateString("de-DE").replace(/\./g,"-")}.json`, json);
+    setMsg(weg === 'app_ohne_plugin'
+      ? belksSpeicherText(weg, 0, "")
+      : (weg === 'plugin' ? "\u2705 Backup im Ordner \"Dokumente\" gespeichert."
+                          : "\u2705 Backup gespeichert (Ordner \"Downloads\")."));
   };
   const doRestore = () => {
     try { const parsed = JSON.parse(restoreText); onRestore(parsed); setMsg("\u2705 Wiederhergestellt!"); }
@@ -21553,6 +21599,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
           onClick: () => {
             const erg = belksTagSichern(orders, offen, belksDeZuIso(offen));
             if (erg.ok) { belksExportOffenLoeschen(); setView("home"); }
+            else alert(belksSpeicherText(erg.weg, erg.anzahl, ""));
           },
           style:{ padding:"9px 14px", borderRadius:9, border:"none", background:"#c62828", color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5, whiteSpace:"nowrap" }
         }, "Jetzt sichern")
@@ -21713,7 +21760,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v308"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v309"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -23075,6 +23122,14 @@ function App() {
       belksExportOffenSetzen(key);
       const erg = belksTagSichern(completedOrders, key, belksDeZuIso(key));
       if (erg.ok) belksExportOffenLoeschen();
+      /* v309: Konnte die App keine Datei ablegen, bleibt der Merkzettel
+         stehen - und der Chef sieht auf der Startseite, dass der Tag noch
+         zu sichern ist. Kein stilles Verschlucken mehr. */
+      else if (erg.weg === 'app_ohne_plugin')
+        alert("\u26A0\uFE0F Der Tagesexport konnte nicht als Datei abgelegt werden.\n\n" +
+              "Diese App-Version (WebView) kann das noch nicht. Die Bestellungen sind in der Cloud " +
+              "und im Archiv sicher \u2013 auf der Startseite steht jetzt ein Hinweis, damit der Tag " +
+              "sp\u00E4ter in Chrome gesichert werden kann.");
     } catch (e) { console.warn("Tagesexport:", e); }
     setCompletedOrders([]);
     setExpenses([]);
