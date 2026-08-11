@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v307</title>
+<title>eatDeSi POS v308</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21713,7 +21713,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v307"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v308"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22477,13 +22477,55 @@ function App() {
       LS.set("eatdesi_printer", h);
     }catch(e){ LS.set("eatdesi_printer", printerSettings); }
   }, [printerSettings]);
+  /* ═══ v308: SELBSTHEILUNG STUFE 2 + 3 ═══
+     Stufe 1 (Token automatisch erneuern und die Abfrage wiederholen) laeuft
+     seit v291. Wenn aber auch der Erneuerungsschluessel abgelaufen ist, hilft
+     kein Wiederholen mehr - dann setzt belksAuthRefresh das Kennzeichen
+     __belksAnmeldungTot. Bisher hat NIEMAND dieses Kennzeichen gelesen: die
+     Kasse lief scheinbar normal weiter, zeigte "Online" und falsche
+     Tischsummen. Genau das war der Fall mit 180 Anfragen / 45 Fehlern.
+     Ab jetzt: sichtbarer roter Balken (Stufe 2) und keine NEUEN Bestellungen
+     mehr (Stufe 3). Offene Tische bleiben bedienbar und kassierbar - ein
+     Gast, der zahlen will, darf nie an der Technik haengen bleiben. */
+  const [anmeldungTot, setAnmeldungTot] = React.useState(false);
+  React.useEffect(() => {
+    const pruefen = () => {
+      let tot = false;
+      try { tot = !!window.__belksAnmeldungTot; } catch (e) {}
+      setAnmeldungTot(v => (v === tot ? v : tot));
+    };
+    pruefen();
+    const t = setInterval(pruefen, 3000);
+    return () => clearInterval(t);
+  }, []);
+
   const openTable = id => {
+    /* Nur NEUE Tische sperren. Ein Tisch, auf dem schon etwas steht, muss
+       weiter aufgehen - sonst kann niemand mehr kassieren. */
+    const sid = String(id);
+    const schonOffen = sid.indexOf("ta_") === 0
+      || !!(tableOrders && tableOrders[id] && (tableOrders[id].items || []).length > 0);
+    if (anmeldungTot && !schonOffen) {
+      alert("\u26A0\uFE0F Keine Verbindung zur Zentrale.\n\n" +
+            "Neue Tische k\u00F6nnen gerade nicht ge\u00F6ffnet werden, weil die Anmeldung abgelaufen ist " +
+            "und die Buchung sonst verloren ginge.\n\n" +
+            "Bitte oben im roten Balken auf \u201EErneut versuchen\u201C tippen oder neu anmelden. " +
+            "Bereits offene Tische lassen sich weiter kassieren.");
+      return;
+    }
     setActiveTable(id);
     setIsTakeaway(String(id).startsWith("ta_"));
     setView("order");
     setMenuOpen(false);
   };
   const newTakeaway = (customer = null, channelSource = null) => {
+    if (anmeldungTot) {
+      alert("\u26A0\uFE0F Keine Verbindung zur Zentrale.\n\n" +
+            "Neue Bestellungen sind gesperrt, bis die Anmeldung wieder steht \u2013 " +
+            "sonst w\u00E4re die Bestellung nur auf diesem Ger\u00E4t und ginge verloren.\n\n" +
+            "Bitte oben im roten Balken auf \u201EErneut versuchen\u201C tippen.");
+      return;
+    }
     const id = taRef.current++;
     setTakeaway(t => [...t, {
       id,
@@ -23861,7 +23903,34 @@ function App() {
       padding: "1px 5px",
       marginLeft: 2
     }
-  }, pendingBar)))), view === "gutscheine" && React.createElement(GutscheinView, {
+  }, pendingBar)))),
+  /* v308: Stufe 2 - der Balken. Bewusst kein kleines Symbol in der Ecke:
+     Kellner schauen dort nicht hin. Er steht ueber allen Ansichten. */
+  anmeldungTot && /*#__PURE__*/React.createElement("div", {
+    style: { background: "#c62828", color: "#fff", padding: "9px 12px", display: "flex",
+             alignItems: "center", gap: 10, fontSize: 12.5, fontWeight: 700 }
+  },
+    /*#__PURE__*/React.createElement("span", { style: { fontSize: 17 } }, "\u26A0\uFE0F"),
+    /*#__PURE__*/React.createElement("div", { style: { flex: 1, lineHeight: 1.4 } },
+      /*#__PURE__*/React.createElement("div", null, "Keine Verbindung zur Zentrale \u2013 bitte anmelden."),
+      /*#__PURE__*/React.createElement("div", { style: { fontWeight: 500, opacity: .9, fontSize: 11 } },
+        "Neue Bestellungen sind gesperrt. Offene Tische k\u00F6nnen weiter kassiert werden.")
+    ),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        try {
+          Promise.resolve(window.belksAuthRefresh && window.belksAuthRefresh()).then(function (ok) {
+            if (!ok) alert("Die Anmeldung l\u00E4sst sich nicht erneuern.\n\n" +
+                           "Bitte \u2630 Men\u00FC \u2192 Restaurant wechseln und neu anmelden.");
+          });
+        } catch (e) {}
+      },
+      style: { background: "#fff", color: "#c62828", border: "none", borderRadius: 8,
+               padding: "7px 12px", cursor: "pointer", fontFamily: "inherit",
+               fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }
+    }, "\uD83D\uDD04 Erneut versuchen")
+  ),
+  view === "gutscheine" && React.createElement(GutscheinView, {
     gutscheine: gutscheine,
     setGutscheine: setGutscheine,
     loggedInUser: loggedInUser,
