@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v309</title>
+<title>eatDeSi POS v310</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -11964,12 +11964,12 @@ function belksExportPaket(orders, bezeichnung){
   };
 }
 /* Speichert den Tag und meldet zurueck, ob etwas zu speichern war. */
-function belksTagSichern(orders, tagText, dateiTeil){
+function belksTagSichern(orders, tagText, dateiTeil, beiFehler){
   var pk = belksExportPaket(orders, tagText);
   if(!pk.anzahl) return { ok: true, anzahl: 0, weg: 'leer' };
   try{
     var weg = belksDateiSpeichern("belks_bestellungen_" + pk.loc + "_" + dateiTeil + ".json",
-                                  JSON.stringify(pk.inhalt, null, 2));
+                                  JSON.stringify(pk.inhalt, null, 2), beiFehler);
     /* Nur wenn wirklich geschrieben wurde, gilt der Tag als gesichert -
        sonst bleibt der Merkzettel stehen und die Startseite erinnert. */
     return { ok: weg !== 'app_ohne_plugin', anzahl: pk.anzahl, summe: pk.summe, weg: weg };
@@ -12022,14 +12022,26 @@ function belksDateiWeg(){
   return fs ? 'plugin' : 'app_ohne_plugin';          // APK ohne Dateisystem-Plugin
 }
 /* Gibt zurueck, was WIRKLICH passiert ist: 'browser' | 'plugin' | 'app_ohne_plugin' */
-function belksDateiSpeichern(name, inhalt){
+/* v310: writeFile ist ein Versprechen. v309 hat es losgeschickt und sofort
+   "gespeichert" gemeldet - bei vollem Speicher oder fehlendem Recht waere
+   der Fehler wieder unsichtbar geblieben. Genau dieser stille Weg hat uns
+   schon einmal Daten gekostet. beiFehler wird gerufen, wenn das Schreiben
+   spaeter doch scheitert. */
+function belksDateiSpeichern(name, inhalt, beiFehler){
   var weg = belksDateiWeg();
   if(weg === 'app_ohne_plugin') return weg;          // gar nicht erst so tun als ob
   if(weg === 'plugin'){
     try{
       var c = window.Capacitor;
       var fs = c.Plugins.Filesystem || c.Plugins.FileSystem;
-      fs.writeFile({ path: name, data: inhalt, directory: 'DOCUMENTS', encoding: 'utf8' });
+      var pr = fs.writeFile({ path: name, data: inhalt, directory: 'DOCUMENTS', encoding: 'utf8' });
+      if(pr && typeof pr.then === 'function'){
+        pr.catch(function(e){
+          var txt = "\u26A0\uFE0F Die Datei \u201E" + name + "\u201C konnte nicht geschrieben werden.\n\n"
+                  + ((e && e.message) ? e.message : String(e));
+          try { if(typeof beiFehler === 'function') beiFehler(txt); else alert(txt); } catch(_e){}
+        });
+      }
       return 'plugin';
     }catch(e){ return 'app_ohne_plugin'; }
   }
@@ -21760,7 +21772,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v309"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v310"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -23120,7 +23132,12 @@ function App() {
        Speichern ab, meldet sich die Startseite am naechsten Morgen. */
     try {
       belksExportOffenSetzen(key);
-      const erg = belksTagSichern(completedOrders, key, belksDeZuIso(key));
+      const erg = belksTagSichern(completedOrders, key, belksDeZuIso(key), function (txt) {
+        /* Schreiben doch fehlgeschlagen -> Merkzettel wieder setzen, damit
+           die Startseite morgen erinnert. */
+        try { belksExportOffenSetzen(key); } catch (e2) {}
+        alert(txt);
+      });
       if (erg.ok) belksExportOffenLoeschen();
       /* v309: Konnte die App keine Datei ablegen, bleibt der Merkzettel
          stehen - und der Chef sieht auf der Startseite, dass der Tag noch
