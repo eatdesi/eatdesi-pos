@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v310</title>
+<title>eatDeSi POS v314</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9486,15 +9486,24 @@ function BonModal({
   fee > 0 && /*#__PURE__*/React.createElement("div", {
     style: { display:"flex", justifyContent:"space-between", fontSize:13, color:"#1565c0", padding:"3px 0", borderTop:"1px solid #eee", marginTop:3 }
   }, /*#__PURE__*/React.createElement("span", null, "🛵 Liefergebühr"), /*#__PURE__*/React.createElement("span", null, fmt(fee))),
+  /* v314: Der Betrag stand in 14 px zwischen Netto und MwSt. - genau die
+     Zeile, die der Gast am Tisch lesen soll, war die kleinste. Jetzt
+     abgesetzt und in 26 px. Der Bondruck bleibt unveraendert; das hier ist
+     nur die Anzeige auf dem Bildschirm. */
   /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
-      fontWeight: 700,
-      fontSize: 14,
-      marginTop: 4
+      alignItems: "center",
+      fontWeight: 800,
+      marginTop: 8,
+      padding: "10px 12px",
+      background: "#e8f5e9",
+      border: "2px solid " + C.green,
+      borderRadius: 10
     }
-  }, React.createElement("span", null, "GESAMT"), React.createElement("span", { style:{ color: C.green } }, fmt(finalTotal))),
+  }, React.createElement("span", { style:{ fontSize: 15, color:"#33691e", letterSpacing: 1 } }, "GESAMT"),
+     React.createElement("span", { style:{ color: C.green, fontSize: 26, fontWeight: 800, letterSpacing: -0.5 } }, fmt(finalTotal))),
   gutscheinRabatt > 0 && React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", fontSize:13, color:"#f57f17", padding:"4px 0" } },
     React.createElement("span", null, "🎫 Gutschein ("+gutscheinApplied.code+")"),
     React.createElement("span", null, "-"+fmt(gutscheinRabatt))
@@ -12036,6 +12045,16 @@ function belksDateiSpeichern(name, inhalt, beiFehler){
       var fs = c.Plugins.Filesystem || c.Plugins.FileSystem;
       var pr = fs.writeFile({ path: name, data: inhalt, directory: 'DOCUMENTS', encoding: 'utf8' });
       if(pr && typeof pr.then === 'function'){
+        /* v311: Abdullah fand die Datei im Ordner "Dokumente" nicht. Statt zu
+           raten, wo Android sie ablegt, zeigen wir schlicht den Pfad an, den
+           das Plugin zurueckmeldet. */
+        pr.then(function(r){
+          try{
+            var u = (r && r.uri) ? String(r.uri) : '';
+            if(u) window.__belksLetzteDatei = u;
+            if(u && typeof beiFehler === 'function') beiFehler(null, u);
+          }catch(_e){}
+        });
         pr.catch(function(e){
           var txt = "\u26A0\uFE0F Die Datei \u201E" + name + "\u201C konnte nicht geschrieben werden.\n\n"
                   + ((e && e.message) ? e.message : String(e));
@@ -12068,6 +12087,10 @@ function BackupView({ data, onRestore }) {
   const [msg, setMsg] = React.useState("");
   const [tag, setTag] = React.useState(() => belksTagVon({ time: new Date() }));
   const [tagMsg, setTagMsg] = React.useState("");
+  /* v311: Das Voll-Backup schrieb seine Antwort in den Import-Kasten ganz
+     unten - weit weg vom Knopf, den man gerade gedrueckt hat. Eigene
+     Meldung direkt darunter. */
+  const [expMsg, setExpMsg] = React.useState("");
   const alleBezahlt = (data.orders || []).filter(belksBezahlt);
   const tagOrders = alleBezahlt.filter(o => belksTagVon(o) === tag);
   const monatOrders = alleBezahlt.filter(o => belksTagVon(o).slice(0, 7) === String(tag).slice(0, 7));
@@ -12085,7 +12108,12 @@ function BackupView({ data, onRestore }) {
       summe: Math.round(summe(liste) * 100) / 100,
       bestellungen: liste
     };
-    const weg = belksDateiSpeichern("belks_bestellungen_" + loc + "_" + dateiTeil + ".json", JSON.stringify(paket, null, 2));
+    const dname = "belks_bestellungen_" + loc + "_" + dateiTeil + ".json";
+    const weg = belksDateiSpeichern(dname, JSON.stringify(paket, null, 2),
+      (fehler, uri) => {
+        if (fehler) { setTagMsg(fehler); return; }
+        if (uri) setTagMsg(m => m + "\n\uD83D\uDCC2 " + uri);
+      });
     setTagMsg(belksSpeicherText(weg, liste.length, fmt(summe(liste))));
   };
   const lsKeys = ["eatdesi_orders","eatdesi_expenses","eatdesi_customers","eatdesi_inventory","eatdesi_drivers","eatdesi_floors","eatdesi_users","eatdesi_menu","eatdesi_printer"];
@@ -12094,8 +12122,13 @@ function BackupView({ data, onRestore }) {
     /* v309: Der Knopf gab bisher ueberhaupt keine Rueckmeldung. In der APK
        sah es deshalb genauso aus wie ein erfolgreicher Download. */
     const json = JSON.stringify({ ...data, exportDate:new Date().toISOString(), version:"v13" }, null, 2);
-    const weg = belksDateiSpeichern(`eatdesi_backup_${new Date().toLocaleDateString("de-DE").replace(/\./g,"-")}.json`, json);
-    setMsg(weg === 'app_ohne_plugin'
+    const weg = belksDateiSpeichern(
+      `eatdesi_backup_${new Date().toLocaleDateString("de-DE").replace(/\./g,"-")}.json`, json,
+      (fehler, uri) => {
+        if (fehler) { setExpMsg(fehler); return; }
+        if (uri) setExpMsg(m => m + "\n\uD83D\uDCC2 " + uri);
+      });
+    setExpMsg(weg === 'app_ohne_plugin'
       ? belksSpeicherText(weg, 0, "")
       : (weg === 'plugin' ? "\u2705 Backup im Ordner \"Dokumente\" gespeichert."
                           : "\u2705 Backup gespeichert (Ordner \"Downloads\")."));
@@ -12142,15 +12175,32 @@ function BackupView({ data, onRestore }) {
           style: { flex:1, padding:12, borderRadius:10, border:"1.5px solid #1565c0", background:"#fff", color:"#1565c0", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13.5 }
         }, "\uD83D\uDCC1 Monat")
       ),
-      tagMsg && /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, marginTop:8, color:"#0d47a1" } }, tagMsg),
+      tagMsg && /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, marginTop:8, color:"#0d47a1", whiteSpace:"pre-wrap", wordBreak:"break-all" } }, tagMsg),
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#607d8b", marginTop:8, lineHeight:1.5 } },
-        "\u2139\uFE0F Ersetzt weder TSE noch die Cloud \u2014 es ist eine zus\u00E4tzliche Sicherung. Das automatische Schreiben auf die SD-Karte kommt mit der echten Android-App.")
+        "\u2139\uFE0F Ersetzt weder TSE noch die Cloud \u2014 es ist eine zus\u00E4tzliche Sicherung. Das automatische Schreiben auf die SD-Karte kommt mit der echten Android-App."),
+      /* v311: Der rote Balken aus v308 laesst sich im Betrieb nicht
+         herbeifuehren - das Token laeuft eine Stunde und erneuert sich
+         selbst. Ohne Probe weiss niemand, ob die Sperre wirklich greift.
+         Dieser Knopf setzt nur das Kennzeichen; nichts wird geloescht. */
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => {
+          try {
+            const an = !window.__belksAnmeldungTot;
+            window.__belksAnmeldungTot = an;
+            alert(an
+              ? "\uD83E\uDDEA Probe l\u00E4uft.\n\nDer rote Balken erscheint in wenigen Sekunden. Pr\u00FCfe jetzt:\n\u2022 neuer Tisch \u2192 muss gesperrt sein\n\u2022 offener Tisch \u2192 muss weiter kassierbar sein\n\nZum Beenden denselben Knopf noch einmal dr\u00FCcken."
+              : "\u2705 Probe beendet \u2013 der Balken verschwindet gleich wieder.");
+          } catch (e) {}
+        },
+        style:{ width:"100%", padding:10, borderRadius:9, border:"1.5px dashed #90a4ae", background:"#fff", color:"#546e7a", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5, marginTop:10 }
+      }, "\uD83E\uDDEA Selbstheilung testen (roter Balken)")
     ),
 
     /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:12, padding:14, marginBottom:12, border:"2px solid #a5d6a7" } },
       /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, marginBottom:8 } }, "\uD83D\uDCE4 Export (Backup erstellen)"),
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#555", marginBottom:10 } }, "Alle Daten als JSON-Datei. LocalStorage: ", (lsSize/1024).toFixed(1), " KB"),
       /*#__PURE__*/React.createElement("button", { onClick:exportAll, style:{ width:"100%", padding:12, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 } }, "\u2B07\uFE0F Backup herunterladen"),
+      expMsg && /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, marginTop:8, color:"#2e7d32", whiteSpace:"pre-wrap", wordBreak:"break-all" } }, expMsg),
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#558b2f", marginTop:8 } }, "\uD83D\uDCA1 Datei landet im Ordner \"Downloads\". Von dort kannst du sie auf SD-Karte, USB-Stick oder Google Drive kopieren.")
     ),
     /*#__PURE__*/React.createElement("div", { style:{ background:"#fff3e0", borderRadius:12, padding:14, border:"2px solid #ffcc80" } },
@@ -12389,7 +12439,20 @@ function TableView({
   /* v303: Der Plan zeigt den Raum so, wie er wirklich aussieht - das ist
      die Ansicht, mit der gearbeitet wird. Die Liste bleibt als Zweitweg. */
   const [viewMode, setViewMode] = React.useState("map"); // map | grid
+  /* v311: Der Plan sprang bei jedem Aufruf zurueck auf den ersten Bereich.
+     Wer draussen bedient, musste vor JEDEM Tisch erst wieder "Aussen"
+     antippen. Die Wahl gehoert zum Geraet, nicht zum Restaurant - sie wird
+     lokal gemerkt und darf NICHT in die Cloud (sonst zwingt ein Kellner
+     dem anderen seinen Bereich auf). Gemerkt wird der NAME, nicht die
+     Position: kommt ein Bereich dazu, stimmt eine Zahl sonst nicht mehr. */
   const [bereichIdx, setBereichIdx] = React.useState(0);
+  const bereichMerkKey = "eatdesi_bereich_wahl";
+  const bereichMerken = (name) => {
+    try { localStorage.setItem(bereichMerkKey, String(name || "")); } catch (e) {}
+  };
+  const bereichGemerkt = () => {
+    try { return localStorage.getItem(bereichMerkKey) || ""; } catch (e) { return ""; }
+  };
 
   /* ── v304: ZIEHEN MIT DEM FINGER ──────────────────────────────────────
      v303 benutzte React-Zeigerereignisse. Auf dem Tablet passierte damit
@@ -12550,6 +12613,19 @@ function TableView({
     setBereichIdx(0);
   };
 
+  /* Einmal beim Oeffnen: gemerkten Bereich suchen und einstellen. */
+  const bereichGesetzt = React.useRef(false);
+  React.useEffect(() => {
+    if (bereichGesetzt.current || viewMode !== "map") return;
+    const liste = bereicheBauen();
+    const merk = bereichGemerkt();
+    if (merk) {
+      const i = liste.findIndex(x => x.name === merk);
+      if (i >= 0) setBereichIdx(i);
+    }
+    bereichGesetzt.current = true;
+  }, [viewMode, floors]);
+
   const renderMapView = () => {
     const bereiche = bereicheBauen();
     const b = bereiche[Math.min(bereichIdx, bereiche.length - 1)] || bereiche[0];
@@ -12596,7 +12672,7 @@ function TableView({
         bereiche.map((bx, bi) =>
           React.createElement("button", {
             key: bx.key || ("b" + bi),
-            onClick: () => { setBereichIdx(bi); setPlanWahl(null); },
+            onClick: () => { setBereichIdx(bi); bereichMerken(bx.name); setPlanWahl(null); },
             style: { padding: "5px 11px", borderRadius: 16, cursor: "pointer", fontFamily: "inherit",
                      fontWeight: 700, fontSize: 11.5, whiteSpace: "nowrap",
                      border: "1.5px solid " + (bi === bereichIdx ? C.green : "#ddd"),
@@ -12743,13 +12819,37 @@ function OrderView({
   onClear,
   optionGroups,
   menuData,
-  printerSettings
+  printerSettings,
+  loggedInUser
 }) {
   const MENU_LIVE = menuData || MENU;
   const [activeCat, setActiveCat] = useState(Object.keys(MENU_LIVE)[0] || Object.keys(MENU)[0]);
   const [optItem, setOptItem] = useState(null);
   const [noteTarget, setNoteTarget] = useState(null);
   const [noteText, setNoteText] = useState("");
+  /* ═══ v312: ZEILE BEARBEITEN ═══
+     Bisher konnte der Stift nur eine Kuechennotiz. Preis und Rabatt gingen
+     erst an der Kasse - beim Aufnehmen der Bestellung ging das nicht.
+     Menge, Preis und Rabatt liegen jetzt im selben Fenster.
+     WICHTIG: Preis und Rabatt darf nur Admin/Manager aendern. Sonst koennte
+     jeder am Tisch stillschweigend Umsatz verschwinden lassen - und im
+     Nachhinein sieht niemand, ob es ein Rabatt oder ein Griff in die Kasse
+     war. Kellner behalten die Notiz. */
+  const [bearbMenge, setBearbMenge] = useState("1");
+  const [bearbPreis, setBearbPreis] = useState("");
+  const [bearbProz, setBearbProz] = useState("");
+  const [bearbAbzug, setBearbAbzug] = useState("");
+  const darfPreis = !!(loggedInUser && (loggedInUser.role === "Admin" || loggedInUser.role === "Manager"));
+  /* Der Endpreis einer Zeile: erst Prozent, dann fester Abzug. Nie unter 0 -
+     ein negativer Posten wuerde die Summen und die TSE verfaelschen. */
+  const bearbEndpreis = () => {
+    var basis = parseFloat(String(bearbPreis).replace(",", ".")) || 0;
+    var proz = parseFloat(String(bearbProz).replace(",", ".")) || 0;
+    var abzug = parseFloat(String(bearbAbzug).replace(",", ".")) || 0;
+    var wert = basis * (1 - proz / 100) - abzug;
+    return Math.max(0, Math.round(wert * 100) / 100);
+  };
+  const bearbMengeZahl = () => Math.max(1, parseInt(bearbMenge, 10) || 1);
   const orderListRef = React.useRef(null);
   const [splitTarget, setSplitTarget] = React.useState(null);
   const [splitQty, setSplitQty] = React.useState(1);
@@ -12932,7 +13032,61 @@ function OrderView({
       marginBottom: 10,
       fontSize: 15
     }
-  }, "\uD83D\uDCDD Notiz f\xFCr K\xFCche"), /*#__PURE__*/React.createElement("textarea", {
+  }, (function(){
+    var it = items.filter(function(x){ return x._key === noteTarget; })[0];
+    return "\u270F\uFE0F " + (it ? (it.nr + ". " + it.name) : "Position bearbeiten");
+  })()),
+  /* Menge + Preis nebeneinander */
+  /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10, marginBottom: 10 } },
+    /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#777", marginBottom: 4, fontWeight: 600 } }, "Menge"),
+      /*#__PURE__*/React.createElement("input", {
+        type: "number", min: 1, inputMode: "numeric", value: bearbMenge,
+        onChange: e => setBearbMenge(e.target.value),
+        style: { width: "100%", padding: 11, borderRadius: 8, border: "2px solid #ddd", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box" }
+      })
+    ),
+    /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#777", marginBottom: 4, fontWeight: 600 } },
+        "Preis \u20AC", !darfPreis && /*#__PURE__*/React.createElement("span", { style: { color: "#bbb" } }, " \u00B7 gesperrt")),
+      /*#__PURE__*/React.createElement("input", {
+        type: "number", step: "0.01", inputMode: "decimal", value: bearbPreis,
+        disabled: !darfPreis,
+        onChange: e => setBearbPreis(e.target.value),
+        style: { width: "100%", padding: 11, borderRadius: 8, border: "2px solid #ddd", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box", background: darfPreis ? "#fff" : "#f5f5f5", color: darfPreis ? "#000" : "#999" }
+      })
+    )
+  ),
+  /* Rabatt nur fuer Admin/Manager */
+  darfPreis && /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10, marginBottom: 10 } },
+    /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#777", marginBottom: 4, fontWeight: 600 } }, "Rabatt %"),
+      /*#__PURE__*/React.createElement("input", {
+        type: "number", step: "1", min: 0, max: 100, inputMode: "decimal", value: bearbProz,
+        onChange: e => setBearbProz(e.target.value), placeholder: "0",
+        style: { width: "100%", padding: 11, borderRadius: 8, border: "2px solid #ddd", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box" }
+      })
+    ),
+    /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#777", marginBottom: 4, fontWeight: 600 } }, "Rabatt \u20AC"),
+      /*#__PURE__*/React.createElement("input", {
+        type: "number", step: "0.01", min: 0, inputMode: "decimal", value: bearbAbzug,
+        onChange: e => setBearbAbzug(e.target.value), placeholder: "0,00",
+        style: { width: "100%", padding: 11, borderRadius: 8, border: "2px solid #ddd", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box" }
+      })
+    )
+  ),
+  /* Was am Ende wirklich berechnet wird */
+  /*#__PURE__*/React.createElement("div", {
+    style: { background: "#f1f8e9", border: "1.5px solid #c5e1a5", borderRadius: 9, padding: "9px 12px", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }
+  },
+    /*#__PURE__*/React.createElement("span", { style: { fontSize: 12.5, color: "#558b2f", fontWeight: 600 } },
+      bearbMengeZahl(), " \u00D7 ", fmt(bearbEndpreis())),
+    /*#__PURE__*/React.createElement("span", { style: { fontSize: 16, fontWeight: 800, color: C.green } },
+      fmt(bearbEndpreis() * bearbMengeZahl()))
+  ),
+  /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#777", marginBottom: 4, fontWeight: 600 } }, "\uD83D\uDCDD Notiz f\u00FCr K\u00FCche"),
+  /*#__PURE__*/React.createElement("textarea", {
     value: noteText,
     onChange: e => setNoteText(e.target.value),
     placeholder: "z.B. kein Zwiebeln, extra scharf...",
@@ -12968,10 +13122,22 @@ function OrderView({
     }
   }, "Abbrechen"), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
-      onUpdate(tableId, items.map(i => i._key === noteTarget ? {
-        ...i,
-        kitchenNote: noteText
-      } : i));
+      const menge = bearbMengeZahl();
+      const endpreis = bearbEndpreis();
+      onUpdate(tableId, items.map(i => {
+        if (i._key !== noteTarget) return i;
+        const neu = Object.assign({}, i, { kitchenNote: noteText, qty: menge });
+        if (darfPreis) {
+          /* _urPreis merkt den Preis VOR dem Rabatt - sonst waere beim
+             zweiten Oeffnen der rabattierte Preis die neue Grundlage und
+             der Rabatt wuerde sich stillschweigend verdoppeln. */
+          neu._urPreis = parseFloat(String(bearbPreis).replace(",", ".")) || 0;
+          neu._rabProz = parseFloat(String(bearbProz).replace(",", ".")) || 0;
+          neu._rabAbzug = parseFloat(String(bearbAbzug).replace(",", ".")) || 0;
+          neu.finalPrice = endpreis;
+        }
+        return neu;
+      }));
       setNoteTarget(null);
     },
     style: {
@@ -13007,10 +13173,15 @@ function OrderView({
     }
   }, fmt(total))), items.length > 0 && /*#__PURE__*/React.createElement("div", {
     ref: orderListRef,
+    /* v313: Die Bestellliste war auf 220 px gedeckelt und weiss wie die
+       Speisekarte darunter - ab der vierten Zeile musste man in einem
+       winzigen Fenster scrollen und sah nicht, wo die Bestellung aufhoert
+       und das Menue anfaengt. Jetzt bis 45 % der Bildschirmhoehe und ein
+       eigener heller Ton mit kraeftiger Trennkante. */
     style: {
-      background: "#fff",
-      borderBottom: "2px solid #eee",
-      maxHeight: 220,
+      background: "#fffdf7",
+      borderBottom: "3px solid " + C.pink,
+      maxHeight: "45vh",
       overflowY: "auto"
     }
   }, items.map(item => /*#__PURE__*/React.createElement("div", {
@@ -13018,8 +13189,8 @@ function OrderView({
     style: {
       display: "flex",
       alignItems: "center",
-      padding: "8px 12px",
-      borderBottom: "1px solid #f5f5f5"
+      padding: "9px 12px",
+      borderBottom: "1px solid #f0e6d8"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -13035,7 +13206,15 @@ function OrderView({
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, item.nr, ". ", item.name, item.note ? ` – ${item.note}` : ""), item.kitchenNote && /*#__PURE__*/React.createElement("div", {
+  }, item.nr, ". ", item.name, item.note ? ` – ${item.note}` : ""),
+  /* v312: Ein Rabatt muss am Tisch sichtbar sein, nicht erst auf dem Bon. */
+  (item._rabProz > 0 || item._rabAbzug > 0) && /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 10, color: C.orange, fontWeight: 700 }
+  }, "\uD83C\uDFF7\uFE0F ", (item._rabProz > 0 ? ("-" + item._rabProz + "%") : ""),
+     (item._rabProz > 0 && item._rabAbzug > 0 ? " \u00B7 " : ""),
+     (item._rabAbzug > 0 ? ("-" + fmt(item._rabAbzug)) : ""),
+     item._urPreis != null ? (" \u00B7 statt " + fmt(item._urPreis)) : ""),
+  item.kitchenNote && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       color: C.blue
@@ -13044,6 +13223,10 @@ function OrderView({
     onClick: () => {
       setNoteTarget(item._key);
       setNoteText(item.kitchenNote || "");
+      setBearbMenge(String(item.qty || 1));
+      setBearbPreis(String(item._urPreis != null ? item._urPreis : (item.finalPrice != null ? item.finalPrice : item.price) || 0));
+      setBearbProz(item._rabProz != null ? String(item._rabProz) : "");
+      setBearbAbzug(item._rabAbzug != null ? String(item._rabAbzug) : "");
     },
     style: {
       background: "none",
@@ -21772,7 +21955,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v310"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v314"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24024,7 +24207,8 @@ function App() {
     onClear: clearTable,
     optionGroups: optionGroups,
     menuData: menuData,
-    printerSettings: printerSettings
+    printerSettings: printerSettings,
+    loggedInUser: loggedInUser
   }), view === "kitchen" && /*#__PURE__*/React.createElement(KitchenView, {
     orders: tableOrders,
     takeaway: takeaway,
@@ -28627,6 +28811,7 @@ var SYNC_BLACKLIST = [
   'eatdesi_mode',          // Betriebsmodus pro Geraet (POS/Kiosk)
   'eatdesi_sumup_rueckweg',// SumUp-Rueckweg: haengt am Geraet, nicht am Restaurant
   'eatdesi_bt_freigeben',  // Drucker teilen: haengt am Geraet
+  'eatdesi_bereich_wahl',  // v311: welcher Tisch-Bereich zuletzt offen war (pro Geraet)
   'eatdesi_kuechen_schrift',// Schriftgroesse Kueche/Bar: haengt am Drucker
   'eatdesi_sb_url',        // Sync-interne Konfiguration
   'eatdesi_sb_key',
