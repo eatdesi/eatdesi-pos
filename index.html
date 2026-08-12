@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v314</title>
+<title>eatDeSi POS v315</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7320,6 +7320,117 @@ const DRINK_CATS = ["Cocktails","Alkoholfrei","Softdrinks","Bier","Weine","Long 
 // === NATIVE BLUETOOTH DRUCK (Capacitor BLE Plugin) =========================
 // Druckt direkt auf JEDEN Bluetooth-Thermodrucker (ESC/POS), ohne RawBT.
 // Funktioniert in der APK (nicht im normalen Browser).
+// ===== ROH-DRUCK ÜBER TCP (Port 9100) — für Nicht-Epson-WLAN-Drucker =====
+// Warum es das braucht: ePOS-Print ist eine Epson-Erfindung. MUNBYN, Xprinter
+// und die meisten anderen Netzwerkdrucker verstehen es nicht - sie nehmen nur
+// rohe ESC/POS-Bytes auf Port 9100 entgegen. Ein Browser darf keine rohen
+// TCP-Verbindungen oeffnen (Sicherheitsregel, keine Einstellung), deshalb
+// laeuft dieser Weg NUR in der APK ueber das Plugin capacitor-tcp-socket.
+// Im Browser sagen wir das ehrlich, statt einen Fehler zu zeigen.
+var RohDruck = {
+  plugin: function(){
+    try {
+      var c = window.Capacitor;
+      if(!(c && c.isNativePlatform && c.isNativePlatform())) return null;
+      return (c.Plugins && (c.Plugins.TcpSocket || c.Plugins.TCPSocket)) || null;
+    } catch(e){ return null; }
+  },
+  /* Umlaute: Thermodrucker kennen kein UTF-8. Standard ist CP858 (Codepage 19),
+     das CP850 mit Euro-Zeichen ist - damit stimmen ä ö ü ß und €. Was dort
+     fehlt, wird lesbar umgeschrieben (ä->ae), damit nie Kauderwelsch auf dem
+     Bon steht. */
+  CP858: { "\u00e4":132, "\u00f6":148, "\u00fc":129, "\u00c4":142, "\u00d6":153, "\u00dc":154,
+           "\u00df":225, "\u20ac":213, "\u00e9":130, "\u00e8":138, "\u00ea":136, "\u00e0":133,
+           "\u00e7":135, "\u00f1":164, "\u00d1":165, "\u00b0":248, "\u00a3":156, "\u00b7":250 },
+  ERSATZ: { "\u00e4":"ae","\u00f6":"oe","\u00fc":"ue","\u00c4":"Ae","\u00d6":"Oe","\u00dc":"Ue",
+            "\u00df":"ss","\u20ac":"EUR","\u2013":"-","\u2014":"-","\u201e":'"',"\u201c":'"',
+            "\u2018":"'","\u2019":"'","\u2026":"...","\u00d7":"x","\u2192":"->" },
+  textBytes: function(str){
+    var out = [];
+    var s2 = String(str == null ? "" : str);
+    for(var i = 0; i < s2.length; i++){
+      var ch = s2.charAt(i), code = s2.charCodeAt(i);
+      if(code < 128){ out.push(code); continue; }
+      if(this.CP858[ch] != null){ out.push(this.CP858[ch]); continue; }
+      var er = this.ERSATZ[ch];
+      if(er){ for(var k = 0; k < er.length; k++) out.push(er.charCodeAt(k) & 0x7F); continue; }
+      out.push(63); // '?'
+    }
+    return out;
+  },
+  /* Baut aus den Zeilen (dieselben, die auch ePOS bekommt) einen ESC/POS-Strom. */
+  bytes: function(lines, kitchen, codepage){
+    var b = [];
+    var push = function(a){ for(var i = 0; i < a.length; i++) b.push(a[i]); };
+    push([0x1B, 0x40]);                                   // ESC @  Drucker zuruecksetzen
+    push([0x1B, 0x74, (codepage == null ? 19 : codepage)]); // ESC t  Zeichensatz
+    for(var i = 0; i < lines.length; i++){
+      var ln = lines[i] || {};
+      var al = ln.align === 'center' ? 1 : (ln.align === 'right' ? 2 : 0);
+      push([0x1B, 0x61, al]);                             // ESC a  Ausrichtung
+      var dh = kitchen ? true : !!ln.big;                 // doppelte Hoehe
+      var dw = (kitchen && ln.big) ? true : false;        // doppelte Breite
+      var mode = 0;
+      if(ln.bold) mode |= 0x08;
+      if(dh) mode |= 0x10;
+      if(dw) mode |= 0x20;
+      push([0x1B, 0x21, mode]);                           // ESC !  Schriftbild
+      push(this.textBytes(ln.text));
+      push([0x0A]);
+      push([0x1B, 0x21, 0x00]);                           // zuruecksetzen
+    }
+    push([0x1B, 0x64, 0x04]);                             // ESC d  4 Zeilen vorschieben
+    push([0x1D, 0x56, 0x42, 0x00]);                       // GS V B  abschneiden
+    return b;
+  },
+  b64: function(arr){
+    var s2 = "";
+    for(var i = 0; i < arr.length; i++) s2 += String.fromCharCode(arr[i] & 0xFF);
+    return window.btoa(s2);
+  },
+  /* Verbinden, senden, trennen. Der Drucker antwortet nicht - deshalb gilt
+     "gesendet ohne Fehler" als Erfolg. */
+  print: function(ip, port, html, kitchen, codepage){
+    var self = this;
+    var P = self.plugin();
+    if(!P) return Promise.reject(new Error(
+      "Roh-Druck (Port 9100) geht nur in der Android-App, nicht im Browser. " +
+      "Der Browser darf keine direkte Druckerverbindung oeffnen."));
+    var lines = EposWiFi.htmlToLines(html);
+    var daten = self.b64(self.bytes(lines, kitchen, codepage));
+    var klient = null;
+    return Promise.resolve(P.connect({ ipAddress: ip, port: (port || 9100) }))
+      .then(function(r){
+        klient = (r && (r.client != null ? r.client : r.clientId));
+        if(klient == null) throw new Error("Keine Verbindung zu " + ip + ":" + (port || 9100));
+        return P.send({ client: klient, data: daten, encoding: "base64" });
+      })
+      .then(function(){
+        /* Kurz warten: manche Module brechen ab, wenn sofort getrennt wird,
+           und drucken dann nur den halben Bon. */
+        return new Promise(function(res){ setTimeout(res, 400); });
+      })
+      .then(function(){
+        try { P.disconnect({ client: klient }); } catch(e){}
+        return { ok: true, url: "tcp://" + ip + ":" + (port || 9100) };
+      })
+      .catch(function(e){
+        if(klient != null){ try { P.disconnect({ client: klient }); } catch(e2){} }
+        throw new Error((e && e.message) ? e.message : String(e));
+      });
+  }
+};
+
+/* Eine Stelle entscheidet, welcher WLAN-Weg genommen wird. */
+function belksWlanDruck(cfg, html, kitchen){
+  var ip = cfg && cfg.ip;
+  if(!ip) return Promise.reject(new Error("Keine IP hinterlegt."));
+  if((cfg.wifiProto || 'epos') === 'raw'){
+    return RohDruck.print(ip, cfg.wifiPort || 9100, html, kitchen, cfg.wifiCp);
+  }
+  return EposWiFi.print(ip, html, kitchen);
+}
+
 // ===== Epson ePOS-Print WiFi/LAN Helper (direkter Druck über IP, kein Dialog) =====
 // Nutzt die ePOS-Print Service der TM-m30/TM-m30III (muss am Drucker aktiviert sein).
 // Wandelt unser Bon-HTML in ePOS-Print XML und sendet es per HTTP POST an den Drucker.
@@ -9207,7 +9318,7 @@ function BonModal({
     } else if (method === "wifi" && printerSettings?.ip) {
       // Direkter WLAN-Druck über ePOS-Print (kein Dialog)
       var isKitchenD = (typeof fontOverride !== 'number') || fontOverride >= 0x01;
-      EposWiFi.print(printerSettings.ip, html, isKitchenD).catch(function(e){
+      belksWlanDruck(printerSettings, html, isKitchenD).catch(function(e){
         printHtml(html);
       });
     } else {
@@ -16427,13 +16538,18 @@ function PrinterSettingsView({
       '<div class="row"><span>Drucker:</span><span>'+form.ip+'</span></div>'+
       '<div class="row"><span>Status:</span><span>OK</span></div>'+
       '<div class="line"></div>'+
-      '<div class="center">ePOS-Print funktioniert! ✓</div>'+
+      '<div class="center">WLAN-Druck funktioniert! \u2713</div>'+
       '</body></html>';
-    EposWiFi.print(form.ip, testHtml, false).then(function(r){
-      var via = (r && r.url) ? (" ("+(r.url.indexOf('https')===0?'HTTPS':'HTTP')+")") : "";
-      setWifiStatus("✅ Bon gesendet an " + form.ip + via + "! Wenn nichts druckt: ePOS-Print am Drucker aktivieren.");
+    var roh = (form.wifiProto || 'epos') === 'raw';
+    belksWlanDruck(form, testHtml, false).then(function(r){
+      var via = (r && r.url) ? (" \u00B7 " + r.url) : "";
+      setWifiStatus("\u2705 Bon gesendet an " + form.ip + via + (roh
+        ? ". Kommt nichts: Port pr\u00FCfen (meist 9100)."
+        : ". Wenn nichts druckt: ePOS-Print am Drucker aktivieren."));
     }).catch(function(e){
-      setWifiStatus("❌ " + (e.message||e) + ". Prüfe: 1) Drucker im gleichen WLAN, 2) ePOS-Print Service am Drucker aktiviert (WebConfig), 3) IP korrekt.");
+      setWifiStatus("\u274C " + (e.message||e) + (roh
+        ? " Pr\u00FCfe: 1) Drucker im gleichen WLAN, 2) Port (meist 9100), 3) IP korrekt."
+        : " Pr\u00FCfe: 1) Drucker im gleichen WLAN, 2) ePOS-Print Service am Drucker aktiviert (WebConfig), 3) IP korrekt."));
     });
   };
   const testBrowserPrint = () => {
@@ -16815,7 +16931,55 @@ function PrinterSettingsView({
       color: C.blue,
       marginBottom: 10
     }
-  }, "\uD83D\uDCE1 WiFi Drucker Einstellungen"), /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCE1 WiFi Drucker Einstellungen"),
+  /* v315: Bisher konnte hier nur Epson. Wer einen MUNBYN, Xprinter o.\u00E4.
+     anschloss, bekam endlose ERROR_PARAMETER - die Einstellung versprach
+     etwas, das der Drucker gar nicht kann. Jetzt wird der Weg gew\u00E4hlt. */
+  /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#888", marginBottom: 4 } }, "Druckertyp"),
+  /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10 } },
+    [{ id: "epos", t: "Epson (ePOS)", u: "TM-m30, TM-T88" },
+     { id: "raw",  t: "Standard 9100", u: "MUNBYN, Xprinter \u2026" }].map(function(o){
+      var aktiv = (form.wifiProto || "epos") === o.id;
+      return /*#__PURE__*/React.createElement("button", {
+        key: o.id,
+        onClick: function(){ setForm(function(f){ return Object.assign({}, f, { wifiProto: o.id }); }); setWifiStatus(""); },
+        style: { flex: 1, padding: "8px 6px", borderRadius: 9, cursor: "pointer", fontFamily: "inherit",
+                 border: "2px solid " + (aktiv ? C.blue : "#ddd"),
+                 background: aktiv ? "#e3f2fd" : "#fff", color: aktiv ? C.blue : "#777" }
+      },
+        /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 12.5 } }, o.t),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, opacity: .8 } }, o.u)
+      );
+    })
+  ),
+  (form.wifiProto === "raw") && /*#__PURE__*/React.createElement("div", {
+    style: { background: "#fff8e1", border: "1.5px solid #ffe082", borderRadius: 8, padding: "8px 10px", marginBottom: 10, fontSize: 11, color: "#8d6e63", lineHeight: 1.5 }
+  }, "\u2139\uFE0F Dieser Weg funktioniert nur in der Android-App, nicht im Browser \u2013 ein Browser darf keine direkte Druckerverbindung \u00F6ffnen."),
+  (form.wifiProto === "raw") && /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 8 } },
+    /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#888", marginBottom: 4 } }, "Port"),
+      /*#__PURE__*/React.createElement("input", {
+        value: form.wifiPort == null ? 9100 : form.wifiPort,
+        onChange: function(e){ var v = parseInt(e.target.value, 10); setForm(function(f){ return Object.assign({}, f, { wifiPort: isNaN(v) ? 9100 : v }); }); },
+        inputMode: "numeric",
+        style: { width: "100%", padding: 10, borderRadius: 8, border: "2px solid #b3d9ff", fontSize: 14, fontFamily: "monospace", boxSizing: "border-box" }
+      })
+    ),
+    /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#888", marginBottom: 4 } }, "Umlaute"),
+      /*#__PURE__*/React.createElement("select", {
+        value: form.wifiCp == null ? 19 : form.wifiCp,
+        onChange: function(e){ var v = parseInt(e.target.value, 10); setForm(function(f){ return Object.assign({}, f, { wifiCp: v }); }); },
+        style: { width: "100%", padding: 10, borderRadius: 8, border: "2px solid #b3d9ff", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", background: "#fff" }
+      },
+        /*#__PURE__*/React.createElement("option", { value: 19 }, "CP858 (Standard)"),
+        /*#__PURE__*/React.createElement("option", { value: 2 },  "CP850"),
+        /*#__PURE__*/React.createElement("option", { value: 16 }, "Windows-1252"),
+        /*#__PURE__*/React.createElement("option", { value: 0 },  "CP437")
+      )
+    )
+  ),
+  /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: "#888",
@@ -16858,7 +17022,7 @@ function PrinterSettingsView({
       fontWeight: 700,
       fontSize: 12
     }
-  }, "\uD83D\uDD13 Zertifikat \u00F6ffnen"), /*#__PURE__*/React.createElement("button", {
+  }, (form.wifiProto === "raw") ? "\uD83C\uDF10 Drucker-Seite" : "\uD83D\uDD13 Zertifikat \u00F6ffnen"), /*#__PURE__*/React.createElement("button", {
     onClick: testWiFiPrint,
     style: {
       flex: 1,
@@ -16889,7 +17053,11 @@ function PrinterSettingsView({
       background: "#e1f5fe",
       borderRadius: 8
     }
-  }, "\uD83D\uDCA1 ", /*#__PURE__*/React.createElement("b", null, "Erster Schritt:"), " Auf \u201E\uD83D\uDD13 Zertifikat \u00F6ffnen\u201C tippen \u2192 \u201EAdvanced\u201C \u2192 \u201EProceed\u201C, damit der Browser dem Drucker vertraut. Danach Testdruck. Drucker muss im gleichen WLAN sein. Mehrere Tablets gleichzeitig m\u00F6glich.")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, (form.wifiProto === "raw")
+     ? [/*#__PURE__*/React.createElement("b", { key:"b" }, "\uD83D\uDCA1 Erster Schritt: "),
+        "Drucker muss im gleichen WLAN sein und eine feste IP haben (im Router unter \u201EImmer die gleiche IP\u201C). Danach Testdruck \u2013 in der Android-App. Mehrere Tablets gleichzeitig m\u00F6glich."]
+     : [/*#__PURE__*/React.createElement("b", { key:"b" }, "\uD83D\uDCA1 Erster Schritt: "),
+        "Auf \u201E\uD83D\uDD13 Zertifikat \u00F6ffnen\u201C tippen \u2192 \u201EAdvanced\u201C \u2192 \u201EProceed\u201C, damit der Browser dem Drucker vertraut. Danach Testdruck. Drucker muss im gleichen WLAN sein. Mehrere Tablets gleichzeitig m\u00F6glich."])), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: "#888",
@@ -21955,7 +22123,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v314"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v315"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
