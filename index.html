@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v320</title>
+<title>eatDeSi POS v321</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7320,6 +7320,31 @@ const DRINK_CATS = ["Cocktails","Alkoholfrei","Softdrinks","Bier","Weine","Long 
 // === NATIVE BLUETOOTH DRUCK (Capacitor BLE Plugin) =========================
 // Druckt direkt auf JEDEN Bluetooth-Thermodrucker (ESC/POS), ohne RawBT.
 // Funktioniert in der APK (nicht im normalen Browser).
+/* ═══ v321: DER GESCHÄFTSTAG ENDET UM 04:00, NICHT UM MITTERNACHT ═══
+   Um 00:20 zeigte der Bericht "Freitag, 14. August" mit 0 Bestellungen -
+   der ganze Abend war weg, obwohl niemand einen Abschluss gemacht hatte.
+   Grund: gerechnet wurde nach Kalendertag. Ein Restaurant, das bis nach
+   Mitternacht bedient, hat aber EINEN Abend: die Buchung um 23:55 und die
+   um 00:30 gehoeren in dieselbe Kasse. Genau deshalb macht der
+   Auto-Abschluss auch um 04:00 und nicht um 00:00.
+   Ab jetzt gilt: alles vor 04:00 zaehlt zum Vortag. */
+var BELKS_TAGESWECHSEL = 4;   // Stunde, ab der ein neuer Geschaeftstag beginnt
+/* Gibt den Beginn des Geschaeftstages zurueck, zu dem ein Zeitpunkt gehoert. */
+function belksTagStart(zeit){
+  var d = zeit ? new Date(zeit) : new Date();
+  if(isNaN(d.getTime())) d = new Date();
+  var s = new Date(d.getFullYear(), d.getMonth(), d.getDate(), BELKS_TAGESWECHSEL, 0, 0, 0);
+  if(d.getHours() < BELKS_TAGESWECHSEL) s.setDate(s.getDate() - 1);
+  return s;
+}
+/* Kennung des Geschaeftstages, z.B. "2026-08-13" - zum Vergleichen. */
+function belksTagKey(zeit){
+  var s = belksTagStart(zeit);
+  return s.getFullYear() + "-" + String(s.getMonth()+1).padStart(2,"0") + "-" + String(s.getDate()).padStart(2,"0");
+}
+/* Gehoert dieser Zeitpunkt zum selben Geschaeftstag wie der zweite? */
+function belksGleicherTag(a, b){ return belksTagKey(a) === belksTagKey(b); }
+
 /* ═══ v320: ZAHLARTEN EINER BESTELLUNG ═══
    Bei getrennter Zahlung stand als Zahlart nur "Getrennt". Der Tagesbericht
    zaehlt aber ausschliesslich payMethod === "Bar" bzw. "Karte" - der ganze
@@ -11351,9 +11376,11 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
   const getDateRange = () => {
     const now = new Date();
     if (period === "tag") {
-      const s = new Date(now); s.setHours(0,0,0,0);
-      const e = new Date(now); e.setHours(23,59,59,999);
-      return { from: s, to: e, label: now.toLocaleDateString("de-DE", { weekday:"long", day:"2-digit", month:"long" }) };
+      /* v321: Geschaeftstag statt Kalendertag - sonst steht nachts um 00:20
+         ein leeres Kassenbuch da, obwohl Geld in der Kasse liegt. */
+      const s = belksTagStart(now);
+      const e = new Date(s); e.setDate(e.getDate() + 1); e.setMilliseconds(-1);
+      return { from: s, to: e, label: s.toLocaleDateString("de-DE", { weekday:"long", day:"2-digit", month:"long" }) };
     }
     if (period === "woche") {
       const d = new Date(now);
@@ -14011,7 +14038,7 @@ function SummaryView({
   completedOrders,
   expenses
 }) {
-  const today = completedOrders.filter(o => new Date(o.time).toDateString() === new Date().toDateString() && !o.storniert);
+  const today = completedOrders.filter(o => belksGleicherTag(o.time, new Date()) && !o.storniert);
   const total = today.reduce((s, o) => s + o.total, 0);
   const tax = total / (1 + TAX_FOOD) * TAX_FOOD; // approx
   const bar = belksSummeBar(today);
@@ -14021,7 +14048,7 @@ function SummaryView({
     topItems[i.name] = (topItems[i.name] || 0) + i.qty;
   }));
   const topList = Object.entries(topItems).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  const todayExp = expenses.filter(e => new Date(e.time).toDateString() === new Date().toDateString()).reduce((s, e) => s + e.amount, 0);
+  const todayExp = expenses.filter(e => belksGleicherTag(e.time, new Date())).reduce((s, e) => s + e.amount, 0);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 14,
@@ -14201,20 +14228,27 @@ function SummaryView({
 function getPeriodRange(period, customFrom, customTo) {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (period === "heute") return {
-    from: today,
-    to: now,
-    label: "Heute"
-  };
+  /* v321: "Heute" ist der laufende Geschaeftstag - er beginnt um 04:00 und
+     reicht bis 04:00 am naechsten Morgen. Um 00:20 ist damit noch der
+     gestrige Abend gemeint, so wie es auch in der Kasse liegt. */
+  if (period === "heute") {
+    const von = belksTagStart(now);
+    return {
+      from: von,
+      to: now,
+      label: "Heute (" + von.toLocaleDateString("de-DE", { weekday:"short", day:"2-digit", month:"2-digit" }) + ")"
+    };
+  }
   if (period === "gestern") {
-    const g = new Date(today);
-    g.setDate(today.getDate() - 1);
+    const g = belksTagStart(now);
+    g.setDate(g.getDate() - 1);
     const ge = new Date(g);
-    ge.setHours(23, 59, 59);
+    ge.setDate(ge.getDate() + 1);
+    ge.setMilliseconds(-1);
     return {
       from: g,
       to: ge,
-      label: "Gestern"
+      label: "Gestern (" + g.toLocaleDateString("de-DE", { weekday:"short", day:"2-digit", month:"2-digit" }) + ")"
     };
   }
   if (period === "woche") {
@@ -15472,7 +15506,7 @@ function ExpensesView({
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState("Lebensmittel");
   const CATS = ["Lebensmittel", "Getränke", "Personal", "Reinigung", "Reparatur", "Sonstiges"];
-  const todayTotal = expenses.filter(e => new Date(e.time).toDateString() === new Date().toDateString()).reduce((s, e) => s + e.amount, 0);
+  const todayTotal = expenses.filter(e => belksGleicherTag(e.time, new Date())).reduce((s, e) => s + e.amount, 0);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 14,
@@ -19991,7 +20025,7 @@ function DeliveryPersonView({ drivers, takeaway, completedOrders, onSave }) {
   const todayDeliveries = completedOrders.filter(o => {
     const d = new Date(o.time);
     const today = new Date();
-    return d.toDateString() === today.toDateString() && String(o.tableId||"").startsWith("ta_");
+    return belksGleicherTag(d, today) && String(o.tableId||"").startsWith("ta_");
   });
 
   return /*#__PURE__*/React.createElement("div", { style:{ display:"flex", flexDirection:"column", height:"calc(100vh - 90px)" } },
@@ -22300,7 +22334,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v320"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v321"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26891,10 +26925,10 @@ function ChannelsView({menuData, completedOrders}){
   function rmLine(i){setLines(lines.filter(function(_,j){return j!==i;}));}
   var sum=lines.reduce(function(s,l){return s+l.price*l.qty;},0)+(parseFloat(fee)||0);
   // Heutige Zähler pro Kanal (kanalgetrennte Statistik lebt in Monatsstatistik/Kassenbuch)
-  var today=new Date().toDateString();
+  var today=new Date();
   var cntL=0,cntU=0;
   (completedOrders||[]).forEach(function(o){
-    try{ if(new Date(o.time||o.created_at||0).toDateString()!==today) return;
+    try{ if(!belksGleicherTag(o.time||o.created_at||0, today)) return;
       var c=orderChannel(o); if(c==='lieferando')cntL++; else if(c==='ubereats')cntU++;
     }catch(e){}
   });
