@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v318</title>
+<title>eatDeSi POS v319</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -10005,7 +10005,23 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
   const PCOLORS = ["#1565c0","#2e7d32","#e65100","#880e4f","#4a148c","#bf360c","#00695c","#37474f"];
 
   const selItems = items.filter(i => sel[i._key]);
-  const selTotal = selItems.reduce((s,i)=>s+i.finalPrice*i.qty,0);
+  /* ═══ v319: RABATT AUCH BEI GETRENNTER ZAHLUNG ═══
+     Im Hauptfenster gab es Rabatt/Gutschein, hier nicht. Wer einem einzelnen
+     Gast etwas nachlassen wollte, musste die ganze Rechnung zusammen
+     kassieren - oder den Nachlass am Kassenbuch vorbei geben.
+     rohTotal = Summe der gewaehlten Artikel, selTotal = das, was der Gast
+     wirklich zahlt. Ab hier rechnet ALLES mit selTotal weiter: Trinkgeld,
+     Rueckgeld, Bon und Buchung. */
+  const [rabattType, setRabattType] = React.useState("none");
+  const [rabattVal, setRabattVal] = React.useState("");
+  const rohTotal = selItems.reduce((s,i)=>s+i.finalPrice*i.qty,0);
+  const rabattAmt = (() => {
+    const v = parseFloat(String(rabattVal).replace(",", ".")) || 0;
+    if (rabattType === "percent") return Math.min(rohTotal, Math.round(rohTotal * v) / 100);
+    if (rabattType === "euro")    return Math.min(rohTotal, Math.round(v * 100) / 100);
+    return 0;
+  })();
+  const selTotal = Math.max(0, Math.round((rohTotal - rabattAmt) * 100) / 100);
   const tgVal = parseFloat(tg)||0;
   const totalWithTG = selTotal + tgVal;
   /* Wie im Hauptfenster: der Gast nennt den Gesamtbetrag, nicht das
@@ -10033,19 +10049,24 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
   };
   const leereBetrag = () => { setZahlText(""); setTg(""); };
   // Beim Wechsel zum naechsten Gast das Feld leeren
-  React.useEffect(() => { setZahlText(""); }, [gastNr]);
+  React.useEffect(() => { setZahlText(""); setRabattType("none"); setRabattVal(""); }, [gastNr]);
   const cashChange = (parseFloat(cashGiven)||0) - totalWithTG;
   const gastColor = PCOLORS[gastNr % PCOLORS.length];
 
   const confirmPay = (method) => {
     const cashInfo = method === "Bar" ? { cashGiven: parseFloat(cashGiven)||0, change: cashChange } : null;
     // Print bon for this guest
-    printGastBon(selItems, selTotal, tgVal, method, gastNr+1, label, printerSettings);
-    onGastPaid(selItems, method, tgVal, cashInfo);
+    printGastBon(selItems, selTotal, tgVal, method, gastNr+1, label, printerSettings, rabattAmt);
+    /* Der Rabatt muss mitgereicht werden: die Buchung rechnet sonst wieder
+       die vollen Artikelpreise zusammen - der Gast zahlt 19 EUR und die
+       Kasse bucht 21,20 EUR. */
+    onGastPaid(selItems, method, tgVal, cashInfo, rabattAmt);
     setSel({});
     setPayMethod(null);
     setCashGiven("");
     setTg("");
+    setRabattType("none");
+    setRabattVal("");
   };
 
   const rawbtPrint = (text) => {
@@ -10059,7 +10080,7 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
 
-  const printGastBon = (gitems, gtotal, gtg, method, nr, lbl, firma) => {
+  const printGastBon = (gitems, gtotal, gtg, method, nr, lbl, firma, grab) => {
     const name = firma?.firmaName || "eatDeSi";
     const now = new Date();
     const dateStr = fmtD(now) + ' ' + fmtT(now);
@@ -10076,6 +10097,7 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
           return `<div class="row"><span>${head}</span><span>${fmt(i.finalPrice*i.qty)}</span></div>${noteLine}`;
         }).join("");
         L += `<div class="line"></div>`;
+        if (grab > 0) L += `<div class="row"><span>Rabatt</span><span>-${fmt(grab)}</span></div>`;
         L += `<div class="row bold" style="font-size:16px"><span>GESAMT</span><span>${fmt(gtotal)}</span></div>`;
         if (gtg > 0) L += `<div class="row"><span>Trinkgeld</span><span>${fmt(gtg)}</span></div>`;
         L += `<div class="row bold"><span>Zahlung:</span><span>${method}</span></div>`;
@@ -10194,7 +10216,31 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
       ),
       selItems.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ background:gastColor+"15", borderRadius:8, padding:"10px 12px", marginBottom:10, display:"flex", justifyContent:"space-between", fontWeight:700, color:gastColor, fontSize:15 } },
         /*#__PURE__*/React.createElement("span", null, "Gast ", gastNr+1, " gesamt"),
-        /*#__PURE__*/React.createElement("span", null, fmt(selTotal))
+        /*#__PURE__*/React.createElement("span", null,
+          rabattAmt > 0 && /*#__PURE__*/React.createElement("span", { style:{ textDecoration:"line-through", opacity:.55, fontWeight:600, marginRight:8, fontSize:13 } }, fmt(rohTotal)),
+          fmt(selTotal))
+      ),
+      // v319: Rabatt fuer genau diesen Gast
+      selItems.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ background:"#fce4ec", border:"2px solid #f48fb1", borderRadius:10, padding:"10px 11px", marginBottom:10 } },
+        /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:12.5, color:"#c2185b", marginBottom:7 } },
+          "\uD83C\uDF9F\uFE0F Rabatt f\u00FCr Gast ", gastNr+1),
+        /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6, marginBottom: rabattType==="none" ? 0 : 7 } },
+          [["none","Kein"],["percent","% Rabatt"],["euro","\u20ac Abzug"]].map(([v,l]) =>
+            /*#__PURE__*/React.createElement("button", { key:v, onClick:()=>{ setRabattType(v); setRabattVal(""); setZahlText(""); setTg(""); },
+              style:{ flex:1, padding:"7px 0", borderRadius:8, border:"2px solid "+(rabattType===v?"#c2185b":"#ddd"), background:rabattType===v?"#c2185b":"#fff", color:rabattType===v?"#fff":"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:11.5 }
+            }, l)
+          )
+        ),
+        rabattType !== "none" && /*#__PURE__*/React.createElement("input", {
+          type:"number", inputMode:"decimal", value:rabattVal,
+          onChange:e=>{ setRabattVal(e.target.value); setZahlText(""); setTg(""); },
+          placeholder: rabattType==="percent" ? "z.B. 10" : "z.B. 5,00",
+          style:{ width:"100%", padding:"9px 12px", borderRadius:8, border:"2px solid #f48fb1", fontSize:14, fontFamily:"inherit", boxSizing:"border-box" }
+        }),
+        rabattAmt > 0 && /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:8, padding:"6px 10px", marginTop:7, display:"flex", justifyContent:"space-between", fontSize:13, color:"#c2185b", fontWeight:700 } },
+          /*#__PURE__*/React.createElement("span", null, "Ersparnis"),
+          /*#__PURE__*/React.createElement("span", null, "\u2212", fmt(rabattAmt))
+        )
       ),
       /* \u26A0\uFE0F LETZTE ZAHLUNG
          Alle uebrigen Artikel sind ausgewaehlt -> danach ist der Tisch zu.
@@ -10873,9 +10919,11 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
           gastNr: einzelnGast,
           label: label,
           printerSettings: printerSettings,
-          onGastPaid: (gastItems, method, tg, cashInfo) => {
-            const amt = gastItems.reduce((s,i)=>s+i.finalPrice*i.qty,0);
-            const newPaid = [...einzelnPaid, { items: gastItems, amount: amt, method, trinkgeld: tg, cashInfo, gastNr: einzelnGast+1 }];
+          onGastPaid: (gastItems, method, tg, cashInfo, gastRabatt) => {
+            /* v319: was der Gast wirklich bezahlt hat - Artikel minus Rabatt. */
+            const roh = gastItems.reduce((s,i)=>s+i.finalPrice*i.qty,0);
+            const amt = Math.max(0, Math.round((roh - (gastRabatt||0)) * 100) / 100);
+            const newPaid = [...einzelnPaid, { items: gastItems, amount: amt, method, trinkgeld: tg, cashInfo, rabatt: (gastRabatt||0), gastNr: einzelnGast+1 }];
             setEinzelnPaid(newPaid);
             // remove paid items from remaining
             const paidKeys = new Set(gastItems.map(i=>i._key));
@@ -10885,7 +10933,13 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
             if (rem.length === 0) {
               // All done
               const totalTG = newPaid.reduce((s,p)=>s+(p.trinkgeld||0),0);
-              setDone({ method:"Getrennt", total: totalNachRabatt, rabatt: rabattAmt, trinkgeld: totalTG, totalWithTG: totalNachRabatt+totalTG, splitDetails: newPaid.map(p=>({amount:p.amount, method:p.method, trinkgeld:p.trinkgeld||0})) });
+              /* v319: Die Summe ist das, was die Gaeste zusammen bezahlt haben.
+                 Vorher stand hier der Rechnungsbetrag des Hauptfensters - mit
+                 einem Rabatt bei einem einzelnen Gast haette der Tagesabschluss
+                 mehr ausgewiesen, als in der Kasse liegt. */
+              const gesamtBezahlt = Math.round(newPaid.reduce((s,p)=>s+(p.amount||0),0) * 100) / 100;
+              const gesamtRabatt = Math.round(newPaid.reduce((s,p)=>s+(p.rabatt||0),0) * 100) / 100;
+              setDone({ method:"Getrennt", total: gesamtBezahlt, rabatt: gesamtRabatt, trinkgeld: totalTG, totalWithTG: gesamtBezahlt+totalTG, splitDetails: newPaid.map(p=>({amount:p.amount, method:p.method, trinkgeld:p.trinkgeld||0})) });
               setStep("done");
             }
           },
@@ -22195,7 +22249,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v318"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v319"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
