@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v316</title>
+<title>eatDeSi POS v317</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9038,7 +9038,13 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   }
   if (printerCfg?.method === "wifi" && printerCfg?.ip) {
     var isKitchenW = /KÜCHE|KUECHE|BAR/i.test(title||"");
-    EposWiFi.print(printerCfg.ip, html, isKitchenW).catch(function(e){
+    /* v317: Hier stand noch EposWiFi.print - der Epson-eigene Weg. Kueche,
+       Bar und Gaestebon laufen ueber eine andere Stelle und wurden in v315
+       schon umgestellt; DIESE Stelle bedient den Zahlungs- und den
+       Einzelzahlungs-Bon. Auf einem Nicht-Epson-Drucker schlug sie still
+       fehl und landete im Browser-Druck - der Gast bekam keinen Beleg.
+       Jetzt nimmt auch sie den in den Einstellungen gewaehlten Weg. */
+    belksWlanDruck(printerCfg, html, isKitchenW).catch(function(e){
       // Fehlschlag -> Browser-Druck als Fallback, damit nichts verloren geht
       printHtml(html);
     });
@@ -22148,7 +22154,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v316"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v317"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
