@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v319</title>
+<title>eatDeSi POS v320</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7320,6 +7320,44 @@ const DRINK_CATS = ["Cocktails","Alkoholfrei","Softdrinks","Bier","Weine","Long 
 // === NATIVE BLUETOOTH DRUCK (Capacitor BLE Plugin) =========================
 // Druckt direkt auf JEDEN Bluetooth-Thermodrucker (ESC/POS), ohne RawBT.
 // Funktioniert in der APK (nicht im normalen Browser).
+/* ═══ v320: ZAHLARTEN EINER BESTELLUNG ═══
+   Bei getrennter Zahlung stand als Zahlart nur "Getrennt". Der Tagesbericht
+   zaehlt aber ausschliesslich payMethod === "Bar" bzw. "Karte" - der ganze
+   Betrag fiel damit aus BEIDEN Summen heraus. Beispiel Tisch 36: 117,30 EUR
+   waren im Umsatz, aber weder in Bar noch in Karte. Ein Kassensturz konnte
+   nicht stimmen und dem Finanzamt fehlte die Aufteilung.
+   Diese eine Funktion beantwortet fuer JEDE Bestellung: wie viel bar, wie
+   viel mit Karte. Alle Berichte fragen ab jetzt hier. */
+function belksZahlarten(o){
+  var bar = 0, karte = 0, sonst = 0;
+  if(!o) return { bar: 0, karte: 0, sonst: 0 };
+  var det = o.splitDetails;
+  if(Array.isArray(det) && det.length){
+    for(var i = 0; i < det.length; i++){
+      var d = det[i] || {};
+      var betrag = Number(d.amount) || 0;
+      if(d.method === 'Bar') bar += betrag;
+      else if(d.method === 'Karte') karte += betrag;
+      else sonst += betrag;
+    }
+    /* Rundungsrest gegen den gebuchten Gesamtbetrag ausgleichen, damit die
+       Summe der Zahlarten nie neben dem Umsatz liegt. */
+    var summe = bar + karte + sonst;
+    var ziel = Number(o.total) || 0;
+    var rest = Math.round((ziel - summe) * 100) / 100;
+    if(Math.abs(rest) >= 0.01 && Math.abs(rest) < 1){
+      if(karte >= bar) karte += rest; else bar += rest;
+    }
+    return { bar: Math.round(bar*100)/100, karte: Math.round(karte*100)/100, sonst: Math.round(sonst*100)/100 };
+  }
+  var t = Number(o.total) || 0;
+  if(o.payMethod === 'Bar') return { bar: t, karte: 0, sonst: 0 };
+  if(o.payMethod === 'Karte') return { bar: 0, karte: t, sonst: 0 };
+  return { bar: 0, karte: 0, sonst: t };
+}
+function belksSummeBar(liste){ return (liste||[]).reduce(function(s,o){ return s + belksZahlarten(o).bar; }, 0); }
+function belksSummeKarte(liste){ return (liste||[]).reduce(function(s,o){ return s + belksZahlarten(o).karte; }, 0); }
+
 // ===== ROH-DRUCK ÜBER TCP (Port 9100) — für Nicht-Epson-WLAN-Drucker =====
 // Warum es das braucht: ePOS-Print ist eine Epson-Erfindung. MUNBYN, Xprinter
 // und die meisten anderen Netzwerkdrucker verstehen es nicht - sie nehmen nur
@@ -11084,7 +11122,9 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
                   }, 500);
                 }
               }
-              onComplete(done.method, done.trinkgeld||0, done.rabatt||0, gutscheinApplied?{id:gutscheinApplied.id,rabatt:gutscheinRabatt}:null, loyaltyPhone||null, redeemedPts||0);
+              /* v320: die Aufteilung muss mit - sonst ist beim Buchen nicht
+                 mehr feststellbar, was bar und was mit Karte kam. */
+              onComplete(done.method, done.trinkgeld||0, done.rabatt||0, gutscheinApplied?{id:gutscheinApplied.id,rabatt:gutscheinRabatt}:null, loyaltyPhone||null, redeemedPts||0, done.splitDetails||null);
             },
             style:{ width:"100%", padding:14, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:15 }
           }, "\uD83C\uDD95 Tisch freigeben"),
@@ -11349,8 +11389,8 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
 
   const rev = filtered.reduce((s,o)=>s+(o.total||0),0);
   const tg = filtered.reduce((s,o)=>s+(o.trinkgeld||0),0);
-  const bar = filtered.filter(o=>o.payMethod==="Bar").reduce((s,o)=>s+(o.total||0),0);
-  const karte = filtered.filter(o=>o.payMethod==="Karte").reduce((s,o)=>s+(o.total||0),0);
+  const bar = belksSummeBar(filtered);
+  const karte = belksSummeKarte(filtered);
   const rabattTotal = filtered.reduce((s,o)=>s+(o.rabatt||0),0);
   const stornoSum = stornos.reduce((s,o)=>s+(o.total||0),0);
   const exp = filtExp.reduce((s,e)=>s+(e.amount||0),0);
@@ -11512,8 +11552,8 @@ function MonatsreportView({ completedOrders }) {
   const data = Array.from({length:12},(_,m) => {
     const ord = completedOrders.filter(o => { const d=new Date(o.time); return d.getFullYear()===selYear && d.getMonth()===m && !o.storniert; });
     return { m, rev:ord.reduce((s,o)=>s+(o.total||0),0), count:ord.length,
-      bar:ord.filter(o=>o.payMethod==="Bar").reduce((s,o)=>s+(o.total||0),0),
-      karte:ord.filter(o=>o.payMethod==="Karte").reduce((s,o)=>s+(o.total||0),0) };
+      bar: belksSummeBar(ord),
+      karte: belksSummeKarte(ord) };
   });
   const maxRev = Math.max(...data.map(d=>d.rev), 1);
   const totalYear = data.reduce((s,d)=>s+d.rev,0);
@@ -13974,8 +14014,8 @@ function SummaryView({
   const today = completedOrders.filter(o => new Date(o.time).toDateString() === new Date().toDateString() && !o.storniert);
   const total = today.reduce((s, o) => s + o.total, 0);
   const tax = total / (1 + TAX_FOOD) * TAX_FOOD; // approx
-  const bar = today.filter(o => o.payMethod === "Bar").reduce((s, o) => s + o.total, 0);
-  const karte = today.filter(o => o.payMethod === "Karte").reduce((s, o) => s + o.total, 0);
+  const bar = belksSummeBar(today);
+  const karte = belksSummeKarte(today);
   const topItems = {};
   today.forEach(o => o.items?.forEach(i => {
     topItems[i.name] = (topItems[i.name] || 0) + i.qty;
@@ -14265,8 +14305,8 @@ function DayEndView({
   const exp = filteredExp.reduce((s, e) => s + e.amount, 0);
   const tax7 = filtered.reduce((s, o) => s + calcTax7(o.items || []), 0);
   const tax19 = filtered.reduce((s, o) => s + calcTax19(o.items || []), 0);
-  const bar = filtered.filter(o => o.payMethod === "Bar").reduce((s, o) => s + o.total, 0);
-  const karte = filtered.filter(o => o.payMethod === "Karte").reduce((s, o) => s + o.total, 0);
+  const bar = belksSummeBar(filtered);
+  const karte = belksSummeKarte(filtered);
   const netto = rev - tax7 - tax19;
   // KANAL-AUFSCHLÜSSELUNG (Finanzamt: jeder Bestellweg getrennt)
   const channelStats = {};
@@ -14367,8 +14407,8 @@ ${trinkgeldTotal > 0 ? `<div style="margin-top:8px;padding:6px 10px;background:#
 <h2>💳 Zahlungsarten</h2>
 <table>
 <tr><th>Zahlungsart</th><th>Anzahl</th><th>Betrag</th><th>🌟 Trinkgeld</th><th>Anteil</th></tr>
-<tr><td>💵 Bar</td><td>${filtered.filter(o => o.payMethod === "Bar").length}</td><td>${fmt(bar)}</td><td>${fmt(filtered.filter(o => o.payMethod === "Bar").reduce((s, o) => s + (o.trinkgeld || 0), 0))}</td><td>${rev > 0 ? (bar / rev * 100).toFixed(1) : 0}%</td></tr>
-<tr><td>💳 EC/Karte (SumUp)</td><td>${filtered.filter(o => o.payMethod === "Karte").length}</td><td>${fmt(karte)}</td><td>${fmt(filtered.filter(o => o.payMethod === "Karte").reduce((s, o) => s + (o.trinkgeld || 0), 0))}</td><td>${rev > 0 ? (karte / rev * 100).toFixed(1) : 0}%</td></tr>
+<tr><td>💵 Bar</td><td>${filtered.filter(o => belksZahlarten(o).bar > 0).length}</td><td>${fmt(bar)}</td><td>${fmt(filtered.filter(o => o.payMethod === "Bar").reduce((s, o) => s + (o.trinkgeld || 0), 0))}</td><td>${rev > 0 ? (bar / rev * 100).toFixed(1) : 0}%</td></tr>
+<tr><td>💳 EC/Karte (SumUp)</td><td>${filtered.filter(o => belksZahlarten(o).karte > 0).length}</td><td>${fmt(karte)}</td><td>${fmt(filtered.filter(o => o.payMethod === "Karte").reduce((s, o) => s + (o.trinkgeld || 0), 0))}</td><td>${rev > 0 ? (karte / rev * 100).toFixed(1) : 0}%</td></tr>
 <tr><td>👥 Getrennt</td><td>${filtered.filter(o => o.payMethod === "Getrennt").length}</td><td>${fmt(filtered.filter(o => o.payMethod === "Getrennt").reduce((s, o) => s + o.total, 0))}</td><td>${fmt(filtered.filter(o => o.payMethod === "Getrennt").reduce((s, o) => s + (o.trinkgeld || 0), 0))}</td><td>${rev > 0 ? (filtered.filter(o => o.payMethod === "Getrennt").reduce((s, o) => s + o.total, 0) / rev * 100).toFixed(1) : 0}%</td></tr>
 <tr class="total-row"><td><b>Gesamt</b></td><td><b>${filtered.length}</b></td><td><b>${fmt(rev)}</b></td><td><b style="color:#e65100">${fmt(trinkgeldTotal)}</b></td><td><b>100%</b></td></tr>
 </table>
@@ -15100,7 +15140,18 @@ function OrderListView({
         justifyContent: "space-between",
         marginBottom: 3
       }
-    }, /*#__PURE__*/React.createElement("span", null, "Zahlart:"), /*#__PURE__*/React.createElement("span", null, o.payMethod || "—")), /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("span", null, "Zahlart:"),
+  /*#__PURE__*/React.createElement("span", null, (function(){
+    /* v320: Bei getrennter Zahlung stand hier nur "Getrennt". Wer den
+       Beleg pruefte, sah nicht, was bar und was mit Karte kam. */
+    var z = belksZahlarten(o);
+    if(!(Array.isArray(o.splitDetails) && o.splitDetails.length)) return o.payMethod || "\u2014";
+    var t = [];
+    if(z.bar > 0) t.push("Bar " + fmt(z.bar));
+    if(z.karte > 0) t.push("Karte " + fmt(z.karte));
+    if(z.sonst > 0) t.push("Sonstige " + fmt(z.sonst));
+    return "Getrennt \u00b7 " + t.join(" \u00b7 ");
+  })())), /*#__PURE__*/React.createElement("div", {
       style: { display:"flex", justifyContent:"space-between", marginBottom:4, fontSize:12 }
     }, /*#__PURE__*/React.createElement("span", null, "Beleg-Nr:"), /*#__PURE__*/React.createElement("span", { style:{ fontFamily:"monospace", fontWeight:700, color:"#555" } }, o.bonNr || "—")), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -22249,7 +22300,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v319"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v320"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -23201,7 +23252,7 @@ function App() {
     L += `<div class="row bold"><span>Zahlung:</span><span>${bpayMethod}</span></div>`;
     return L;
   };
-  const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0, loyaltyPhone = null, redeemedPts = 0) => {
+  const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0, loyaltyPhone = null, redeemedPts = 0, splitDetails = null) => {
     const isTA = String(tid).startsWith("ta_");
     // Auto-deduct inventory: match item names to inventory articles
     const autoDeductItems = isTA
@@ -23267,7 +23318,8 @@ function App() {
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: o.items, tableId: tid }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
         try { window.maybeOpenDrawer && window.maybeOpenDrawer(payMethod); } catch (e) {}
-        setCompletedOrders(p => [...p, { ...o, time: new Date(), tableId: tid, payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse }]);
+        setCompletedOrders(p => [...p, { ...o, time: new Date(), tableId: tid, payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse,
+          splitDetails: (splitDetails && splitDetails.length) ? splitDetails.map(d => ({ amount: Number(d.amount)||0, method: d.method||"", trinkgeld: Number(d.trinkgeld)||0 })) : undefined }]);
         // Zahlungs-Beleg automatisch drucken (mit Firma + MwSt + TSE).
         // ABER bei getrennter Zahlung NICHT: dort hat jeder Gast schon beim
         // Bezahlen seinen eigenen Bon bekommen (printGastBon) -> kein Gesamt-Beleg.
@@ -24841,7 +24893,7 @@ function App() {
   })), checkout && /*#__PURE__*/React.createElement(CheckoutModal, _extends({}, checkout, {
     printerSettings: printerSettings,
     onClose: () => setCheckout(null),
-    onComplete: (method, tg, rabatt, usedGutschein, loyaltyPhone, redeemedPts) => {
+    onComplete: (method, tg, rabatt, usedGutschein, loyaltyPhone, redeemedPts, splitDetails) => {
       if(usedGutschein && setGutscheine) {
         setGutscheine(prev => prev.map(g => g.id === usedGutschein.id ? {
           ...g,
@@ -24850,7 +24902,7 @@ function App() {
           usedAt: new Date().toISOString()
         } : g));
       }
-      completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts);
+      completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts, splitDetails);
     },
     gutscheine: gutscheine,
     setGutscheine: setGutscheine,
