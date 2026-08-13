@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v317</title>
+<title>eatDeSi POS v318</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7481,6 +7481,10 @@ var EposWiFi = {
           var isRow = /(^|\s)row(\s|$)/.test(cls);
           var isLine = /(^|\s)line(\s|$)/.test(cls);
           if(isLine){ lines.push({text:"--------------------------------", align:"left", bold:false, big:false}); continue; }
+          /* v318: Leerzeilen wurden bisher verschluckt (leerer Text ->
+             uebersprungen). Auf einem Beleg, in den jemand HINEINSCHREIBEN
+             soll, ist genau die Leerzeile das Wichtigste. */
+          if(/(^|\s)blank(\s|$)/.test(cls)){ lines.push({text:"", align:"left", bold:false, big:false}); continue; }
           if(isRow){
             var sp = c.querySelectorAll('span');
             if(sp.length>=2){
@@ -20671,9 +20675,18 @@ function _bewHtml(items, total, label, fmt80, F) {
       ? '<div style="display:flex;justify-content:space-between;font-size:11px;margin:1px 0"><span>' + name + '</span><span>' + amt + '\u20ac</span></div>'
       : '<tr><td>' + name + '</td><td style="text-align:right">' + amt + ' \u20ac</td></tr>';
   }).join('');
+  /* v318: Fuer den Bon-Drucker eigene Zeilen mit der Klasse "row" - nur so
+     setzt htmlToLines Name und Preis auf die zwei Seiten der Zeile.
+     Vorher klebte beides aneinander: "Pommes Frites4.90EUR". */
+  var rows80 = items.map(function(i){
+    var name = i.qty + 'x ' + (i.nr ? (i.nr + '. ') : '') + i.name;
+    var amt  = (i.finalPrice * i.qty).toFixed(2) + ' EUR';
+    var note = i.note ? '<div style="font-size:11px">  (' + i.note + ')</div>' : '';
+    return '<div class="row"><span>' + name + '</span><span>' + amt + '</span></div>' + note;
+  }).join('');
 
-  var t7r80  = tax7  > 0 ? '<div style="display:flex;justify-content:space-between"><span>MwSt. 7%:</span><span>'  + tax7.toFixed(2)  + '\u20ac</span></div>' : '';
-  var t19r80 = tax19 > 0 ? '<div style="display:flex;justify-content:space-between"><span>MwSt.19%:</span><span>' + tax19.toFixed(2) + '\u20ac</span></div>' : '';
+  var t7r80  = tax7  > 0 ? '<div class="row"><span>MwSt. 7% (Speisen)</span><span>'   + tax7.toFixed(2)  + ' EUR</span></div>' : '';
+  var t19r80 = tax19 > 0 ? '<div class="row"><span>MwSt. 19% (Getr\u00e4nke)</span><span>' + tax19.toFixed(2) + ' EUR</span></div>' : '';
   var t7r4   = tax7  > 0 ? '<tr><td>zzgl. 7% MwSt.</td><td style="text-align:right">'  + tax7.toFixed(2)  + ' \u20ac</td></tr>' : '';
   var t19r4  = tax19 > 0 ? '<tr><td>zzgl. 19% MwSt.</td><td style="text-align:right">' + tax19.toFixed(2) + ' \u20ac</td></tr>' : '';
 
@@ -20747,50 +20760,78 @@ function _bewHtml(items, total, label, fmt80, F) {
     + '</div>';
 
   if (fmt80) {
+    /* ═══ v318: BEWIRTUNGSBELEG NEU AUFGEBAUT ═══
+       Der Beleg wurde fuer den Browser gebaut (display:flex, CSS-Rahmen).
+       Auf dem Thermodrucker verstand htmlToLines davon nichts: Preise
+       klebten am Namen, nichts war zentriert, die Schreiblinien fielen ganz
+       weg. Jetzt dieselben Klassen wie bei allen anderen Bons - row,
+       center, bold, line - plus echte Punktlinien zum Schreiben statt
+       CSS-Raendern. Im Browser sieht es dank Style-Block genauso aus. */
+    /* 42 Punkte: genau die Zeilenbreite, die htmlToLines fuer row-Zeilen
+       benutzt - so endet die Schreiblinie buendig mit der Preisspalte. */
+    var _pl = function(){ return '<div>..........................................</div>'; };
+    var _sp = function(n){ var o=''; for(var q=0;q<n;q++) o += '<div class="blank">&nbsp;</div>'; return o; };
+    var _feld = function(bez, zeilen, leer){
+      var o = '<div class="bold" style="margin-top:6px">' + bez + '</div>';
+      for(var q=0;q<(zeilen||0);q++) o += _pl();
+      if(leer) o += _sp(leer);
+      return o;
+    };
+    var FELDER = ''
+      + _feld('Anlass der Bewirtung', 4)
+      + _feld('Name des Bewirtenden', 2)
+      + _feld('Firma / Unternehmen', 2)
+      + _feld('Bewirtete Personen', 4)
+      + _feld('Gesch\u00e4ftliche Beziehung', 2)
+      + '<div class="line"></div>'
+      + _feld('Unterschrift Gastgeber', 0, 4)
+      + _pl()
+      + _feld('Stempel & Unterschrift Restaurant', 0, 6)
+      + _pl();
+
     return '<!DOCTYPE html><html><head><style>'
-      + 'body{font-family:monospace;font-size:12px;width:72mm;margin:0 auto;padding:6px}'
+      /* v318: Breite in px wie bei allen anderen Bons. Der Bluetooth-Weg
+         liest genau dieses "width:NNNpx", um die Zeichen pro Zeile zu
+         bestimmen. Mit "72mm" fand er nichts und rechnete mit 32 statt 44
+         Zeichen - die Schreiblinien waeren umgebrochen. */
+      + 'body{font-family:monospace;font-size:13px;font-weight:600;width:384px;margin:0 auto;padding:6px;line-height:1.35}'
+      + '.row{display:flex;justify-content:space-between;margin:2px 0}'
+      + '.center{text-align:center}.bold{font-weight:800}'
+      + '.line{border-top:1px dashed #999;margin:5px 0}'
+      + '.blank{height:14px}'
       + '@media print{@page{size:80mm auto;margin:3mm}}'
       + '</style></head><body>'
-      + '<div style="text-align:center;font-weight:bold;font-size:13px">Bewirtungsbeleg</div>'
-      + '<div style="text-align:center;font-size:9px">\u00a7 4 Abs. 5 Nr. 2 EStG</div>'
-      + '<div style="border-top:1px dashed #999;margin:5px 0"></div>'
-      /* Kopf wie beim Kunden-Beleg - aus den Firmendaten.
-         Vorher stand hier fest eatDeSi mit Adresse und Telefon: jede andere
-         Tochter druckte damit eine fremde Firma auf einen Beleg, der beim
-         Finanzamt eingereicht wird. */
-      + '<div style="text-align:center;font-weight:bold;font-size:13px">' + (fn||'') + '</div>'
-      + (fz   ? '<div style="text-align:center;font-size:10px">' + fz + '</div>' : '')
-      + (fstr ? '<div style="text-align:center;font-size:10px">' + fstr + (fpo?(' \u00b7 '+fpo):'') + '</div>' : (fpo?'<div style="text-align:center;font-size:10px">'+fpo+'</div>':''))
-      + (ftel ? '<div style="text-align:center;font-size:10px">Tel: ' + ftel + '</div>' : '')
-      + (fstNr? '<div style="text-align:center;font-size:9px">StNr: ' + fstNr + (fust?(' \u00b7 USt: '+fust):'') + '</div>'
-              : (fust?'<div style="text-align:center;font-size:9px">USt: '+fust+'</div>':''))
-      + '<div style="border-top:1px dashed #999;margin:5px 0"></div>'
-      + '<div style="display:flex;justify-content:space-between"><span>Datum:</span><span>' + d + ' ' + t + '</span></div>'
-      + '<div style="display:flex;justify-content:space-between"><span>Tisch:</span><span>' + label + '</span></div>'
-      + '<div style="border-top:1px dashed #999;margin:5px 0"></div>'
-      + rows
-      + '<div style="border-top:1px dashed #999;margin:5px 0"></div>'
-      + '<div style="display:flex;justify-content:space-between"><span>Netto:</span><span>' + netto.toFixed(2) + '\u20ac</span></div>'
+      /* Ueberschrift gross und mittig - das ist der Titel des Belegs */
+      + '<div class="center bold" style="font-size:19px">BEWIRTUNGSBELEG</div>'
+      + '<div class="center" style="font-size:10px">\u00a7 4 Abs. 5 Nr. 2 EStG</div>'
+      + '<div class="line"></div>'
+      /* Firmendaten mittig, der Name gross. Vorher stand hier fest eatDeSi:
+         jede andere Tochter druckte damit eine fremde Firma auf einen Beleg,
+         der beim Finanzamt eingereicht wird. */
+      + '<div class="center bold" style="font-size:19px">' + (fn||'') + '</div>'
+      + (fz   ? '<div class="center">' + fz + '</div>' : '')
+      + (fstr ? '<div class="center">' + fstr + (fpo?(' \u00b7 '+fpo):'') + '</div>' : (fpo?'<div class="center">'+fpo+'</div>':''))
+      + (ftel ? '<div class="center">Tel: ' + ftel + '</div>' : '')
+      + (fstNr? '<div class="center">StNr: ' + fstNr + '</div>' : '')
+      + (fust ? '<div class="center">USt: ' + fust + '</div>' : '')
+      + '<div class="line"></div>'
+      + '<div class="row"><span>Datum:</span><span>' + d + ' ' + t + '</span></div>'
+      + '<div class="row"><span>Tisch:</span><span>' + label + '</span></div>'
+      + '<div class="line"></div>'
+      + rows80
+      + '<div class="line"></div>'
+      + '<div class="row"><span>Netto</span><span>' + netto.toFixed(2) + ' EUR</span></div>'
       + t7r80 + t19r80
-      + '<div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px"><span>GESAMT</span><span>' + total.toFixed(2) + '\u20ac</span></div>'
-      + '<div style="border-top:1px dashed #999;margin:5px 0"></div>'
-      + FIELDS_80
-      + '<div style="border-top:1px dashed #999;margin:6px 0"></div>'
-      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">'
-      +   '<div style="font-size:8px;color:#555;border-top:1px solid #333;padding-top:4px;width:42%">Unterschrift Gast</div>'
-      +   '<div style="text-align:center">'
-      +     '<svg width="44" height="34" viewBox="0 0 60 45">'
-      +       '<ellipse cx="30" cy="22" rx="28" ry="20" fill="none" stroke="#1a5276" stroke-width="2.5"/>'
-      +       '<text x="30" y="19" text-anchor="middle" font-family="Arial" font-size="5.5" font-weight="bold" fill="#1a5276">eatDeSi</text>'
-      +       '<text x="30" y="26" text-anchor="middle" font-family="Arial" font-size="3.8" fill="#1a5276">Bad Wildungen</text>'
-      +       '<path d="M18 36 Q22 28 26 32 Q30 36 34 26 Q38 18 42 30" fill="none" stroke="#1a5276" stroke-width="1.5" stroke-linecap="round"/>'
-      +     '</svg>'
-      +     '<div style="font-size:7px;color:#1a5276">' + d + '</div>'
-      +   '</div>'
-      + '</div>'
-      + '<div style="border-top:1px dashed #999;margin:6px 0"></div>'
-      + '<div style="font-size:8px;text-align:center">' + footer80 + '</div>'
-      + (footer80b.trim() ? '<div style="font-size:7px;text-align:center;color:#777">' + footer80b + '</div>' : '')
+      + '<div class="line"></div>'
+      /* Der Betrag gross - danach sucht der Gast und spaeter das Finanzamt */
+      + '<div class="row bold" style="font-size:19px"><span>GESAMT</span><span>' + total.toFixed(2) + ' EUR</span></div>'
+      + '<div class="line"></div>'
+      + FELDER
+      + '<div class="line"></div>'
+      + '<div class="center" style="font-size:10px">Nur 70% abzugsf\u00e4hig. Originalrechnung beilegen.</div>'
+      + '<div class="center" style="font-size:10px">' + footer80 + '</div>'
+      + (footer80b.trim() ? '<div class="center" style="font-size:10px">' + footer80b + '</div>' : '')
+      + _sp(2)
       + PS + '</body></html>';
   } else {
     return '<!DOCTYPE html><html><head><style>'
@@ -22154,7 +22195,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v317"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v318"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
