@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v315</title>
+<title>eatDeSi POS v316</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7335,23 +7335,48 @@ var RohDruck = {
       return (c.Plugins && (c.Plugins.TcpSocket || c.Plugins.TCPSocket)) || null;
     } catch(e){ return null; }
   },
-  /* Umlaute: Thermodrucker kennen kein UTF-8. Standard ist CP858 (Codepage 19),
-     das CP850 mit Euro-Zeichen ist - damit stimmen ä ö ü ß und €. Was dort
-     fehlt, wird lesbar umgeschrieben (ä->ae), damit nie Kauderwelsch auf dem
-     Bon steht. */
-  CP858: { "\u00e4":132, "\u00f6":148, "\u00fc":129, "\u00c4":142, "\u00d6":153, "\u00dc":154,
-           "\u00df":225, "\u20ac":213, "\u00e9":130, "\u00e8":138, "\u00ea":136, "\u00e0":133,
-           "\u00e7":135, "\u00f1":164, "\u00d1":165, "\u00b0":248, "\u00a3":156, "\u00b7":250 },
+  /* v316: Vorher galt EINE Tabelle (CP858) fuer jede Einstellung. Wer CP437
+     waehlte, bekam trotzdem CP858-Bytes - der Drucker zeigte dann fremde
+     Zeichen (KyCHE statt KUECHE, GETRONKE statt GETRAENKE). Jetzt hat jede
+     Codepage ihre eigene Tabelle. Was in der gewaehlten Tabelle fehlt, wird
+     lesbar umgeschrieben (ae, oe, EUR) statt als Zufallszeichen gedruckt. */
+  TABELLEN: {
+    /* CP437 - der kleinste gemeinsame Nenner, den praktisch jeder Drucker kann */
+    0:  { "\u00e4":132, "\u00f6":148, "\u00fc":129, "\u00c4":142, "\u00d6":153, "\u00dc":154,
+          "\u00df":225, "\u00e9":130, "\u00e8":138, "\u00ea":136, "\u00e0":133, "\u00e7":135,
+          "\u00f1":164, "\u00d1":165, "\u00b0":248 },
+    /* CP850 - wie CP437 bei den Umlauten, aber ohne Euro */
+    2:  { "\u00e4":132, "\u00f6":148, "\u00fc":129, "\u00c4":142, "\u00d6":153, "\u00dc":154,
+          "\u00df":225, "\u00e9":130, "\u00e8":138, "\u00ea":136, "\u00e0":133, "\u00e7":135,
+          "\u00f1":164, "\u00d1":165, "\u00b0":248, "\u00a3":156 },
+    /* CP858 - CP850 mit Euro auf 213 */
+    19: { "\u00e4":132, "\u00f6":148, "\u00fc":129, "\u00c4":142, "\u00d6":153, "\u00dc":154,
+          "\u00df":225, "\u20ac":213, "\u00e9":130, "\u00e8":138, "\u00ea":136, "\u00e0":133,
+          "\u00e7":135, "\u00f1":164, "\u00d1":165, "\u00b0":248, "\u00a3":156 },
+    /* Windows-1252 - voellig andere Anordnung als die DOS-Seiten */
+    16: { "\u00e4":228, "\u00f6":246, "\u00fc":252, "\u00c4":196, "\u00d6":214, "\u00dc":220,
+          "\u00df":223, "\u20ac":128, "\u00e9":233, "\u00e8":232, "\u00ea":234, "\u00e0":224,
+          "\u00e7":231, "\u00f1":241, "\u00d1":209, "\u00b0":176, "\u00a3":163 }
+  },
   ERSATZ: { "\u00e4":"ae","\u00f6":"oe","\u00fc":"ue","\u00c4":"Ae","\u00d6":"Oe","\u00dc":"Ue",
-            "\u00df":"ss","\u20ac":"EUR","\u2013":"-","\u2014":"-","\u201e":'"',"\u201c":'"',
-            "\u2018":"'","\u2019":"'","\u2026":"...","\u00d7":"x","\u2192":"->" },
-  textBytes: function(str){
+            "\u00df":"ss","\u20ac":"EUR","\u00e9":"e","\u00e8":"e","\u00ea":"e","\u00e0":"a",
+            "\u00e7":"c","\u00f1":"n","\u00d1":"N","\u00b0":"Grad","\u00a3":"GBP",
+            "\u2013":"-","\u2014":"-","\u201e":'"',"\u201c":'"',"\u201d":'"',
+            "\u2018":"'","\u2019":"'","\u2026":"...","\u00d7":"x","\u2192":"->","\u00b7":"-" },
+  textBytes: function(str, codepage){
+    var tab = this.TABELLEN[codepage == null ? 19 : codepage] || this.TABELLEN[19];
     var out = [];
     var s2 = String(str == null ? "" : str);
     for(var i = 0; i < s2.length; i++){
       var ch = s2.charAt(i), code = s2.charCodeAt(i);
       if(code < 128){ out.push(code); continue; }
-      if(this.CP858[ch] != null){ out.push(this.CP858[ch]); continue; }
+      /* Emojis bestehen aus zwei Zeichen. Frueher wurden daraus zwei
+         Fragezeichen ("?? KUECHE"). Jetzt fliegen sie samt Folgezeichen
+         still raus - auf Papier haben sie ohnehin nichts verloren. */
+      if(code >= 0xD800 && code <= 0xDBFF){ i++; continue; }
+      if(code >= 0xFE00 && code <= 0xFE0F){ continue; }   // Variantenzeichen
+      if(code >= 0x2190 && code <= 0x2BFF && !this.ERSATZ[ch]){ continue; }
+      if(tab[ch] != null){ out.push(tab[ch]); continue; }
       var er = this.ERSATZ[ch];
       if(er){ for(var k = 0; k < er.length; k++) out.push(er.charCodeAt(k) & 0x7F); continue; }
       out.push(63); // '?'
@@ -7375,7 +7400,7 @@ var RohDruck = {
       if(dh) mode |= 0x10;
       if(dw) mode |= 0x20;
       push([0x1B, 0x21, mode]);                           // ESC !  Schriftbild
-      push(this.textBytes(ln.text));
+      push(this.textBytes(ln.text, codepage));
       push([0x0A]);
       push([0x1B, 0x21, 0x00]);                           // zuruecksetzen
     }
@@ -22123,7 +22148,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v315"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v316"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -29887,6 +29912,13 @@ function printAny(htmlContent, forceFontCmd) {
   var fsz = (typeof forceFontCmd==='number') ? forceFontCmd : (szMap[cfg.bonFontSize||'gross']??0x01);
   if (method === 'bluetooth' && cfg.btAddress && typeof BTPrint!=='undefined' && BTPrint.isNative()) {
     BTPrint.printHtml(cfg.btAddress, htmlContent, fsz).catch(function(e){ printHtml(htmlContent); });
+    return;
+  }
+  /* v316: Der Zahlungs- und der Bewirtungsbeleg kamen ueber diesen Weg und
+     kannten nur Bluetooth. Wer auf WLAN umgestellt hatte, bekam sie gar
+     nicht - sie landeten still im Browser-Druck. */
+  if (method === 'wifi' && cfg.ip && typeof belksWlanDruck === 'function') {
+    belksWlanDruck(cfg, htmlContent, false).catch(function(e){ printHtml(htmlContent); });
     return;
   }
   if (method === 'rawbt') {
