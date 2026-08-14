@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v326</title>
+<title>eatDeSi POS v328</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7427,7 +7427,15 @@ function belksGleicherTag(a, b){ return belksTagKey(a) === belksTagKey(b); }
    viel mit Karte. Alle Berichte fragen ab jetzt hier. */
 function belksZahlarten(o){
   var bar = 0, karte = 0, sonst = 0;
-  if(!o) return { bar: 0, karte: 0, sonst: 0 };
+  if(!o) return { bar: 0, karte: 0, sonst: 0, gutschein: 0 };
+  /* ═══ v328: EINGELOESTER GUTSCHEIN IST EINE ZAHLART ═══
+     Der Umsatz (o.total) bleibt in voller Hoehe stehen und wird normal
+     versteuert. In die Geldschublade kommt aber nur der Rest. Wer das
+     verwechselt, hat entweder zu wenig Umsatz (Gutschein als Rabatt) oder
+     zu viel Geld in der Kasse (Gutschein gar nicht abgezogen). */
+  var gut = Math.max(0, Number(o.gutscheinBetrag) || 0);
+  var t = Number(o.total) || 0;
+  var ziel = Math.max(0, Math.round((t - gut) * 100) / 100);
   var det = o.splitDetails;
   if(Array.isArray(det) && det.length){
     for(var i = 0; i < det.length; i++){
@@ -7437,20 +7445,38 @@ function belksZahlarten(o){
       else if(d.method === 'Karte') karte += betrag;
       else sonst += betrag;
     }
-    /* Rundungsrest gegen den gebuchten Gesamtbetrag ausgleichen, damit die
-       Summe der Zahlarten nie neben dem Umsatz liegt. */
+    /* Rundungsrest gegen den tatsaechlich gezahlten Betrag ausgleichen. */
     var summe = bar + karte + sonst;
-    var ziel = Number(o.total) || 0;
     var rest = Math.round((ziel - summe) * 100) / 100;
     if(Math.abs(rest) >= 0.01 && Math.abs(rest) < 1){
       if(karte >= bar) karte += rest; else bar += rest;
     }
-    return { bar: Math.round(bar*100)/100, karte: Math.round(karte*100)/100, sonst: Math.round(sonst*100)/100 };
+    return { bar: Math.round(bar*100)/100, karte: Math.round(karte*100)/100, sonst: Math.round(sonst*100)/100, gutschein: gut };
   }
-  var t = Number(o.total) || 0;
-  if(o.payMethod === 'Bar') return { bar: t, karte: 0, sonst: 0 };
-  if(o.payMethod === 'Karte') return { bar: 0, karte: t, sonst: 0 };
-  return { bar: 0, karte: 0, sonst: t };
+  if(o.payMethod === 'Bar') return { bar: ziel, karte: 0, sonst: 0, gutschein: gut };
+  if(o.payMethod === 'Karte') return { bar: 0, karte: ziel, sonst: 0, gutschein: gut };
+  return { bar: 0, karte: 0, sonst: ziel, gutschein: gut };
+}
+/* v328: wie viel wurde im Zeitraum mit Gutschein bezahlt. */
+function belksSummeGutscheinEingeloest(liste){
+  return Math.round((liste||[]).reduce(function(s,o){ return s + belksZahlarten(o).gutschein; }, 0) * 100) / 100;
+}
+/* ═══ v327: GUTSCHEIN-VERKAUF IST KEIN UMSATZ ═══
+   Ein Mehrzweckgutschein wird erst bei der Einloesung versteuert. Beim
+   Verkauf fliesst nur Geld in die Kasse - das ist eine Verbindlichkeit,
+   kein Erloes. Damit diese Regel nicht an fuenf Stellen einzeln
+   nachgepflegt werden muss (und irgendwann eine vergessen wird), steht
+   sie hier EINMAL. Wer Umsatz rechnet, nimmt belksUmsatzBuchungen();
+   wer den Kassenbestand rechnet, nimmt die volle Liste. */
+function belksIstGutscheinVerkauf(o){ return !!(o && o.gutscheinVerkauf); }
+function belksUmsatzBuchungen(liste){
+  return (liste||[]).filter(function(o){ return !o.storniert && !belksIstGutscheinVerkauf(o); });
+}
+function belksGutscheinBuchungen(liste){
+  return (liste||[]).filter(function(o){ return !o.storniert && belksIstGutscheinVerkauf(o); });
+}
+function belksSummeGutschein(liste){
+  return Math.round(belksGutscheinBuchungen(liste).reduce(function(s,o){ return s + (Number(o.total)||0); }, 0) * 100) / 100;
 }
 function belksSummeBar(liste){ return (liste||[]).reduce(function(s,o){ return s + belksZahlarten(o).bar; }, 0); }
 function belksSummeKarte(liste){ return (liste||[]).reduce(function(s,o){ return s + belksZahlarten(o).karte; }, 0); }
@@ -10636,8 +10662,10 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
   const [gutscheinCode, setGutscheinCode] = React.useState("");
   const [gutscheinApplied, setGutscheinApplied] = React.useState(null);
   const [gutscheinError, setGutscheinError] = React.useState("");
+  /* v328: "Gesamt" zeigt jetzt den Rechnungsbetrag. Der Gutschein steht
+     als eigene Zeile darunter, gefolgt von "Zu zahlen". */
   const gutscheinRabatt = gutscheinApplied ? Math.min(gutscheinApplied.rest, total) : 0;
-  const finalTotal = Math.max(0, total - gutscheinRabatt);
+  const finalTotal = total;
 
   const applyGutschein = () => {
     const code = gutscheinCode.trim().toUpperCase();
@@ -10677,20 +10705,18 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
     if (rabattType === "euro") return Math.min(parseFloat(rabattVal)||0, total);
     return 0;
   })();
-  /* ═══ v326: GUTSCHEIN GEHOERT IN DIE ENDSUMME ═══
-     finalTotal (Anzeige "Gesamt") zog den Gutschein schon ab,
-     totalNachRabatt aber nicht - deshalb stand oben 9,00 EUR und unten
-     "Zu zahlen 14,00 EUR". Der Gast haette 5 EUR zu viel gezahlt.
-     Ab hier rechnet alles mit demselben Betrag: Anzeige, Rueckgeld,
-     SumUp-Betrag, Bon und Buchung. */
-  const totalNachRabatt = Math.max(0, total - rabattAmt - (pointsRabatt||0) - gutscheinRabatt);
-  /* Was die Buchung als Rabatt sehen muss: completeOrder rechnet
-     "Artikelsumme minus Rabatt". Faehrt hier nur rabattAmt mit, bucht die
-     Kasse wieder die vollen Artikelpreise - der Gutschein und die
-     eingeloesten Punkte waeren im Tagesbericht nicht zu sehen. */
-  const rabattGesamt = Math.round((rabattAmt + gutscheinRabatt + (pointsRabatt||0)) * 100) / 100;
+  /* ═══ v328: RECHNUNGSBETRAG UND ZAHLBETRAG SIND ZWEI DINGE ═══
+     totalNachRabatt = was gebucht und versteuert wird (Umsatz).
+     zuZahlen       = was der Gast noch bar oder mit Karte gibt.
+     Der Gutschein steht dazwischen: er ist eine Zahlart, kein Rabatt.
+     Rabatt und eingeloeste Punkte mindern dagegen wirklich den Umsatz. */
+  const totalNachRabatt = Math.max(0, total - rabattAmt - (pointsRabatt||0));
+  const rabattGesamt = Math.round((rabattAmt + (pointsRabatt||0)) * 100) / 100;
+  /* Der Gutschein kann nie mehr decken als die Rechnung hergibt. */
+  const gutscheinAbzug = Math.min(gutscheinRabatt, totalNachRabatt);
+  const zuZahlen = Math.max(0, Math.round((totalNachRabatt - gutscheinAbzug) * 100) / 100);
   const tg = parseFloat(trinkgeld) || 0;
-  const totalWithTG = totalNachRabatt + tg;
+  const totalWithTG = zuZahlen + tg;
   /* Runde Betraege, die ein Gast typischerweise nennt: erst auf den vollen
      Euro, danach die naechsten 5er-Schritte. Aus 76,00 wird 80 / 85 / 90,
      aus 76,40 wird 77 / 80 / 85 / 90. */
@@ -10722,11 +10748,12 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
   const leereBetrag = () => { setZahlText(""); setTrinkgeld(""); };
   const tax7 = calcTax7(items);
   const tax19 = calcTax19(items);
-  const splitRemaining = totalNachRabatt - splitPaid.reduce((s, p) => s + p.amount, 0);
+  /* v328: aufgeteilt wird der ZAHLBETRAG, nicht der Rechnungsbetrag. */
+  const splitRemaining = zuZahlen - splitPaid.reduce((s, p) => s + p.amount, 0);
   const isLastSplit = splitPaid.length === splitPersons - 1;
   const currentPersonIdx = splitPaid.length;
   const getSplitAmount = pi => splitMode === "gleich"
-    ? Math.round(totalNachRabatt / splitPersons * 100) / 100
+    ? Math.round(zuZahlen / splitPersons * 100) / 100
     : parseFloat(customAmounts[pi]) || 0;
   const currentPersonAmt = isLastSplit ? Math.round(splitRemaining * 100) / 100 : getSplitAmount(currentPersonIdx);
   const cashChange = parseFloat(cashGiven) - totalWithTG;
@@ -10786,14 +10813,14 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
   };
 
   const finishFull = (method, extra = {}) => {
-    setDone({ method, total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: tg, totalWithTG, ...extra });
+    setDone({ method, total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: tg, totalWithTG, gutschein: gutscheinAbzug, ...extra });
     setStep("done");
     rawbtZahlBon(method, totalNachRabatt, tg, items, label);
   };
   const finishMix = () => {
     const bar = parseFloat(mixBarAmt) || 0;
     const karte = Math.max(0, totalWithTG - bar);
-    setDone({ method: "Bar+Karte", total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: tg, totalWithTG, mixBar: bar, mixKarte: karte });
+    setDone({ method: "Bar+Karte", total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: tg, totalWithTG, gutschein: gutscheinAbzug, mixBar: bar, mixKarte: karte });
     setStep("done");
   };
   const handleSplitPaid = (method, personTG = 0) => {
@@ -10802,7 +10829,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
     setSplitPaid(newPaid);
     if (newPaid.length === splitPersons) {
       const totalTG = newPaid.reduce((s, p) => s + p.trinkgeld, 0);
-      setDone({ method: "Getrennt", total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: totalTG, totalWithTG: totalNachRabatt + totalTG, splitDetails: newPaid });
+      setDone({ method: "Getrennt", total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: totalTG, totalWithTG: zuZahlen + totalTG, gutschein: gutscheinAbzug, splitDetails: newPaid });
       setStep("done");
     }
   };
@@ -10827,9 +10854,15 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
             React.createElement("span", null, "Gesamt"),
             React.createElement("span", { style:{ color:C.green } }, fmt(finalTotal))
           ),
-          gutscheinRabatt > 0 && React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", fontSize:13, color:"#f57f17", marginTop:4 } },
-            React.createElement("span", null, "🎫 "+gutscheinApplied.code),
-            React.createElement("span", null, "-"+fmt(gutscheinRabatt))
+          gutscheinAbzug > 0 && React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", fontSize:13, color:"#f57f17", marginTop:4 } },
+            React.createElement("span", null, "🎫 "+gutscheinApplied.code+" (Zahlart)"),
+            React.createElement("span", null, "-"+fmt(gutscheinAbzug))
+          ),
+          /* v328: getrennt ausweisen, damit klar ist was gebucht wird und
+             was der Gast noch geben muss. */
+          gutscheinAbzug > 0 && React.createElement("div", { style:{ borderTop:"1px solid #ddd", marginTop:6, paddingTop:6, display:"flex", justifyContent:"space-between", fontWeight:800, fontSize:15 } },
+            React.createElement("span", null, "Zu zahlen"),
+            React.createElement("span", { style:{ color:C.green } }, fmt(zuZahlen))
           ),
           // Gutschein input
           React.createElement("div", { style:{ background:"#fff8f0", borderRadius:10, padding:"10px 12px", marginTop:8, border:"1px solid #f0e0cc" } },
@@ -11239,12 +11272,15 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
           done.cashGiven && /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", border:"2px solid #4caf50", borderRadius:10, padding:"10px 14px", marginBottom:12, display:"flex", justifyContent:"space-between", fontWeight:700, color:C.green, fontSize:15 } },
             /*#__PURE__*/React.createElement("span", null, "R\xFCckgeld"), /*#__PURE__*/React.createElement("span", null, fmt(done.change))
           ),
+          done.gutschein > 0 && /*#__PURE__*/React.createElement("div", { style:{ background:"#fffdf2", border:"2px solid #D4A017", borderRadius:10, padding:"8px 12px", marginBottom:10, display:"flex", justifyContent:"space-between", fontWeight:700, color:"#8a6d00", fontSize:13 } },
+            /*#__PURE__*/React.createElement("span", null, "\uD83C\uDF9F\uFE0F Mit Gutschein bezahlt"), /*#__PURE__*/React.createElement("span", null, fmt(done.gutschein))
+          ),
           done.rabatt > 0 && /*#__PURE__*/React.createElement("div", { style:{ background:"#fce4ec", border:"2px solid #f48fb1", borderRadius:10, padding:"8px 12px", marginBottom:10, display:"flex", justifyContent:"space-between", fontWeight:700, color:"#c2185b", fontSize:13 } },
             /*#__PURE__*/React.createElement("span", null, "\uD83C\uDF9F\uFE0F Rabatt"), /*#__PURE__*/React.createElement("span", null, "\u2212", fmt(done.rabatt))
           ),
           /*#__PURE__*/React.createElement("button", { onClick:()=>{
               if(gutscheinApplied && setGutscheine) {
-                const restGuthaben = Math.max(0, gutscheinApplied.rest - gutscheinRabatt);
+                const restGuthaben = Math.max(0, gutscheinApplied.rest - gutscheinAbzug);   // v328
                 const updatedG = {...gutscheinApplied, rest: restGuthaben, used: restGuthaben <= 0, usedAt: new Date().toISOString()};
                 setGutscheine(prev => prev.map(g => g.id === gutscheinApplied.id ? updatedG : g));
                 // Print Rest-Bon if there's remaining balance
@@ -11257,7 +11293,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
                       let RL = "";
                       RL += '<div class="center bold" style="font-size:20px;letter-spacing:2px">' + gutscheinApplied.code + '</div>';
                       RL += '<div class="line"></div>';
-                      RL += '<div class="row"><span>Genutzt heute</span><span>-' + fmt(gutscheinRabatt) + '</span></div>';
+                      RL += '<div class="row"><span>Genutzt heute</span><span>-' + fmt(gutscheinAbzug) + '</span></div>';
                       RL += '<div class="row bold"><span>Restguthaben</span><span>' + fmt(restGuthaben) + '</span></div>';
                       RL += '<div class="line"></div>';
                       RL += '<div class="center">Beim n\u00e4chsten Besuch einl\u00f6sbar.</div>';
@@ -11274,7 +11310,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
               if (done.nurKarte && typeof onNurKarte === "function") {
                 onNurKarte();
               } else {
-                onComplete(done.method, done.trinkgeld||0, done.rabatt||0, gutscheinApplied?{id:gutscheinApplied.id,rabatt:gutscheinRabatt}:null, loyaltyPhone||null, redeemedPts||0, done.splitDetails||null);
+                onComplete(done.method, done.trinkgeld||0, done.rabatt||0, gutscheinApplied?{id:gutscheinApplied.id,rabatt:gutscheinAbzug}:null, loyaltyPhone||null, redeemedPts||0, done.splitDetails||null);
               }
             },
             style:{ width:"100%", padding:14, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:15 }
@@ -11536,20 +11572,28 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
 
   const { from, to, label: periodLabel } = getDateRange();
   const filteredAll = completedOrders.filter(o => { const d = new Date(o.time); return d >= from && d <= to; });
-  const filtered = filteredAll.filter(o => !o.storniert);   // nur gueltige fuer Umsatz
+  /* v327: Gutschein-Verkaeufe raus aus dem Umsatz, aber DRIN im
+     Kassenbestand - das Geld liegt ja in der Schublade. */
+  const filtered = belksUmsatzBuchungen(filteredAll);       // nur gueltige fuer Umsatz
+  const gutVerkList = belksGutscheinBuchungen(filteredAll); // verkaufte Gutscheine
+  const gutVerk = belksSummeGutschein(filteredAll);
+  const gutEin = belksSummeGutscheinEingeloest(filtered);   // v328: als Zahlart eingeloest
   const stornos = filteredAll.filter(o => o.storniert);     // stornierte separat
   const filtExp = (expenses||[]).filter(e => { const d = new Date(e.date||e.time||0); return d >= from && d <= to; });
 
   const rev = filtered.reduce((s,o)=>s+(o.total||0),0);
   const tg = filtered.reduce((s,o)=>s+(o.trinkgeld||0),0);
-  const bar = belksSummeBar(filtered);
-  const karte = belksSummeKarte(filtered);
+  /* Kassenbestand = Umsatz + Gutschein-Verkaeufe. Der Umsatz oben bleibt
+     davon unberuehrt. */
+  const bar = belksSummeBar(filtered) + belksSummeBar(gutVerkList);
+  const karte = belksSummeKarte(filtered) + belksSummeKarte(gutVerkList);
   const rabattTotal = filtered.reduce((s,o)=>s+(o.rabatt||0),0);
   const stornoSum = stornos.reduce((s,o)=>s+(o.total||0),0);
   const exp = filtExp.reduce((s,e)=>s+(e.amount||0),0);
   const tax7 = filtered.reduce((s,o)=>s+calcTax7(o.items||[]),0);
   const tax19 = filtered.reduce((s,o)=>s+calcTax19(o.items||[]),0);
-  const netto = rev - exp;
+  /* v327: was tatsaechlich hereinkam, inklusive der verkauften Gutscheine. */
+  const netto = rev + gutVerk - exp;
 
   const buildBonHtml = (typ) => {
     const firma = printerSettings?.firmaName || "eatDeSi";
@@ -11557,6 +11601,9 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
     const rows = [
       ["\uD83D\uDCE6 Bestellungen", filtered.length],
       ["\uD83D\uDCB0 Umsatz Brutto", fmt(rev)],
+      gutVerk > 0 ? ["\uD83C\uDF9F\uFE0F Gutschein-Verkauf", fmt(gutVerk)] : null,
+      gutVerk > 0 ? ["   (kein Umsatz, Mehrzweck)", ""] : null,
+      gutEin > 0 ? ["\uD83C\uDF9F\uFE0F Mit Gutschein bezahlt", fmt(gutEin)] : null,
       ["\uD83D\uDCB5 Bar", fmt(bar)],
       ["\uD83D\uDCB3 Karte", fmt(karte)],
       tg > 0 ? ["\uD83C\uDF1F Trinkgeld", fmt(tg)] : null,
@@ -11603,6 +11650,8 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
   const rows = [
     ["\uD83D\uDCE6 Bestellungen", filtered.length],
     ["\uD83D\uDCB0 Umsatz Brutto", fmt(rev)],
+    gutVerk > 0 ? ["\uD83C\uDF9F\uFE0F Gutschein-Verkauf (kein Umsatz)", fmt(gutVerk)] : null,
+    gutEin > 0 ? ["\uD83C\uDF9F\uFE0F Mit Gutschein bezahlt", fmt(gutEin)] : null,
     ["\uD83D\uDCB5 Bar", fmt(bar)],
     ["\uD83D\uDCB3 Karte", fmt(karte)],
     tg > 0 ? ["\uD83C\uDF1F Trinkgeld", fmt(tg)] : null,
@@ -11678,7 +11727,7 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
     archive.length > 0 && /*#__PURE__*/React.createElement("div", null,
       /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, color:"#888", fontSize:12, textTransform:"uppercase", letterSpacing:1, marginBottom:8 } }, "\uD83D\uDCC1 Abschluss-Archiv"),
       archive.slice().reverse().slice(0,15).map((a,i) => {
-        const r = (a.orders||[]).reduce((s,o)=>s+(o.total||0),0);
+        const r = belksUmsatzBuchungen(a.orders||[]).reduce((s,o)=>s+(o.total||0),0);   // v327
         const isAuto = !!a.auto;
         return /*#__PURE__*/React.createElement("div", { key:i, style:{ background:"#fff", borderRadius:10, padding:"10px 14px", marginBottom:6, boxShadow:"0 1px 4px #0001", display:"flex", justifyContent:"space-between", alignItems:"center" } },
           /*#__PURE__*/React.createElement("div", null,
@@ -11703,7 +11752,7 @@ function MonatsreportView({ completedOrders }) {
   const [selYear, setSelYear] = React.useState(nowY);
   const monthNames = ["Jan","Feb","M\xE4r","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
   const data = Array.from({length:12},(_,m) => {
-    const ord = completedOrders.filter(o => { const d=new Date(o.time); return d.getFullYear()===selYear && d.getMonth()===m && !o.storniert; });
+    const ord = belksUmsatzBuchungen(completedOrders).filter(o => { const d=new Date(o.time); return d.getFullYear()===selYear && d.getMonth()===m; });   // v327
     return { m, rev:ord.reduce((s,o)=>s+(o.total||0),0), count:ord.length,
       bar: belksSummeBar(ord),
       karte: belksSummeKarte(ord) };
@@ -14164,11 +14213,14 @@ function SummaryView({
   completedOrders,
   expenses
 }) {
-  const today = completedOrders.filter(o => belksGleicherTag(o.time, new Date()) && !o.storniert);
+  /* v327: siehe DayEndView - Gutschein-Verkauf ist kein Umsatz. */
+  const heuteAlle = completedOrders.filter(o => belksGleicherTag(o.time, new Date()) && !o.storniert);
+  const today = belksUmsatzBuchungen(heuteAlle);
+  const heuteGut = belksGutscheinBuchungen(heuteAlle);
   const total = today.reduce((s, o) => s + o.total, 0);
   const tax = total / (1 + TAX_FOOD) * TAX_FOOD; // approx
-  const bar = belksSummeBar(today);
-  const karte = belksSummeKarte(today);
+  const bar = belksSummeBar(today) + belksSummeBar(heuteGut);
+  const karte = belksSummeKarte(today) + belksSummeKarte(heuteGut);
   const topItems = {};
   today.forEach(o => o.items?.forEach(i => {
     topItems[i.name] = (topItems[i.name] || 0) + i.qty;
@@ -14450,12 +14502,18 @@ function DayEndView({
     to,
     label
   } = getPeriodRange(period, customFrom, customTo);
-  const filtered = completedOrders.filter(o => {
+  /* v327: Gutschein-Verkaeufe gehoeren nicht in den Umsatz und nicht in
+     den MwSt-Ausweis - sie stehen weiter unten in einer eigenen Zeile. */
+  const imZeitraum = completedOrders.filter(o => {
     if (isPendingOnline(o)) return false; // noch nicht angenommen -> nicht zählen
     if (typeof o.note === 'string' && o.note.indexOf('[ABGELEHNT]') !== -1) return false;
     const d = new Date(o.time);
     return d >= from && d <= to && !o.storniert;
   });
+  const filtered = belksUmsatzBuchungen(imZeitraum);
+  const gutList  = belksGutscheinBuchungen(imZeitraum);
+  const gutVerk  = belksSummeGutschein(imZeitraum);
+  const gutEin   = belksSummeGutscheinEingeloest(filtered);   // v328
   const filteredExp = expenses.filter(e => {
     const d = new Date(e.time);
     return d >= from && d <= to;
@@ -14465,8 +14523,9 @@ function DayEndView({
   const exp = filteredExp.reduce((s, e) => s + e.amount, 0);
   const tax7 = filtered.reduce((s, o) => s + calcTax7(o.items || []), 0);
   const tax19 = filtered.reduce((s, o) => s + calcTax19(o.items || []), 0);
-  const bar = belksSummeBar(filtered);
-  const karte = belksSummeKarte(filtered);
+  /* Kassenbestand: Umsatz PLUS verkaufte Gutscheine. */
+  const bar = belksSummeBar(filtered) + belksSummeBar(gutList);
+  const karte = belksSummeKarte(filtered) + belksSummeKarte(gutList);
   const netto = rev - tax7 - tax19;
   // KANAL-AUFSCHLÜSSELUNG (Finanzamt: jeder Bestellweg getrennt)
   const channelStats = {};
@@ -14544,7 +14603,10 @@ function DayEndView({
   <div class="kpi"><div class="kpi-val">${fmt(karte)}</div><div class="kpi-lbl">Karte Einnahmen</div></div>
   <div class="kpi" style="border:2px solid #f9a825;background:#fffde7"><div class="kpi-val" style="color:#e65100">${fmt(trinkgeldTotal)}</div><div class="kpi-lbl">🌟 Trinkgeld</div></div>
   <div class="kpi"><div class="kpi-val" style="color:#c62828">-${fmt(exp)}</div><div class="kpi-lbl">💸 Ausgaben</div></div>
+  ${gutVerk > 0 ? `<div class="kpi" style="border:2px solid #D4A017;background:#fffdf2"><div class="kpi-val" style="color:#8a6d00">${fmt(gutVerk)}</div><div class="kpi-lbl">🎟️ Gutschein-Verkauf</div></div>` : ""}
+  ${gutEin > 0 ? `<div class="kpi" style="border:2px solid #D4A017;background:#fffdf2"><div class="kpi-val" style="color:#8a6d00">${fmt(gutEin)}</div><div class="kpi-lbl">🎟️ Mit Gutschein bezahlt</div></div>` : ""}
 </div>
+${gutVerk > 0 ? `<div class="warn">🎟️ Gutschein-Verkauf ${fmt(gutVerk)} (${gutList.length} St\u00fcck) ist im Kassenbestand enthalten, aber KEIN Umsatz und ohne Umsatzsteuer. Mehrzweckgutscheine werden erst bei der Einl\u00f6sung versteuert (\u00a7 3 Abs. 15 UStG).</div>` : ""}
 
 <div class="highlight">
   <div style="font-size:11px;color:#555;margin-bottom:4px">💰 Umsatz netto (ohne MwSt., ohne Trinkgeld)</div>
@@ -14757,6 +14819,12 @@ ${filtered.map((o, i) => {
   }, {
     l: "💸 Ausgaben",
     v: `-${fmt(exp)}`
+  }, {
+    l: "🎟️ Gutschein-Verkauf",
+    v: fmt(gutVerk)
+  }, {
+    l: "🎟️ Mit Gutschein bezahlt",
+    v: fmt(gutEin)
   }].map(s => /*#__PURE__*/React.createElement("div", {
     key: s.l,
     style: {
@@ -22052,7 +22120,7 @@ function HappyHourView({ happyHours, setHappyHours, menuData }) {
   );
 }
 
-function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSettings }) {
+function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSettings, onVerkauf }) {
   const [showNew, setShowNew] = React.useState(false);
   const [lastSaved, setLastSaved] = React.useState(null);
   const [code, setCode] = React.useState("");
@@ -22088,24 +22156,64 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
       L += '<div class="row"><span>Gutscheinwert</span><span>' + fmt(g.betrag) + '</span></div>';
       L += '<div class="row bold"><span>Guthaben</span><span>' + fmt(g.rest) + '</span></div>';
       if (g.note) L += '<div class="row"><span>Notiz</span><span>' + g.note + '</span></div>';
+      if (g.zahlart) L += '<div class="row"><span>Bezahlt mit</span><span>' + g.zahlart + '</span></div>';
       L += '<div class="line"></div>';
       L += '<div class="row"><span>Ausgestellt</span><span>' + fmtD(erstellt) + '</span></div>';
       L += '<div class="row"><span>G\u00fcltig bis</span><span>' + fmtD(gueltig) + '</span></div>';
       L += '<div class="line"></div>';
+      /* v327: Pflichthinweis. Ein Mehrzweckgutschein darf beim Verkauf
+         KEINE Umsatzsteuer ausweisen - versteuert wird erst die Einloesung. */
+      L += '<div class="center">Mehrzweckgutschein \u00b7 kein Umsatzsteuerausweis</div>';
+      L += '<div class="center">(\u00a7 3 Abs. 15 UStG)</div>';
+      L += '<div class="line"></div>';
       L += '<div class="center">Bitte diesen Bon aufbewahren!</div>';
-      printBon("\uD83C\uDF9F\uFE0F GUTSCHEIN", L, "Gutschein", g.code, erstellt, null, printerSettings, null, 'kunde');
+      printBon("\uD83C\uDF9F\uFE0F GUTSCHEIN", L, "Gutschein", g.bonNr || g.code, erstellt, null, printerSettings, g.tse || null, 'kunde');
     } catch (e) { console.warn("Gutschein-Druck Fehler:", e); }
   };
 
-  const saveNew = () => {
+  const [zahlart, setZahlart] = React.useState("Bar");
+  const [speichert, setSpeichert] = React.useState(false);
+  /* v327: Der Verkauf ist jetzt ein Kassenvorgang, kein Listeneintrag mehr.
+     Deshalb muss die Zahlart bekannt sein, und es wird eine Buchung mit
+     Bon-Nummer und TSE-Signatur erzeugt, BEVOR der Gutschein gespeichert
+     wird - sonst gaebe es einen Gutschein ohne Beleg. */
+  const saveNew = async () => {
+    if(speichert) return;
     if(!code.trim()) return;
     if(!betrag || parseFloat(betrag) <= 0) return;
     if(gutscheine.find(g => g.code === code.trim().toUpperCase())) return;
-    const ng = { id: Date.now(), code: code.trim().toUpperCase(), betrag: parseFloat(betrag), rest: parseFloat(betrag), note, created: new Date().toISOString(), used: false, usedAt: null };
+    setSpeichert(true);
+    const ng = { id: Date.now(), code: code.trim().toUpperCase(), betrag: parseFloat(betrag), rest: parseFloat(betrag), note, created: new Date().toISOString(), used: false, usedAt: null, zahlart: zahlart };
+    try {
+      if (typeof onVerkauf === "function") {
+        const b = await onVerkauf(ng, zahlart);
+        if (b) { ng.bonNr = b.bonNr; ng.tse = b.tse; }
+      }
+    } catch (e) { console.warn("Gutschein-Verkauf konnte nicht gebucht werden:", e); }
     setGutscheine(prev => [...prev, ng]);
     setCode(""); setBetrag(""); setNote(""); setShowNew(false);
+    setSpeichert(false);
     setLastSaved(ng); // Show print prompt
   };
+
+  /* ═══ v328: UEBERSICHT ═══
+     Das offene Guthaben ist eine Verbindlichkeit des Betriebs: Geld, das
+     schon kassiert wurde, fuer das aber noch Leistung geschuldet wird.
+     Es muss jederzeit ablesbar sein - auch fuer den Steuerberater. */
+  const uebersicht = (() => {
+    let vBar = 0, vKarte = 0, vAlt = 0, offen = 0, eingeloest = 0;
+    (gutscheine||[]).forEach(g => {
+      const wert = Number(g.betrag) || 0;
+      const rest = Number(g.rest) || 0;
+      if (g.zahlart === "Bar") vBar += wert;
+      else if (g.zahlart === "Karte") vKarte += wert;
+      else vAlt += wert;                       // vor v327 angelegt, Zahlart unbekannt
+      eingeloest += Math.max(0, wert - rest);
+      if (!g.used) offen += rest;
+    });
+    const r = v => Math.round(v * 100) / 100;
+    return { vBar:r(vBar), vKarte:r(vKarte), vAlt:r(vAlt), verkauft:r(vBar+vKarte+vAlt), eingeloest:r(eingeloest), offen:r(offen) };
+  })();
 
   const filtered = gutscheine.filter(g => !search || g.code.includes(search.toUpperCase()) || (g.note||"").toLowerCase().includes(search.toLowerCase()));
 
@@ -22162,9 +22270,45 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
         React.createElement("div", { style:{ fontSize:11, fontWeight:700, color:"#666", marginBottom:4, textTransform:"uppercase" } }, "Notiz (optional)"),
         React.createElement("input", { value:note, onChange:e=>setNote(e.target.value), placeholder:"z.B. Geburtstag Max Mustermann", style:{ width:"100%", padding:"9px 10px", border:"1px solid #e0d0c8", borderRadius:8, fontSize:13, boxSizing:"border-box" } })
       ),
+      /* v327: Zahlart - der Verkauf geht in die Kasse und braucht sie. */
+      React.createElement("div", { style:{ marginBottom:12 } },
+        React.createElement("div", { style:{ fontSize:11, fontWeight:700, color:"#666", marginBottom:4, textTransform:"uppercase" } }, "Bezahlt mit *"),
+        React.createElement("div", { style:{ display:"flex", gap:8 } },
+          ["Bar","Karte"].map(z => React.createElement("button", { key:z, onClick:()=>setZahlart(z),
+            style:{ flex:1, padding:"10px 0", borderRadius:8, border:"2px solid "+(zahlart===z?"#2e7d32":"#ddd"), background:zahlart===z?"#2e7d32":"#fff", color:zahlart===z?"#fff":"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
+          }, (z==="Bar"?"\uD83D\uDCB5 ":"\uD83D\uDCB3 ")+z))
+        ),
+        React.createElement("div", { style:{ fontSize:11, color:"#888", marginTop:6, lineHeight:1.4 } },
+          "Mehrzweckgutschein: z\u00e4hlt in die Kasse, aber noch nicht in den Umsatz. Versteuert wird bei der Einl\u00f6sung.")
+      ),
       React.createElement("div", { style:{ display:"flex", gap:8 } },
         React.createElement("button", { onClick:()=>setShowNew(false), style:{ padding:"9px 16px", border:"2px solid #eee", background:"#f5f5f5", borderRadius:8, cursor:"pointer", fontWeight:600, fontSize:13 } }, "Abbrechen"),
-        React.createElement("button", { onClick:saveNew, style:{ padding:"9px 20px", background:"linear-gradient(135deg,#C84B31,#8B2500)", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700, fontSize:13 } }, "💾 Speichern")
+        React.createElement("button", { onClick:saveNew, disabled:speichert, style:{ padding:"9px 20px", background:speichert?"#ccc":"linear-gradient(135deg,#C84B31,#8B2500)", color:"#fff", border:"none", borderRadius:8, cursor:speichert?"wait":"pointer", fontWeight:700, fontSize:13 } }, speichert ? "\u2026 wird gebucht" : "\uD83D\uDCBE Verkaufen & Speichern")
+      )
+    ),
+
+    // v328: Uebersicht
+    React.createElement("div", { style:{ background:"#fff", borderRadius:14, padding:14, marginBottom:14, border:"2px solid #D4A01733" } },
+      React.createElement("div", { style:{ fontSize:11, fontWeight:700, color:"#888", marginBottom:10, textTransform:"uppercase", letterSpacing:1 } }, "\uD83C\uDF9F\uFE0F Gutschein-\u00dcbersicht"),
+      React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 } },
+        [
+          ["\uD83D\uDCB5 Verkauft Bar", uebersicht.vBar, "#2e7d32"],
+          ["\uD83D\uDCB3 Verkauft Karte", uebersicht.vKarte, "#1565c0"],
+          uebersicht.vAlt > 0 ? ["\u2753 Verkauft (Zahlart unbekannt)", uebersicht.vAlt, "#999"] : null,
+          ["\u03a3 Verkauft gesamt", uebersicht.verkauft, "#8a6d00"],
+          ["\uD83C\uDF9F\uFE0F Bereits eingel\u00f6st", uebersicht.eingeloest, "#C84B31"]
+        ].filter(Boolean).map(([l,v,col]) => React.createElement("div", { key:l,
+          style:{ background:"#fafafa", borderRadius:8, padding:"8px 10px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:6 } },
+          React.createElement("span", { style:{ fontSize:11, color:"#666" } }, l),
+          React.createElement("span", { style:{ fontWeight:800, fontSize:13, color:col } }, v.toFixed(2)+" \u20ac")
+        ))
+      ),
+      React.createElement("div", { style:{ marginTop:10, background:"#fffdf2", border:"2px solid #D4A017", borderRadius:10, padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" } },
+        React.createElement("div", null,
+          React.createElement("div", { style:{ fontWeight:800, fontSize:13, color:"#8a6d00" } }, "\uD83D\uDCB0 Offenes Guthaben"),
+          React.createElement("div", { style:{ fontSize:10, color:"#a08a3a" } }, "noch nicht eingel\u00f6st \u00b7 Verbindlichkeit")
+        ),
+        React.createElement("span", { style:{ fontWeight:900, fontSize:20, color:"#8a6d00" } }, uebersicht.offen.toFixed(2)+" \u20ac")
       )
     ),
 
@@ -22235,7 +22379,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
   const isAdmin = loggedInUser && (loggedInUser.role === "Admin" || loggedInUser.role === "Manager");
   const today = new Date();
   const todayStr = today.toLocaleDateString("de-DE");
-  const todayOrders = completedOrders.filter(o => new Date(o.time).toLocaleDateString("de-DE") === todayStr && !o.storniert);
+  const todayOrders = belksUmsatzBuchungen(completedOrders).filter(o => new Date(o.time).toLocaleDateString("de-DE") === todayStr);   // v327
   const todayRevenue = todayOrders.reduce((s,o) => s + (o.total||0), 0);
   const todayTips = todayOrders.reduce((s,o) => s + (o.trinkgeld||0), 0);
   const todayExpenses = (expenses||[]).filter(e => new Date(e.date||e.time||0).toLocaleDateString("de-DE") === todayStr).reduce((s,e) => s+(parseFloat(e.amount)||0),0);
@@ -22447,7 +22591,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v326"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v328"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -23400,6 +23544,26 @@ function App() {
     L += `<div class="row bold"><span>Zahlung:</span><span>${bpayMethod}</span></div>`;
     return L;
   };
+  /* ═══ v327: GUTSCHEIN VERKAUFEN = ECHTE BUCHUNG ═══
+     Erzeugt Bon-Nummer und TSE-Signatur und legt die Buchung ab. Sie traegt
+     die Marke gutscheinVerkauf, damit alle Umsatz-Rechnungen sie ueberspringen
+     (siehe belksUmsatzBuchungen). Rueckgabe geht an den Bon, damit Beleg und
+     Buchung dieselbe Nummer tragen. */
+  const belksGutscheinVerkauf = async (g, zahlart) => {
+    const _bonNr = genNr();
+    const _items = [{ id: 0, nr: "GS", name: "Gutschein " + g.code, qty: 1, finalPrice: g.betrag, _gutschein: true }];
+    let _tse = null;
+    try {
+      _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: g.betrag, payMethod: zahlart, items: _items, tableId: null });
+    } catch (e) { console.warn("TSE Signatur Fehler (Gutschein-Verkauf):", e); }
+    setCompletedOrders(p => [...p, {
+      items: _items, time: new Date(), tableId: null, label: "Gutschein " + g.code,
+      payMethod: zahlart, trinkgeld: 0, rabatt: 0, bonNr: _bonNr, total: g.betrag,
+      tse: _tse, gutscheinVerkauf: true, gutscheinCode: g.code
+    }]);
+    return { bonNr: _bonNr, tse: _tse, zahlart: zahlart };
+  };
+
   /* ═══ v325: EINZELNE KARTENZAHLUNG SOFORT ABSCHLIESSEN ═══
      Wird aus der Einzelzahlung gerufen, sobald ein Gast auf "Karte" tippt.
      Erzeugt eine vollwertige, abgeschlossene Bestellung: eigene Bon-Nummer,
@@ -23463,7 +23627,7 @@ function App() {
     setActiveTable(null);
   };
 
-  const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0, loyaltyPhone = null, redeemedPts = 0, splitDetails = null) => {
+  const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0, loyaltyPhone = null, redeemedPts = 0, splitDetails = null, gutscheinBetrag = 0) => {
     const isTA = String(tid).startsWith("ta_");
     // Auto-deduct inventory: match item names to inventory articles
     const autoDeductItems = isTA
@@ -23491,7 +23655,7 @@ function App() {
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: ta.items, tableId: null }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
         try { window.maybeOpenDrawer && window.maybeOpenDrawer(payMethod); } catch (e) {}
-        setCompletedOrders(p => [...p, { ...ta, time: new Date(), tableId: null, label: "Takeaway #"+taId, isTakeaway: true, orderType: (ta.customerStreet ? "Lieferung" : "Abholung"), payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse }]);
+        setCompletedOrders(p => [...p, { ...ta, time: new Date(), tableId: null, label: "Takeaway #"+taId, isTakeaway: true, orderType: (ta.customerStreet ? "Lieferung" : "Abholung"), payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse, gutscheinBetrag: gutscheinBetrag||0 }]);
         // Zahlungs-Beleg automatisch drucken (mit Firma + MwSt + TSE).
         // Bei getrennter Zahlung NICHT (jeder Gast hat seinen eigenen Bon).
         if (payMethod !== "Getrennt") {
@@ -23529,7 +23693,7 @@ function App() {
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: o.items, tableId: tid }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
         try { window.maybeOpenDrawer && window.maybeOpenDrawer(payMethod); } catch (e) {}
-        setCompletedOrders(p => [...p, { ...o, time: new Date(), tableId: tid, payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse,
+        setCompletedOrders(p => [...p, { ...o, time: new Date(), tableId: tid, payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse, gutscheinBetrag: gutscheinBetrag||0,
           splitDetails: (splitDetails && splitDetails.length) ? splitDetails.map(d => ({ amount: Number(d.amount)||0, method: d.method||"", trinkgeld: Number(d.trinkgeld)||0 })) : undefined }]);
         // Zahlungs-Beleg automatisch drucken (mit Firma + MwSt + TSE).
         // ABER bei getrennter Zahlung NICHT: dort hat jeder Gast schon beim
@@ -24757,7 +24921,8 @@ function App() {
     gutscheine: gutscheine,
     setGutscheine: setGutscheine,
     loggedInUser: loggedInUser,
-    printerSettings: printerSettings
+    printerSettings: printerSettings,
+    onVerkauf: belksGutscheinVerkauf
   }), view === "dashboard" && React.createElement(DashboardView, { completedOrders: completedOrders, tableOrders: tableOrders, takeaway: takeaway, floors: floors, expenses: expenses, setView: setView, openTable: openTable, setShowTaCustomerSearch: setShowTaCustomerSearch, loggedInUser: loggedInUser, deleteTakeaway: deleteTakeaway, inventory: inventory, happyHours: happyHours, pendingOnlineOrders: pendingOnlineOrders, onChannelOrder: (src) => newTakeaway(null, src) }), view === "tables" && React.createElement(TableView, {
     orders: tableOrders,
     onSelect: openTable,
@@ -25124,7 +25289,7 @@ function App() {
           usedAt: new Date().toISOString()
         } : g));
       }
-      completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts, splitDetails);
+      completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts, splitDetails, usedGutschein ? (usedGutschein.rabatt||0) : 0);
     },
     onTeilzahlung: (gastItems, tg, rabatt, gastNr) => belksTeilzahlung(checkout.tableId, gastItems, tg, rabatt, gastNr),
     onNurKarte: () => belksTischOhneBuchung(checkout.tableId),
@@ -27386,7 +27551,7 @@ function AiBetriebsleiterView({ completedOrders }) {
 
   var orders = completedOrders || [];
   var today = new Date().toLocaleDateString('de-DE');
-  var todayOrders = orders.filter(function(o) {
+  var todayOrders = belksUmsatzBuchungen(orders).filter(function(o) {   // v327
     try { return new Date(o.time).toLocaleDateString('de-DE') === today; } catch(e) { return false; }
   });
   var todayTotal = todayOrders.reduce(function(s,o){return s+(o.total||0);},0);
