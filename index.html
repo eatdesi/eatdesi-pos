@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v325</title>
+<title>eatDeSi POS v326</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -10677,7 +10677,18 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
     if (rabattType === "euro") return Math.min(parseFloat(rabattVal)||0, total);
     return 0;
   })();
-  const totalNachRabatt = Math.max(0, total - rabattAmt - (pointsRabatt||0));
+  /* ═══ v326: GUTSCHEIN GEHOERT IN DIE ENDSUMME ═══
+     finalTotal (Anzeige "Gesamt") zog den Gutschein schon ab,
+     totalNachRabatt aber nicht - deshalb stand oben 9,00 EUR und unten
+     "Zu zahlen 14,00 EUR". Der Gast haette 5 EUR zu viel gezahlt.
+     Ab hier rechnet alles mit demselben Betrag: Anzeige, Rueckgeld,
+     SumUp-Betrag, Bon und Buchung. */
+  const totalNachRabatt = Math.max(0, total - rabattAmt - (pointsRabatt||0) - gutscheinRabatt);
+  /* Was die Buchung als Rabatt sehen muss: completeOrder rechnet
+     "Artikelsumme minus Rabatt". Faehrt hier nur rabattAmt mit, bucht die
+     Kasse wieder die vollen Artikelpreise - der Gutschein und die
+     eingeloesten Punkte waeren im Tagesbericht nicht zu sehen. */
+  const rabattGesamt = Math.round((rabattAmt + gutscheinRabatt + (pointsRabatt||0)) * 100) / 100;
   const tg = parseFloat(trinkgeld) || 0;
   const totalWithTG = totalNachRabatt + tg;
   /* Runde Betraege, die ein Gast typischerweise nennt: erst auf den vollen
@@ -10775,14 +10786,14 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
   };
 
   const finishFull = (method, extra = {}) => {
-    setDone({ method, total: totalNachRabatt, rabatt: rabattAmt, trinkgeld: tg, totalWithTG, ...extra });
+    setDone({ method, total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: tg, totalWithTG, ...extra });
     setStep("done");
     rawbtZahlBon(method, totalNachRabatt, tg, items, label);
   };
   const finishMix = () => {
     const bar = parseFloat(mixBarAmt) || 0;
     const karte = Math.max(0, totalWithTG - bar);
-    setDone({ method: "Bar+Karte", total: totalNachRabatt, rabatt: rabattAmt, trinkgeld: tg, totalWithTG, mixBar: bar, mixKarte: karte });
+    setDone({ method: "Bar+Karte", total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: tg, totalWithTG, mixBar: bar, mixKarte: karte });
     setStep("done");
   };
   const handleSplitPaid = (method, personTG = 0) => {
@@ -10791,7 +10802,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
     setSplitPaid(newPaid);
     if (newPaid.length === splitPersons) {
       const totalTG = newPaid.reduce((s, p) => s + p.trinkgeld, 0);
-      setDone({ method: "Getrennt", total: totalNachRabatt, rabatt: rabattAmt, trinkgeld: totalTG, totalWithTG: totalNachRabatt + totalTG, splitDetails: newPaid });
+      setDone({ method: "Getrennt", total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: totalTG, totalWithTG: totalNachRabatt + totalTG, splitDetails: newPaid });
       setStep("done");
     }
   };
@@ -11239,23 +11250,20 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
                 // Print Rest-Bon if there's remaining balance
                 if(restGuthaben > 0) {
                   setTimeout(() => {
-                    const html = "<html><head><style>body{font-family:monospace;font-size:15px;font-weight:600;width:384px;margin:0 auto;padding:10px}.c{text-align:center}.b{font-weight:700}.l{border-top:1px dashed #999;margin:6px 0}.big{font-size:16px;font-weight:900;letter-spacing:2px;color:#C84B31}</style></head><body>"
-                      +"<div class=\"c b\" style=\"font-size:15px\">eatDeSi POS</div>"
-                      +"<div class=\"l\"></div>"
-                      +"<div class=\"c b\" style=\"color:#f57f17;font-size:13px\">🎫 GUTSCHEIN REST-BON</div>"
-                      +"<div class=\"l\"></div>"
-                      +"<div class=\"c big\">" + gutscheinApplied.code + "</div>"
-                      +"<div class=\"l\"></div>"
-                      +"<div style=\"display:flex;justify-content:space-between\"><span>Genutzt heute:</span><span>-" + gutscheinRabatt.toFixed(2) + " €</span></div>"
-                      +"<div style=\"display:flex;justify-content:space-between\"><span class=\"b\">✅ Restguthaben:</span><span class=\"b\" style=\"color:#2e7d32;font-size:15px\">" + restGuthaben.toFixed(2) + " €</span></div>"
-                      +"<div class=\"l\"></div>"
-                      +"<div class=\"c\" style=\"font-size:11px\">Dieser Bon ist beim nächsten Besuch einlösbar.</div>"
-                      +"<div class=\"c\" style=\"font-size:11px\">Bitte aufbewahren!</div>"
-                      +"<div class=\"l\"></div>"
-                      +"<div class=\"c\">Danke & bis bald! 🙏</div>"
-                      +"<script>window.onload=function(){setTimeout(function(){window.print();},400);}<\/script>"
-                      +"</body></html>";
-                    printHtml(html);
+                    /* v326: auch der Rest-Bon lief nur ueber printHtml
+                       (Browser) und mit eigenen Klassen. Jetzt derselbe
+                       Weg wie alle anderen Belege. */
+                    try {
+                      let RL = "";
+                      RL += '<div class="center bold" style="font-size:20px;letter-spacing:2px">' + gutscheinApplied.code + '</div>';
+                      RL += '<div class="line"></div>';
+                      RL += '<div class="row"><span>Genutzt heute</span><span>-' + fmt(gutscheinRabatt) + '</span></div>';
+                      RL += '<div class="row bold"><span>Restguthaben</span><span>' + fmt(restGuthaben) + '</span></div>';
+                      RL += '<div class="line"></div>';
+                      RL += '<div class="center">Beim n\u00e4chsten Besuch einl\u00f6sbar.</div>';
+                      RL += '<div class="center">Bitte aufbewahren!</div>';
+                      printBon("\uD83C\uDF9F\uFE0F GUTSCHEIN \u2014 RESTGUTHABEN", RL, "Gutschein", gutscheinApplied.code, new Date(), null, printerSettings, null, 'kunde');
+                    } catch (e) { console.warn("Rest-Bon Druck Fehler:", e); }
                   }, 500);
                 }
               }
@@ -22062,44 +22070,31 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
     setCode(c);
   };
 
+  /* ═══ v326: GUTSCHEIN-BON UEBER DEN ECHTEN DRUCKWEG ═══
+     Vorher kannte diese Stelle nur "rawbt" und printHtml. Auf einem Geraet
+     mit Bluetooth- oder WLAN-Drucker fiel sie deshalb IMMER in den
+     Browser-Druck - genau das, was Abdullah gesehen hat. Zusaetzlich
+     benutzte der Bon eigene Klassen (.c/.b/.l), die der Thermodrucker-Umbau
+     nicht in Text uebersetzen kann.
+     Jetzt: normale Bon-Klassen (row/center/bold/line/blank) und printBon(),
+     also derselbe Weg wie Kunden-, Kuechen- und Bewirtungsbeleg. */
   const printGutschein = (g, printerSettings) => {
-    const html = "<html><head><style>body{font-family:monospace;font-size:15px;font-weight:600;width:384px;margin:0 auto;padding:10px}.c{text-align:center}.b{font-weight:700}.l{border-top:1px dashed #999;margin:6px 0}.big{font-size:18px;font-weight:900;letter-spacing:2px;color:#C84B31}</style></head><body>"
-      +"<div class=\"c b\" style=\"font-size:15px\">" + (printerSettings?.name||"eatDeSi POS") + "</div>"
-      +"<div class=\"c\" style=\"font-size:11px\">" + (printerSettings?.address||"") + "</div>"
-      +"<div class=\"l\"></div>"
-      +"<div class=\"c b\" style=\"font-size:14px;margin:6px 0\">🎫 GUTSCHEIN</div>"
-      +"<div class=\"l\"></div>"
-      +"<div class=\"c big\">" + g.code + "</div>"
-      +"<div class=\"l\"></div>"
-      +"<div style=\"display:flex;justify-content:space-between\"><span>Gutscheinwert:</span><span class=\"b\">" + g.betrag.toFixed(2) + " €</span></div>"
-      +"<div style=\"display:flex;justify-content:space-between\"><span>Guthaben:</span><span class=\"b\" style=\"color:#2e7d32\">" + g.rest.toFixed(2) + " €</span></div>"
-      +(g.note ? "<div style=\"font-size:11px;color:#666;margin-top:4px\">Notiz: " + g.note + "</div>" : "")
-      +"<div class=\"l\"></div>"
-      +"<div class=\"c\" style=\"font-size:11px\">Ausgestellt: " + new Date(g.created).toLocaleDateString("de-DE") + "</div>"
-      +"<div class=\"c\" style=\"font-size:11px\">Gültig bis: " + new Date(new Date(g.created).setFullYear(new Date(g.created).getFullYear()+2)).toLocaleDateString("de-DE") + "</div>"
-      +"<div class=\"l\"></div>"
-      +"<div class=\"c\" style=\"font-size:11px\">Bitte diesen Bon aufbewahren!</div>"
-      +"<div class=\"c\">" + (printerSettings?.footer||"Danke & bis bald! 🙏") + "</div>"
-      +"<script>window.onload=function(){setTimeout(function(){window.print();},400);}<\/script>"
-      +"</body></html>";
-    if(printerSettings?.method === "rawbt") {
-      try {
-        const text = g.code.padStart(16," ") + "\n"
-          + "\n=== GUTSCHEIN ===\n"
-          + "Code: " + g.code + "\n"
-          + "Wert: " + g.betrag.toFixed(2) + " EUR\n"
-          + "Guthaben: " + g.rest.toFixed(2) + " EUR\n"
-          + (g.note ? "Notiz: "+g.note+"\n" : "")
-          + "Ausgestellt: "+new Date(g.created).toLocaleDateString("de-DE")+"\n"
-          + "================\n"
-          + "Bitte aufbewahren!\n\n\n";
-        const a = document.createElement("a");
-        a.href = "rawbt:" + encodeURIComponent(text);
-        a.click();
-      } catch(e) { console.error(e); }
-    } else {
-      printHtml(html);
-    }
+    try {
+      const erstellt = new Date(g.created);
+      const gueltig = new Date(new Date(g.created).setFullYear(erstellt.getFullYear() + 2));
+      let L = "";
+      L += '<div class="center bold" style="font-size:20px;letter-spacing:2px">' + g.code + '</div>';
+      L += '<div class="line"></div>';
+      L += '<div class="row"><span>Gutscheinwert</span><span>' + fmt(g.betrag) + '</span></div>';
+      L += '<div class="row bold"><span>Guthaben</span><span>' + fmt(g.rest) + '</span></div>';
+      if (g.note) L += '<div class="row"><span>Notiz</span><span>' + g.note + '</span></div>';
+      L += '<div class="line"></div>';
+      L += '<div class="row"><span>Ausgestellt</span><span>' + fmtD(erstellt) + '</span></div>';
+      L += '<div class="row"><span>G\u00fcltig bis</span><span>' + fmtD(gueltig) + '</span></div>';
+      L += '<div class="line"></div>';
+      L += '<div class="center">Bitte diesen Bon aufbewahren!</div>';
+      printBon("\uD83C\uDF9F\uFE0F GUTSCHEIN", L, "Gutschein", g.code, erstellt, null, printerSettings, null, 'kunde');
+    } catch (e) { console.warn("Gutschein-Druck Fehler:", e); }
   };
 
   const saveNew = () => {
@@ -22452,7 +22447,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v325"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v326"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
