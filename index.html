@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v321</title>
+<title>eatDeSi POS v323</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -472,7 +472,16 @@ window.belksWipeTenantData = function(newLoc){
         var bak = JSON.parse(localStorage.getItem('eatdesi_firmabak_'+newLoc)||'null');
         if(bak){
           if(bak.printer) localStorage.setItem('eatdesi_printer', bak.printer);
-          if(bak.firma)   localStorage.setItem('eatdesi_firma',   bak.firma);
+          /* v322: Nur zurueckholen, wenn die Sicherung wirklich zu dieser
+             Tochter gehoert - eine aeltere Sicherung ohne Kuerzel wird
+             gestempelt, eine fremde gar nicht erst eingespielt. */
+          if(bak.firma){
+            try{
+              var _bf = JSON.parse(bak.firma||'{}') || {};
+              if(!_bf._loc) _bf._loc = newLoc;
+              if(_bf._loc === newLoc) localStorage.setItem('eatdesi_firma', JSON.stringify(_bf));
+            }catch(e){ }
+          }
         }
       }
     }catch(e){}
@@ -550,22 +559,49 @@ window.belksFirmaVollstaendig = function(f){
   return f;
 };
 
+/* ═══ v322: FIRMENDATEN GEHÖREN GENAU EINER TOCHTER ═══
+   In der Kleinen Kneipe standen unter Firmendaten die Anschrift, die
+   Steuernummer und die E-Mail von eatDeSi BW. Das ist keine Schoenheits-
+   frage: diese Angaben stehen auf jedem Bon und auf dem Bewirtungsbeleg,
+   der beim Finanzamt landet.
+   Zwei Wege haben die Daten hinuebergetragen:
+   1) Der einmalige Umzug las die Firmenfelder aus 'eatdesi_printer' - dem
+      ALTEN gemeinsamen Schluessel, der beim Tochterwechsel absichtlich
+      erhalten bleibt. Dort lagen noch die Werte von BW.
+   2) Nichts prüfte, zu welchem Restaurant ein Firmendatensatz gehoert.
+   Ab jetzt traegt jeder Datensatz das Kuerzel seiner Tochter. Passt es
+   nicht, wird er verworfen statt angezeigt. */
+window.belksAktuelleTochter = function(){
+  try{ return localStorage.getItem('eatdesi_data_owner')
+            || localStorage.getItem('eatdesi_location_id') || ''; }catch(e){ return ''; }
+};
 // Firmendaten lesen (Cloud-Schluessel), mit Rueckfall auf alte Geraetedaten
 window.belksFirmaLesen = function(){
   try{
+    var loc = window.belksAktuelleTochter();
     var f = {};
     try{ f = JSON.parse(localStorage.getItem('eatdesi_firma')||'{}') || {}; }catch(e){}
+    /* Fremder Datensatz? Dann lieber leer als falsch. Ein leeres Feld faellt
+       beim Einrichten auf; eine fremde Steuernummer auf dem Bon nicht. */
+    if(f && f._loc && loc && f._loc !== loc){
+      try{ console.warn('Firmendaten gehoerten zu ' + f._loc + ', aktuell ist ' + loc + ' - verworfen'); }catch(e){}
+      try{ localStorage.removeItem('eatdesi_firma'); }catch(e){}
+      f = {};
+    }
     // Einmaliger Umzug: alte Werte aus den Druckereinstellungen uebernehmen,
-    // aber nur, wenn in der Cloud-Ablage noch nichts steht.
+    // aber nur aus dem Datensatz DIESER Tochter und nur, wenn noch nichts
+    // gespeichert ist. Der gemeinsame Altschluessel wird nicht mehr gelesen.
     var p = {};
-    try{ p = JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen()
-                        : localStorage.getItem('eatdesi_printer'))||'{}') || {}; }catch(e){}
+    try{
+      if(loc) p = JSON.parse(localStorage.getItem('eatdesi_printer_' + loc) || '{}') || {};
+    }catch(e){ p = {}; }
     var geaendert = false;
     window.BELKS_FIRMA_FELDER.forEach(function(k){
       if((f[k] === undefined || f[k] === '') && p[k] !== undefined && p[k] !== ''){
         f[k] = p[k]; geaendert = true;
       }
     });
+    if(geaendert && loc) f._loc = loc;
     f = window.belksFirmaVollstaendig(f);
     if(geaendert){
       try{ localStorage.setItem('eatdesi_firma', JSON.stringify(f)); }catch(e){}
@@ -592,6 +628,8 @@ window.belksFirmaSpeichern = function(neu){
       else if(neu && neu[b] !== undefined && neu[b] !== '') z[a] = neu[b];
     });
     z = window.belksFirmaVollstaendig(z);
+    /* v322: Beim Speichern festhalten, zu wem die Daten gehoeren. */
+    try{ var _l = window.belksAktuelleTochter(); if(_l) z._loc = _l; }catch(e){}
     localStorage.setItem('eatdesi_firma', JSON.stringify(z));
     return z;
   }catch(e){ return neu || {}; }
@@ -7543,7 +7581,9 @@ var EposWiFi = {
           var big = fs >= 18;
           var isRow = /(^|\s)row(\s|$)/.test(cls);
           var isLine = /(^|\s)line(\s|$)/.test(cls);
-          if(isLine){ lines.push({text:"--------------------------------", align:"left", bold:false, big:false}); continue; }
+          /* v323: Die Trennlinie war 32 Zeichen lang, die Zeilen darueber 42 -
+             sie endete mitten im Bon, vor der Preisspalte. */
+          if(isLine){ lines.push({text:"------------------------------------------", align:"left", bold:false, big:false}); continue; }
           /* v318: Leerzeilen wurden bisher verschluckt (leerer Text ->
              uebersprungen). Auf einem Beleg, in den jemand HINEINSCHREIBEN
              soll, ist genau die Leerzeile das Wichtigste. */
@@ -9429,7 +9469,7 @@ function BonModal({
     .line{border-top:1px dashed #999;margin:5px 0}.center{text-align:center}
   </style></head><body>
     <div class="center bold" style="font-size:15px">${printerSettings?.name || "eatDeSi"}</div>
-    <div class="center" style="font-size:11px">${printerSettings?.address || "Brunnenallee 30 · 34537 Bad Wildungen"}</div>
+    <div class="center" style="font-size:11px">${printerSettings?.address || ""}</div>
     <div class="center" style="font-size:11px">${printerSettings?.phone || "05621 9449087"}</div>
     <div class="line"></div>
     <div class="center bold" style="margin:3px 0">${title}</div>
@@ -11427,7 +11467,7 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
 
   const buildBonHtml = (typ) => {
     const firma = printerSettings?.firmaName || "eatDeSi";
-    const addr = printerSettings?.address || "Brunnenallee 30 · 34537 Bad Wildungen";
+    const addr = printerSettings?.address || "";
     const rows = [
       ["\uD83D\uDCE6 Bestellungen", filtered.length],
       ["\uD83D\uDCB0 Umsatz Brutto", fmt(rev)],
@@ -11459,9 +11499,9 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
       <div class="ln"></div>
       ${rows.map(([l,v])=>`<div class="row ${l.includes("Umsatz")?"bold":""}"><span>${l}</span><span>${v}</span></div>`).join("")}
       <div class="ln"></div>
-      <div class="tot"><span>💰 Netto Gewinn</span><span>${fmt(netto)}</span></div>
+      <div class="tot"><span>💰 Einnahmen − Ausgaben</span><span>${fmt(netto)}</span></div>
       <div class="ln"></div>
-      <div class="s">StNr: ${printerSettings?.firmaStNr||"26/229/25450"}</div>
+      ${printerSettings?.firmaStNr ? `<div class="s">StNr: ${printerSettings.firmaStNr}</div>` : ""}
       <div class="s">USt-IdNr: ${printerSettings?.firmaUst||"DE361161517"}</div>
       <div class="s" style="margin-top:8px">Belks Direktvertrieb GmbH</div>
     </body></html>`;
@@ -11524,7 +11564,7 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
         )
       ),
       /*#__PURE__*/React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", marginTop:8, background:C.green, borderRadius:8, padding:"10px 12px" } },
-        /*#__PURE__*/React.createElement("span", { style:{ fontWeight:700, color:"#fff" } }, "\uD83D\uDCB0 Netto Gewinn"),
+        /*#__PURE__*/React.createElement("span", { style:{ fontWeight:700, color:"#fff" } }, "\uD83D\uDCB0 Einnahmen \u2212 Ausgaben"),
         /*#__PURE__*/React.createElement("span", { style:{ fontWeight:900, color:"#fff", fontSize:16 } }, fmt(netto))
       )
     ),
@@ -14357,7 +14397,7 @@ function DayEndView({
   const PERIODS = [["heute", "Heute"], ["gestern", "Gestern"], ["woche", "Woche"], ["monat", "Monat"], ["letztermonat", "Letzter Monat"], ["quartal", "Quartal"], ["jahr", "Jahr"], ["custom", "Benutzerdefiniert"]];
   const printBericht = (a4 = false) => {
     const rName = printerSettings?.name || "eatDeSi";
-    const rAddr = printerSettings?.address || "Brunnenallee 30 · 34537 Bad Wildungen";
+    const rAddr = printerSettings?.address || "";
     const topItems = {};
     filtered.forEach(o => o.items?.forEach(i => {
       topItems[i.name] = (topItems[i.name] || 0) + i.qty;
@@ -14421,7 +14461,7 @@ function DayEndView({
 </div>
 
 <div class="highlight">
-  <div style="font-size:11px;color:#555;margin-bottom:4px">💰 Netto Gewinn (nach Ausgaben, ohne Trinkgeld)</div>
+  <div style="font-size:11px;color:#555;margin-bottom:4px">💰 Umsatz netto (ohne MwSt., ohne Trinkgeld)</div>
   <div class="highlight-val">${fmt(rev - exp)}</div>
   ${trinkgeldTotal > 0 ? `<div style="font-size:12px;color:#e65100;margin-top:4px">+ 🌟 Trinkgeld: ${fmt(trinkgeldTotal)} (steuerfrei, für Mitarbeiter)</div>` : ""}
 </div>
@@ -14666,7 +14706,7 @@ ${filtered.map((o, i) => {
       color: "#fff",
       fontWeight: 700
     }
-  }, "\uD83D\uDCB0 Netto Gewinn"), /*#__PURE__*/React.createElement("span", {
+  }, "\uD83D\uDCB0 Umsatz netto"), /*#__PURE__*/React.createElement("span", {
     style: {
       color: "#fff",
       fontWeight: 900,
@@ -16588,9 +16628,9 @@ function PrinterSettingsView({
   onSave
 }) {
   const [form, setForm] = useState(settings || {
-    name: "eatDeSi",
-    address: "Brunnenallee 30 · 34537 Bad Wildungen",
-    phone: "05621 9449087",
+    name: "",
+    address: "",
+    phone: "",
     footer: "Danke & bis bald! 🙏",
     width: 384,
     method: "browser",
@@ -20888,9 +20928,9 @@ function _bewHtml(items, total, label, fmt80, F) {
     +         '<path d="M18 36 Q22 28 26 32 Q30 36 34 26 Q38 18 42 30" fill="none" stroke="#1a5276" stroke-width="1.5" stroke-linecap="round"/>'
     +       '</svg>'
     +       '<div style="font-size:9px;color:#1a5276;font-style:italic;text-align:left;line-height:1.4">'
-    +         'Belks Direktvertrieb GmbH<br>'
-    +         'Brunnenallee 30<br>'
-    +         '34537 Bad Wildungen<br>'
+    +         (fn ? (fn + '<br>') : '')
+    +         (fstr ? (fstr + '<br>') : '')
+    +         (fpo ? (fpo + '<br>') : '')
     +         '<span style="font-size:8px;color:#888">Elektronisch gezeichnet<br>' + d + ' ' + t + '</span>'
     +       '</div>'
     +     '</div>'
@@ -21006,13 +21046,13 @@ function BewirtungButtons(props) {
   var F = {
     name:    firma.firmaName    || 'eatDeSi',
     zusatz:  firma.firmaZusatz  || 'Fusion Kitchen & Grill',
-    strasse: firma.firmaStrasse || 'Brunnenallee 30',
+    strasse: firma.firmaStrasse || '',
     plzOrt:  firma.firmaPlzOrt  || '34537 Bad Wildungen',
     phone:   firma.phone        || '05621 9449087',
     stNr:    firma.firmaStNr    || '',
     ust:     firma.firmaUst     || '',
     gericht: firma.firmaGericht || '',
-    email:   firma.firmaEmail   || 'eatdesi.bw@gmail.com',
+    email:   firma.firmaEmail   || '',
     web:     firma.firmaWeb     || 'www.eatdesi-bw.de',
   };
   var _s = React.useState(false);
@@ -22334,7 +22374,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v321"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v323"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27111,7 +27151,7 @@ function ensureQRCardCSS(){
 async function openQRCardOverlay(cfg){
   ensureQRCardCSS();
   if(!window.QRCode||!window.QRCode.toString) throw new Error('QR-Bibliothek nicht geladen. Bitte Internetverbindung pr\u00fcfen und App neu laden.');
-  var firma=LS.get('eatdesi_firma',{name:'eatDeSi BW',street:'Brunnenallee 30',city:'34521 Bad Wildungen'});
+  var firma=LS.get('eatdesi_firma',{name:'',street:'',city:''});
   var cards=await buildQRCardsHTML(cfg,firma);
   var ov=document.getElementById('qrPrintOverlay');
   if(!ov){ov=document.createElement('div');ov.id='qrPrintOverlay';document.body.appendChild(ov);}
