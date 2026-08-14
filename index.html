@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v323</title>
+<title>eatDeSi POS v325</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7358,6 +7358,40 @@ const DRINK_CATS = ["Cocktails","Alkoholfrei","Softdrinks","Bier","Weine","Long 
 // === NATIVE BLUETOOTH DRUCK (Capacitor BLE Plugin) =========================
 // Druckt direkt auf JEDEN Bluetooth-Thermodrucker (ESC/POS), ohne RawBT.
 // Funktioniert in der APK (nicht im normalen Browser).
+/* ═══ v324: GRABSTEINE NACH DEM TAGESABSCHLUSS WEGRÄUMEN ═══
+   Eine Löschmarke ("Grabstein") merkt sich, dass ein Tisch gelöscht wurde.
+   Sie schützt davor, dass ein Gerät, das gerade aus war, den Tisch beim
+   nächsten Einschalten wieder hochlädt. Nach dem Tagesabschluss gibt es
+   aber keine offenen Tische mehr - dann ist die Marke nutzlos und steht nur
+   noch als Altlast in der Cloud. Bisher wurde sie nur beim Antippen von
+   "Aktualisieren" entfernt; nach dem Abschluss blieb sie liegen und tauchte
+   am nächsten Tag wieder in der Diagnose auf.
+   Aufgeräumt wird NUR, wenn wirklich kein Tisch offen ist - sonst würde
+   genau der Schutz wegfallen, für den die Marke da ist. */
+function belksGrabsteineWeg(){
+  try{
+    var to = {};
+    try{ to = JSON.parse(localStorage.getItem('eatdesi_tableorders') || '{}') || {}; }catch(e){}
+    var offen = Object.keys(to).filter(function(k){
+      if(String(k).indexOf('ta_') === 0) return false;
+      var t = to[k]; return t && t.items && t.items.length > 0;
+    }).length;
+    if(offen > 0) return { ok:false, grund:'noch ' + offen + ' Tisch(e) offen' };
+    var m = {};
+    try{ m = JSON.parse(localStorage.getItem('eatdesi_to_meta') || '{}') || {}; }catch(e){}
+    var anzahl = (m && m.del) ? Object.keys(m.del).length : 0;
+    if(!anzahl) return { ok:true, anzahl:0 };
+    var sauber = { ts: (m && m.ts) || {}, del: {} };
+    try{ window._syncWriting = true; }catch(e){}
+    localStorage.setItem('eatdesi_to_meta', JSON.stringify(sauber));
+    try{ window._syncWriting = false; }catch(e){}
+    /* Auch in der Cloud loeschen - sonst holt sich das naechste Geraet die
+       alten Marken beim naechsten Lesen wieder herunter. */
+    try{ if(typeof pushStateToSupabase === 'function') pushStateToSupabase('tableordersmeta', sauber); }catch(e){}
+    return { ok:true, anzahl:anzahl };
+  }catch(e){ return { ok:false, grund:(e && e.message) || String(e) }; }
+}
+
 /* ═══ v321: DER GESCHÄFTSTAG ENDET UM 04:00, NICHT UM MITTERNACHT ═══
    Um 00:20 zeigte der Bericht "Freitag, 14. August" mit 0 Bestellungen -
    der ganze Abend war weg, obwohl niemand einen Abschluss gemacht hatte.
@@ -10099,6 +10133,15 @@ function SplitPersonPay({
 
 // --- Item Assignment for Split (Article Mode) ---------------------------------
 
+/* v325: Schluessel einer Bestellzeile. Normale Tisch-Zeilen haben _key
+   (gesetzt beim Hinzufuegen). Der Rueckfall ist dieselbe Regel, die auch
+   beim Zusammenfassen der Bon-Zeilen benutzt wird - so passen beide Wege
+   zusammen, falls eine alte Zeile ohne _key im Tisch liegt. */
+function belksZeilenKey(z){
+  if (!z) return "";
+  return z._key || ((z.nr||'') + '_' + (z.name||'') + '_' + (z.note||'') + '_' + (z.finalPrice||0));
+}
+
 // --- EINZELN ABKASSIEREN -----------------------------------------------------
 function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, onSkipGast, onAbort }) {
   const [sel, setSel] = React.useState({}); // _key: true
@@ -10158,8 +10201,13 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
 
   const confirmPay = (method) => {
     const cashInfo = method === "Bar" ? { cashGiven: parseFloat(cashGiven)||0, change: cashChange } : null;
-    // Print bon for this guest
-    printGastBon(selItems, selTotal, tgVal, method, gastNr+1, label, printerSettings, rabattAmt);
+    /* v325: Bei Karte bucht die Kasse sofort eine eigene Bestellung und
+       druckt dort den richtigen Zahlungsbeleg MIT TSE-Signatur. Ein
+       zusaetzlicher Gast-Bon ohne Signatur waere ein zweiter Beleg fuer
+       dieselbe Zahlung - deshalb hier nur noch bei Bar drucken. */
+    if (method !== "Karte") {
+      printGastBon(selItems, selTotal, tgVal, method, gastNr+1, label, printerSettings, rabattAmt);
+    }
     /* Der Rabatt muss mitgereicht werden: die Buchung rechnet sonst wieder
        die vollen Artikelpreise zusammen - der Gast zahlt 19 EUR und die
        Kasse bucht 21,20 EUR. */
@@ -10582,7 +10630,7 @@ function ArticleSplitSetup({
   );
 }
 
-function CheckoutModal({ label, items, total, directSplit, printerSettings, onClose, onComplete, gutscheine, setGutscheine, customers, loyaltySettings, setCustomers }) {
+function CheckoutModal({ label, items, total, directSplit, printerSettings, onClose, onComplete, onTeilzahlung, onNurKarte, gutscheine, setGutscheine, customers, loyaltySettings, setCustomers }) {
   const sumupMode = printerSettings?.sumupMode || "same"; // "same" | "other"
   const [step, setStep] = React.useState(directSplit ? "split" : "main");
   const [gutscheinCode, setGutscheinCode] = React.useState("");
@@ -10926,7 +10974,11 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
                 const expanded = [];
                 items.forEach(item => {
                   for (let q = 0; q < item.qty; q++) {
-                    expanded.push({ ...item, qty: 1, finalPrice: item.finalPrice, _key: item._key + "_" + q });
+                    /* v325: _urKey zeigt auf die Originalzeile im Tisch.
+                       Ohne diesen Rueckweg wuesste die Kasse nach einer
+                       Kartenzahlung nicht, welche Menge sie vom Tisch
+                       abziehen muss. */
+                    expanded.push({ ...item, qty: 1, finalPrice: item.finalPrice, _key: item._key + "_" + q, _urKey: belksZeilenKey(item) });
                   }
                 });
                 setEinzelnItems(expanded);
@@ -11028,21 +11080,41 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
             const amt = Math.max(0, Math.round((roh - (gastRabatt||0)) * 100) / 100);
             const newPaid = [...einzelnPaid, { items: gastItems, amount: amt, method, trinkgeld: tg, cashInfo, rabatt: (gastRabatt||0), gastNr: einzelnGast+1 }];
             setEinzelnPaid(newPaid);
+            /* ═══ v325: KARTE = SOFORT EIGENE BESTELLUNG ═══
+               Die KassenSichV verlangt fuer JEDE Zahlung eine eigene
+               signierte Transaktion. Bis v324 wurde der ganze Tisch als ein
+               Posten "Getrennt" gebucht - im Tagesbericht standen Bar und
+               Karte deshalb beide auf 0,00 EUR und ein Kassensturz konnte
+               nicht stimmen. Jetzt bekommt jede Kartenzahlung ihre eigene
+               Bon-Nummer und ihre eigene TSE-Signatur, und die bezahlten
+               Artikel verlassen den Tisch sofort. Barzahlungen sammeln sich
+               weiter und werden bei "Tisch freigeben" als EINE Buchung
+               abgeschlossen. Damit faellt splitDetails (v320) weg. */
+            if (method === "Karte" && typeof onTeilzahlung === "function") {
+              onTeilzahlung(gastItems, tg, (gastRabatt||0), einzelnGast+1);
+            }
             // remove paid items from remaining
             const paidKeys = new Set(gastItems.map(i=>i._key));
             const rem = einzelnItems.filter(i => !paidKeys.has(i._key));
             setEinzelnItems(rem);
             setEinzelnGast(einzelnGast + 1);
             if (rem.length === 0) {
-              // All done
-              const totalTG = newPaid.reduce((s,p)=>s+(p.trinkgeld||0),0);
-              /* v319: Die Summe ist das, was die Gaeste zusammen bezahlt haben.
-                 Vorher stand hier der Rechnungsbetrag des Hauptfensters - mit
-                 einem Rabatt bei einem einzelnen Gast haette der Tagesabschluss
-                 mehr ausgewiesen, als in der Kasse liegt. */
-              const gesamtBezahlt = Math.round(newPaid.reduce((s,p)=>s+(p.amount||0),0) * 100) / 100;
-              const gesamtRabatt = Math.round(newPaid.reduce((s,p)=>s+(p.rabatt||0),0) * 100) / 100;
-              setDone({ method:"Getrennt", total: gesamtBezahlt, rabatt: gesamtRabatt, trinkgeld: totalTG, totalWithTG: gesamtBezahlt+totalTG, splitDetails: newPaid.map(p=>({amount:p.amount, method:p.method, trinkgeld:p.trinkgeld||0})) });
+              /* Was jetzt noch offen ist, sind genau die Barzahlungen: die
+                 Kartenzahlungen sind oben schon gebucht und aus dem Tisch
+                 verschwunden. Deshalb wird hier NUR noch der Bar-Anteil
+                 gemeldet - sonst wuerde derselbe Umsatz doppelt zaehlen. */
+              const barPaid   = newPaid.filter(p => p.method !== "Karte");
+              const barSumme  = Math.round(barPaid.reduce((s,p)=>s+(p.amount||0),0) * 100) / 100;
+              const barRabatt = Math.round(barPaid.reduce((s,p)=>s+(p.rabatt||0),0) * 100) / 100;
+              const barTG     = Math.round(barPaid.reduce((s,p)=>s+(p.trinkgeld||0),0) * 100) / 100;
+              if (barPaid.length === 0) {
+                // Alles war Karte -> alles ist bereits gebucht, der Tisch wird nur geleert.
+                const alleSumme = Math.round(newPaid.reduce((s,p)=>s+(p.amount||0),0) * 100) / 100;
+                const alleTG    = Math.round(newPaid.reduce((s,p)=>s+(p.trinkgeld||0),0) * 100) / 100;
+                setDone({ method:"Karte", total: alleSumme, rabatt: 0, trinkgeld: alleTG, totalWithTG: alleSumme + alleTG, nurKarte: true });
+              } else {
+                setDone({ method:"Bar", total: barSumme, rabatt: barRabatt, trinkgeld: barTG, totalWithTG: barSumme + barTG });
+              }
               setStep("done");
             }
           },
@@ -11187,9 +11259,15 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
                   }, 500);
                 }
               }
-              /* v320: die Aufteilung muss mit - sonst ist beim Buchen nicht
-                 mehr feststellbar, was bar und was mit Karte kam. */
-              onComplete(done.method, done.trinkgeld||0, done.rabatt||0, gutscheinApplied?{id:gutscheinApplied.id,rabatt:gutscheinRabatt}:null, loyaltyPhone||null, redeemedPts||0, done.splitDetails||null);
+              /* v325: Haben ALLE Gaeste mit Karte gezahlt, ist jede Zahlung
+                 schon einzeln gebucht - hier gibt es nichts mehr zu buchen,
+                 der Tisch wird nur noch geleert. Sonst wird der Bar-Rest als
+                 eine Buchung abgeschlossen. */
+              if (done.nurKarte && typeof onNurKarte === "function") {
+                onNurKarte();
+              } else {
+                onComplete(done.method, done.trinkgeld||0, done.rabatt||0, gutscheinApplied?{id:gutscheinApplied.id,rabatt:gutscheinRabatt}:null, loyaltyPhone||null, redeemedPts||0, done.splitDetails||null);
+              }
             },
             style:{ width:"100%", padding:14, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:15 }
           }, "\uD83C\uDD95 Tisch freigeben"),
@@ -22374,7 +22452,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v323"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v325"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22863,6 +22941,7 @@ function App() {
          darf der Browser keine Datei schreiben. Also nur vormerken; die
          Startseite fragt spaeter nach. Die Bestellungen liegen im Archiv. */
       try { if ((completedOrders || []).filter(belksBezahlt).length) belksExportOffenSetzen(yKey); } catch (e) {}
+      try { belksGrabsteineWeg(); } catch (e) {}   // v324
       setCompletedOrders([]);
       setExpenses([]);
       LS.set("eatdesi_last_autoclose", todayKey);
@@ -23326,6 +23405,69 @@ function App() {
     L += `<div class="row bold"><span>Zahlung:</span><span>${bpayMethod}</span></div>`;
     return L;
   };
+  /* ═══ v325: EINZELNE KARTENZAHLUNG SOFORT ABSCHLIESSEN ═══
+     Wird aus der Einzelzahlung gerufen, sobald ein Gast auf "Karte" tippt.
+     Erzeugt eine vollwertige, abgeschlossene Bestellung: eigene Bon-Nummer,
+     eigene TSE-Signatur, eigener Zahlungsbeleg. Danach werden genau die
+     bezahlten Mengen vom Tisch abgezogen, damit der Tisch mit dem
+     Restbetrag weiterlaeuft. */
+  const belksTeilzahlung = async (tid, gastItems, trinkgeld, rabatt, gastNr) => {
+    try {
+      if (String(tid).startsWith("ta_")) return;      // nur Tische, kein Takeaway
+      const o = tableOrders[tid];
+      if (!o || !gastItems || !gastItems.length) return;
+
+      const roh = gastItems.reduce((sum, i) => sum + i.finalPrice * i.qty, 0);
+      const orderTotal = Math.max(0, Math.round((roh - (rabatt || 0)) * 100) / 100);
+      const _bonNr = genNr();
+      let _tse = null;
+      try {
+        _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod: "Karte", items: gastItems, tableId: tid });
+      } catch (e) { console.warn("TSE Signatur Fehler (Teilzahlung):", e); }
+
+      const _label = (o.label || ("Tisch " + tid)) + " · Gast " + gastNr;
+      setCompletedOrders(p => [...p, Object.assign({}, o, {
+        items: gastItems.map(i => Object.assign({}, i)),
+        time: new Date(), tableId: tid, label: _label,
+        payMethod: "Karte", trinkgeld: trinkgeld || 0, rabatt: rabatt || 0,
+        bonNr: _bonNr, total: orderTotal, tse: _tse, teilzahlung: true
+      })]);
+
+      try {
+        const bonLines = buildZahlungLines(gastItems, orderTotal, trinkgeld || 0, "Karte");
+        printBon("💳 ZAHLUNG — " + _label, bonLines, _label, _bonNr, new Date(), null, printerSettings, _tse, 'kunde');
+      } catch (e) { console.warn("Bondruck (Teilzahlung):", e); }
+
+      /* Mengengenau abziehen: "Einzeln abkassieren" zerlegt jede Zeile in
+         Einzelstuecke, _urKey zeigt zurueck auf die Originalzeile. */
+      const weg = {};
+      gastItems.forEach(i => {
+        const k = i._urKey || belksZeilenKey(i);
+        weg[k] = (weg[k] || 0) + (i.qty || 1);
+      });
+      setTableOrders(p => {
+        const alt = p[tid];
+        if (!alt) return p;
+        const neu = [];
+        (alt.items || []).forEach(z => {
+          const rest = (z.qty || 0) - (weg[belksZeilenKey(z)] || 0);
+          if (rest > 0) neu.push(Object.assign({}, z, { qty: rest }));
+        });
+        return Object.assign({}, p, { [tid]: Object.assign({}, alt, { items: neu }) });
+      });
+    } catch (e) { console.warn("Teilzahlung fehlgeschlagen:", e); }
+  };
+
+  /* v325: Alle Gaeste haben mit Karte gezahlt - jede Zahlung ist bereits
+     gebucht. Der Tisch wird nur noch geschlossen, OHNE eine weitere
+     Bestellung anzulegen. */
+  const belksTischOhneBuchung = (tid) => {
+    setTableOrders(p => { const n = { ...p }; delete n[tid]; return n; });
+    setCheckout(null);
+    setView("tables");
+    setActiveTable(null);
+  };
+
   const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0, loyaltyPhone = null, redeemedPts = 0, splitDetails = null) => {
     const isTA = String(tid).startsWith("ta_");
     // Auto-deduct inventory: match item names to inventory articles
@@ -23757,6 +23899,13 @@ function App() {
     setTakeaway([]);
     LS.set("eatdesi_tableorders", {});
     LS.set("eatdesi_takeaway", []);
+    /* v324: Jetzt sind alle Tische zu - der richtige Moment, die
+       Löschmarken zu entfernen, lokal und in der Cloud. */
+    try {
+      const gw = belksGrabsteineWeg();
+      if (gw.ok && gw.anzahl) console.log("Tagesabschluss: " + gw.anzahl + " Grabstein(e) entfernt");
+      else if (!gw.ok) console.warn("Grabsteine nicht entfernt: " + gw.grund);
+    } catch (e) {}
     // 2) Signal an alle Geraete senden (eindeutiger Zeitstempel)
     const signal = { ts: Date.now(), by: (loggedInUser && loggedInUser.name) || "?", date: key };
     LS.set("eatdesi_abschluss_signal", signal);
@@ -23787,6 +23936,10 @@ function App() {
         setTakeaway([]);
         LS.set("eatdesi_tableorders", {});
         LS.set("eatdesi_takeaway", []);
+        /* v324: Das Gerät, das den Abschluss NICHT ausgelöst hat, räumt
+           seine eigenen Marken ebenfalls weg - sonst laedt es sie spaeter
+           wieder hoch und der Abschluss war umsonst. */
+        try { belksGrabsteineWeg(); } catch (e) {}
       } catch(err) {}
     };
     window.addEventListener('eatdesi_abschluss_signal_synced', onAbschlussSignal);
@@ -24978,6 +25131,8 @@ function App() {
       }
       completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts, splitDetails);
     },
+    onTeilzahlung: (gastItems, tg, rabatt, gastNr) => belksTeilzahlung(checkout.tableId, gastItems, tg, rabatt, gastNr),
+    onNurKarte: () => belksTischOhneBuchung(checkout.tableId),
     gutscheine: gutscheine,
     setGutscheine: setGutscheine,
     customers: customers,
