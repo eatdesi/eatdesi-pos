@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v328</title>
+<title>eatDeSi POS v329</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7469,6 +7469,10 @@ function belksSummeGutscheinEingeloest(liste){
    sie hier EINMAL. Wer Umsatz rechnet, nimmt belksUmsatzBuchungen();
    wer den Kassenbestand rechnet, nimmt die volle Liste. */
 function belksIstGutscheinVerkauf(o){ return !!(o && o.gutscheinVerkauf); }
+/* v329: Beim Einloesen tippt jemand den Code ab. Bindestriche, Leerzeichen
+   und Kleinschreibung duerfen dabei nicht entscheiden, ob der Gutschein
+   gefunden wird. Alte Codes (EDS-XXXXXXXX) bleiben so ebenfalls gueltig. */
+function belksGutscheinKey(c){ return String(c==null?'':c).toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 function belksUmsatzBuchungen(liste){
   return (liste||[]).filter(function(o){ return !o.storniert && !belksIstGutscheinVerkauf(o); });
 }
@@ -7638,7 +7642,9 @@ var EposWiFi = {
           var isBold = /bold/.test(cls) || /font-weight\s*:\s*(700|800|900|bold)/.test(st);
           var fsMatch = st.match(/font-size\s*:\s*(\d+)/);
           var fs = fsMatch ? parseInt(fsMatch[1]) : 0;
-          var big = fs >= 18;
+          /* v329: bisher nur ueber font-size erkannt - die Klasse "big"
+             ist eindeutiger und funktioniert auf beiden Druckwegen gleich. */
+          var big = fs >= 18 || /(^|\s)big(\s|$)/.test(cls);
           var isRow = /(^|\s)row(\s|$)/.test(cls);
           var isLine = /(^|\s)line(\s|$)/.test(cls);
           /* v323: Die Trennlinie war 32 Zeichen lang, die Zeilen darueber 42 -
@@ -7937,6 +7943,21 @@ const BTPrint = {
       c.textContent = left + ' '.repeat(p) + t;
     });
     tmp.querySelectorAll('.line').forEach(function(l){ var n=Math.max(8,Math.floor(W/2)); var dash=Array(n+1).join('-'); var pad=Math.floor((W-n)/2); l.textContent=' '.repeat(pad)+dash; });
+    /* ═══ v329: KLASSE "big" = DOPPELT HOHE UND BREITE SCHRIFT ═══
+       CSS font-size hat auf dem Thermodrucker keine Wirkung - der Bon wird
+       hier in reinen Text uebersetzt. Groesser wird es nur ueber ESC/POS:
+       GS ! 0x11 = doppelt hoch UND doppelt breit, GS ! 0x00 = zurueck.
+       Weil die Zeichen dann doppelt so breit sind, passt nur die HALBE
+       Zeichenzahl in eine Zeile - danach wird zentriert und notfalls
+       gekuerzt, sonst rutscht die Zeile um. */
+    var GSb='\x1D';
+    tmp.querySelectorAll('.big').forEach(function(c){
+      var t = A(c.textContent.trim());
+      var Wb = Math.max(8, Math.floor(W/2));
+      if(t.length > Wb) t = t.slice(0, Wb);
+      var p = Math.max(0, Math.floor((Wb - t.length) / 2));
+      c.textContent = GSb+'!'+'\x11' + ' '.repeat(p) + t + GSb+'!'+'\x00';
+    });
     tmp.querySelectorAll('.center').forEach(function(c){var t=A(c.textContent.trim()),p=Math.max(0,Math.floor((W-t.length)/2));c.textContent=' '.repeat(p)+t;});
     // Block-Elemente mit Zeilenumbruch trennen (nicht auf innerText verlassen)
     var out='';
@@ -7952,7 +7973,7 @@ const BTPrint = {
           if(/\S/.test(ch.textContent)) out += ch.textContent;
         }
         else if(ch.nodeType===1){
-          var disp = (ch.className&&(''+ch.className).match(/row|line|center/)) || /^(DIV|P|BR|TR|LI)$/.test(ch.tagName);
+          var disp = (ch.className&&(''+ch.className).match(/row|line|center|big/)) || /^(DIV|P|BR|TR|LI)$/.test(ch.tagName);
           walk(ch);
           if(disp) out += '\n';
         }
@@ -9146,9 +9167,13 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     ${_kp?`<div class="center bold">${_kp}</div>`:""}
     ${(_bc.phone !== false && _kt) ? `<div class="center bold">${_kt}</div>` : ""}
     <div class="line"></div>` : "";
-  const html = `<html><head><meta name="viewport" content="width=device-width"><style>body{font-family:monospace;font-size:15px;font-weight:600;width:${_bonW}px;margin:0 auto;padding:8px;line-height:1.35}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:800}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}</style></head><body${qrOn?` data-qr="${qrLink}"`:""}>
+  /* v329: .big = doppelt grosse, zentrierte Zeile (Thermodrucker: ESC/POS;
+     Browser/PDF: einfach eine grosse Schrift). Der Gutschein-Bon nutzt sie
+     fuer die Ueberschrift und den Code. */
+  const _titelKlasse = (bonType === 'gutschein') ? 'big' : 'center bold';
+  const html = `<html><head><meta name="viewport" content="width=device-width"><style>body{font-family:monospace;font-size:15px;font-weight:600;width:${_bonW}px;margin:0 auto;padding:8px;line-height:1.35}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:800}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}.big{text-align:center;font-size:30px;font-weight:900;letter-spacing:2px;margin:6px 0}</style></head><body${qrOn?` data-qr="${qrLink}"`:""}>
     ${_kopf}
-    <div class="center bold" style="font-size:14px;margin:4px 0">${title}</div>
+    <div class="${_titelKlasse}" style="font-size:14px;margin:4px 0">${title}</div>
     <div class="row info-row"><span>Bon-Nr:</span><span>${bonNr}</span></div>
     <div class="row info-row"><span>Datum:</span><span>${fmtD(now)} ${fmtT(now)}</span></div>
     <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
@@ -9397,9 +9422,9 @@ function BonModal({
   const [gutscheinError, setGutscheinError] = React.useState("");
 
   const applyGutschein = () => {
-    const code = gutscheinCode.trim().toUpperCase();
+    const code = belksGutscheinKey(gutscheinCode);   // v329
     if(!code) return;
-    const g = (gutscheine||[]).find(x => x.code === code && !x.used);
+    const g = (gutscheine||[]).find(x => belksGutscheinKey(x.code) === code && !x.used);
     if(!g) { setGutscheinError("❌ Ungültiger oder bereits eingelöster Code!"); return; }
     setGutscheinApplied(g);
     setGutscheinError("");
@@ -10668,8 +10693,8 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
   const finalTotal = total;
 
   const applyGutschein = () => {
-    const code = gutscheinCode.trim().toUpperCase();
-    const g = (gutscheine||[]).find(x => x.code === code && !x.used);
+    const code = belksGutscheinKey(gutscheinCode);   // v329
+    const g = (gutscheine||[]).find(x => belksGutscheinKey(x.code) === code && !x.used);
     if(!g) { setGutscheinError("❌ Ungültiger oder bereits eingelöster Code!"); return; }
     setGutscheinApplied(g); setGutscheinError("");
   };
@@ -11291,14 +11316,14 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
                        Weg wie alle anderen Belege. */
                     try {
                       let RL = "";
-                      RL += '<div class="center bold" style="font-size:20px;letter-spacing:2px">' + gutscheinApplied.code + '</div>';
+                      RL += '<div class="big">' + gutscheinApplied.code + '</div>';   // v329
                       RL += '<div class="line"></div>';
                       RL += '<div class="row"><span>Genutzt heute</span><span>-' + fmt(gutscheinAbzug) + '</span></div>';
                       RL += '<div class="row bold"><span>Restguthaben</span><span>' + fmt(restGuthaben) + '</span></div>';
                       RL += '<div class="line"></div>';
                       RL += '<div class="center">Beim n\u00e4chsten Besuch einl\u00f6sbar.</div>';
                       RL += '<div class="center">Bitte aufbewahren!</div>';
-                      printBon("\uD83C\uDF9F\uFE0F GUTSCHEIN \u2014 RESTGUTHABEN", RL, "Gutschein", gutscheinApplied.code, new Date(), null, printerSettings, null, 'kunde');
+                      printBon("RESTGUTHABEN", RL, "Gutschein", gutscheinApplied.code, new Date(), null, printerSettings, null, 'gutschein');
                     } catch (e) { console.warn("Rest-Bon Druck Fehler:", e); }
                   }, 500);
                 }
@@ -22131,11 +22156,21 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
 
   const isAdmin = loggedInUser && (loggedInUser.role === "Admin" || loggedInUser.role === "Manager");
 
+  /* ═══ v329: KURZER CODE ZUM ABTIPPEN ═══
+     Vorher 12 Zeichen (EDS-M52D69U4). Der Kellner tippt ihn beim Einloesen
+     ab - jedes Zeichen ist eine Fehlerquelle. Jetzt 6 Zeichen, und zwar
+     nur solche, die man nicht verwechseln kann: kein O/0, I/1, S/5, B/8,
+     Z/2, G/6, Q/O. 23 hoch 6 = 148 Millionen Moeglichkeiten, das reicht.
+     Doppelte werden ausgeschlossen, statt sie erst beim Speichern zu
+     bemerken. */
+  const CODE_ZEICHEN = "ACDEFHJKMNPRTUVWXY34679";
   const genCode = () => {
-    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let c = "EDS-";
-    for(let i=0;i<8;i++) c += chars[Math.floor(Math.random()*chars.length)];
-    setCode(c);
+    for (let versuch = 0; versuch < 50; versuch++) {
+      let c = "";
+      for (let i = 0; i < 6; i++) c += CODE_ZEICHEN[Math.floor(Math.random() * CODE_ZEICHEN.length)];
+      if (!(gutscheine||[]).some(g => belksGutscheinKey(g.code) === c)) { setCode(c); return; }
+    }
+    setCode("");   // praktisch unerreichbar; lieber leer als ein doppelter Code
   };
 
   /* ═══ v326: GUTSCHEIN-BON UEBER DEN ECHTEN DRUCKWEG ═══
@@ -22151,23 +22186,29 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
       const erstellt = new Date(g.created);
       const gueltig = new Date(new Date(g.created).setFullYear(erstellt.getFullYear() + 2));
       let L = "";
-      L += '<div class="center bold" style="font-size:20px;letter-spacing:2px">' + g.code + '</div>';
+      /* v329: "big" statt font-size - nur so wird es auf dem Thermodrucker
+         wirklich groesser (siehe htmlToText/htmlToLines). */
+      L += '<div class="big">' + g.code + '</div>';
+      L += '<div class="line"></div>';
+      L += '<div class="big">' + g.rest.toFixed(2) + ' EUR</div>';
+      L += '<div class="center">Guthaben</div>';
       L += '<div class="line"></div>';
       L += '<div class="row"><span>Gutscheinwert</span><span>' + fmt(g.betrag) + '</span></div>';
-      L += '<div class="row bold"><span>Guthaben</span><span>' + fmt(g.rest) + '</span></div>';
-      if (g.note) L += '<div class="row"><span>Notiz</span><span>' + g.note + '</span></div>';
       if (g.zahlart) L += '<div class="row"><span>Bezahlt mit</span><span>' + g.zahlart + '</span></div>';
-      L += '<div class="line"></div>';
+      if (g.note) L += '<div class="row"><span>Notiz</span><span>' + g.note + '</span></div>';
       L += '<div class="row"><span>Ausgestellt</span><span>' + fmtD(erstellt) + '</span></div>';
       L += '<div class="row"><span>G\u00fcltig bis</span><span>' + fmtD(gueltig) + '</span></div>';
       L += '<div class="line"></div>';
-      /* v327: Pflichthinweis. Ein Mehrzweckgutschein darf beim Verkauf
-         KEINE Umsatzsteuer ausweisen - versteuert wird erst die Einloesung. */
-      L += '<div class="center">Mehrzweckgutschein \u00b7 kein Umsatzsteuerausweis</div>';
-      L += '<div class="center">(\u00a7 3 Abs. 15 UStG)</div>';
+      /* Pflichthinweis. Bewusst auf drei kurze Zeilen verteilt: eine lange
+         Zeile brach auf dem Drucker mitten im Wort um ("...ausweis" / "s").
+         Das Paragraphenzeichen kennt der Thermodrucker nicht - es wurde
+         stillschweigend verschluckt, deshalb steht dort jetzt "Par.". */
+      L += '<div class="center">Mehrzweckgutschein</div>';
+      L += '<div class="center">kein Umsatzsteuerausweis</div>';
+      L += '<div class="center">Par. 3 Abs. 15 UStG</div>';
       L += '<div class="line"></div>';
       L += '<div class="center">Bitte diesen Bon aufbewahren!</div>';
-      printBon("\uD83C\uDF9F\uFE0F GUTSCHEIN", L, "Gutschein", g.bonNr || g.code, erstellt, null, printerSettings, g.tse || null, 'kunde');
+      printBon("GUTSCHEIN", L, "Gutschein", g.bonNr || g.code, erstellt, null, printerSettings, g.tse || null, 'gutschein');
     } catch (e) { console.warn("Gutschein-Druck Fehler:", e); }
   };
 
@@ -22181,7 +22222,7 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
     if(speichert) return;
     if(!code.trim()) return;
     if(!betrag || parseFloat(betrag) <= 0) return;
-    if(gutscheine.find(g => g.code === code.trim().toUpperCase())) return;
+    if(gutscheine.find(g => belksGutscheinKey(g.code) === belksGutscheinKey(code))) return;   // v329
     setSpeichert(true);
     const ng = { id: Date.now(), code: code.trim().toUpperCase(), betrag: parseFloat(betrag), rest: parseFloat(betrag), note, created: new Date().toISOString(), used: false, usedAt: null, zahlart: zahlart };
     try {
@@ -22193,7 +22234,12 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
     setGutscheine(prev => [...prev, ng]);
     setCode(""); setBetrag(""); setNote(""); setShowNew(false);
     setSpeichert(false);
-    setLastSaved(ng); // Show print prompt
+    setLastSaved(ng);
+    /* v329: Der Bon wird sofort gedruckt. Ein Gutschein ohne Beleg ist
+       nutzlos - der Gast bekommt ihn ja in die Hand. Der extra
+       Drucken-Knopf entfaellt damit; zum Nachdrucken gibt es weiter das
+       Drucker-Symbol in der Liste. */
+    setTimeout(() => { try { printGutschein(ng, printerSettings); } catch(e) { console.warn("Gutschein-Druck:", e); } }, 300);
   };
 
   /* ═══ v328: UEBERSICHT ═══
@@ -22224,13 +22270,10 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
     lastSaved && React.createElement("div", { style:{ background:"linear-gradient(135deg,#2e7d32,#1b5e20)", borderRadius:14, padding:"16px 18px", marginBottom:16, display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 } },
       React.createElement("div", null,
         React.createElement("div", { style:{ color:"#fff", fontWeight:800, fontSize:15, marginBottom:3 } }, "✅ Gutschein gespeichert!"),
-        React.createElement("div", { style:{ color:"#a5d6a7", fontSize:12, fontFamily:"monospace", letterSpacing:1 } }, lastSaved.code + " · " + lastSaved.betrag.toFixed(2) + " €")
+        React.createElement("div", { style:{ color:"#a5d6a7", fontSize:12, fontFamily:"monospace", letterSpacing:1 } }, lastSaved.code + " · " + lastSaved.betrag.toFixed(2) + " €"),
+        React.createElement("div", { style:{ color:"#c8e6c9", fontSize:11, marginTop:2 } }, "🖨️ Bon wird gedruckt")
       ),
       React.createElement("div", { style:{ display:"flex", gap:8 } },
-        React.createElement("button", {
-          onClick: () => { printGutschein(lastSaved, printerSettings); },
-          style:{ background:"#fff", color:"#2e7d32", border:"none", borderRadius:10, padding:"10px 16px", fontWeight:800, cursor:"pointer", fontSize:13, whiteSpace:"nowrap" }
-        }, "🖨️ Drucken"),
         React.createElement("button", {
           onClick: () => setLastSaved(null),
           style:{ background:"rgba(255,255,255,0.2)", color:"#fff", border:"none", borderRadius:10, padding:"10px 12px", fontWeight:700, cursor:"pointer", fontSize:13 }
@@ -22257,7 +22300,7 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:11, fontWeight:700, color:"#666", marginBottom:4, textTransform:"uppercase" } }, "Code *"),
           React.createElement("div", { style:{ display:"flex", gap:6 } },
-            React.createElement("input", { value:code, onChange:e=>setCode(e.target.value.toUpperCase()), placeholder:"EDS-XXXXXXXX", style:{ flex:1, padding:"9px 10px", border:"1px solid #e0d0c8", borderRadius:8, fontSize:13, fontFamily:"monospace", letterSpacing:1 } }),
+            React.createElement("input", { value:code, onChange:e=>setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g,"")), placeholder:"z.B. H4KM7P", style:{ flex:1, padding:"9px 10px", border:"1px solid #e0d0c8", borderRadius:8, fontSize:13, fontFamily:"monospace", letterSpacing:1 } }),
             React.createElement("button", { onClick:genCode, style:{ padding:"9px 12px", background:"#f5f0ed", border:"1px solid #e0d0c8", borderRadius:8, cursor:"pointer", fontSize:13 } }, "🔄")
           )
         ),
@@ -22274,10 +22317,17 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
       React.createElement("div", { style:{ marginBottom:12 } },
         React.createElement("div", { style:{ fontSize:11, fontWeight:700, color:"#666", marginBottom:4, textTransform:"uppercase" } }, "Bezahlt mit *"),
         React.createElement("div", { style:{ display:"flex", gap:8 } },
-          ["Bar","Karte"].map(z => React.createElement("button", { key:z, onClick:()=>setZahlart(z),
+          /* v329: Bei "Karte" oeffnet sich SumUp direkt mit dem Betrag -
+             genau wie beim Kassieren am Tisch. Ohne Betrag waere der
+             Aufruf sinnlos, dann wird nur die Zahlart gemerkt. */
+          ["Bar","Karte"].map(z => React.createElement("button", { key:z, onClick:()=>{ setZahlart(z); if(z==="Karte"){ const b=parseFloat(betrag)||0; if(b>0){ try{ window.sumupPay(b, "Gutschein "+(code||"")); }catch(e){ console.warn("SumUp:", e); } } } },
             style:{ flex:1, padding:"10px 0", borderRadius:8, border:"2px solid "+(zahlart===z?"#2e7d32":"#ddd"), background:zahlart===z?"#2e7d32":"#fff", color:zahlart===z?"#fff":"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
           }, (z==="Bar"?"\uD83D\uDCB5 ":"\uD83D\uDCB3 ")+z))
         ),
+        zahlart === "Karte" && (parseFloat(betrag)||0) > 0 && React.createElement("button", {
+          onClick: () => { try{ window.sumupPay(parseFloat(betrag)||0, "Gutschein "+(code||"")); }catch(e){} },
+          style:{ width:"100%", marginTop:8, padding:"9px 0", borderRadius:8, border:"2px solid #C84B31", background:"#fff", color:"#C84B31", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
+        }, "\uD83D\uDCB3 SumUp erneut \u00f6ffnen"),
         React.createElement("div", { style:{ fontSize:11, color:"#888", marginTop:6, lineHeight:1.4 } },
           "Mehrzweckgutschein: z\u00e4hlt in die Kasse, aber noch nicht in den Umsatz. Versteuert wird bei der Einl\u00f6sung.")
       ),
@@ -22591,7 +22641,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v328"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v329"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
