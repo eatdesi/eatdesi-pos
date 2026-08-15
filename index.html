@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v329</title>
+<title>eatDeSi POS v332</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7473,6 +7473,23 @@ function belksIstGutscheinVerkauf(o){ return !!(o && o.gutscheinVerkauf); }
    und Kleinschreibung duerfen dabei nicht entscheiden, ob der Gutschein
    gefunden wird. Alte Codes (EDS-XXXXXXXX) bleiben so ebenfalls gueltig. */
 function belksGutscheinKey(c){ return String(c==null?'':c).toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+/* ═══ v331: UMSATZSTEUER AUF DIE LIEFERGEBUEHR = 19 % ═══
+   Die Lieferung wird als eigene Dienstleistung zum Regelsatz behandelt -
+   19 %, egal ob Speisen oder Getraenke im Karton liegen. Gilt fuer
+   Takeaway und Webshop gleichermassen; der Webshop bucht die Gebuehr
+   ohnehin schon mit 19 %.
+   (v330 hatte sie noch im Verhaeltnis Speisen/Getraenke aufgeteilt. Das
+   war die vorsichtigere Lesart, aber nicht die, nach der hier gebucht
+   wird - und zwei Rechenwege fuer denselben Posten sind schlimmer als
+   einer.)
+   Rueckgabe: der Steueranteil, der in der Bruttogebuehr steckt.
+   Der items-Parameter bleibt erhalten: die Aufrufer uebergeben ihn, und
+   sollte sich die Regel je wieder aendern, ist der Weg schon da. */
+function belksLieferSteuer(items, fee){
+  var f = Number(fee) || 0;
+  if(f <= 0) return { t7: 0, t19: 0 };
+  return { t7: 0, t19: Math.round(f / 1.19 * 0.19 * 100) / 100 };
+}
 function belksUmsatzBuchungen(liste){
   return (liste||[]).filter(function(o){ return !o.storniert && !belksIstGutscheinVerkauf(o); });
 }
@@ -9439,10 +9456,17 @@ function BonModal({
   const fee = lieferFee || 0;
   const gutscheinRabatt = gutscheinApplied ? Math.min(gutscheinApplied.rest, total) : 0;
   const finalTotal = Math.max(0, total - gutscheinRabatt);
-  const tax7 = calcTax7(items);
-  const tax19 = calcTax19(items);
-  const totalTax = tax7 + tax19;
-  const netto = (total - fee) - totalTax;
+  /* v331: Die Steuer der Liefergebuehr fehlte auf dem Bildschirm-Bon - er
+     wies eine andere MwSt aus als der gedruckte Beleg. Zwei Belege zu
+     derselben Rechnung duerfen sich nicht widersprechen. */
+  const _feeSt = belksLieferSteuer(items, fee);
+  const tax7 = Math.round((calcTax7(items) + _feeSt.t7) * 100) / 100;
+  const tax19 = Math.round((calcTax19(items) + _feeSt.t19) * 100) / 100;
+  const totalTax = Math.round((tax7 + tax19) * 100) / 100;
+  /* Netto ist jetzt der volle Rechnungsbetrag minus aller Steuer - die
+     Gebuehr wird nicht mehr herausgerechnet, sie ist steuerpflichtiger
+     Umsatz wie jeder Artikel. */
+  const netto = Math.round((total - totalTax) * 100) / 100;
   const now = new Date();
   const foodItems = items.filter(i => !istBar(i));
   const drinkItems = items.filter(i => istBar(i));
@@ -12660,7 +12684,66 @@ function BackupView({ data, onRestore }) {
           } catch (e) {}
         },
         style:{ width:"100%", padding:10, borderRadius:9, border:"1.5px dashed #90a4ae", background:"#fff", color:"#546e7a", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5, marginTop:10 }
-      }, "\uD83E\uDDEA Selbstheilung testen (roter Balken)")
+      }, "\uD83E\uDDEA Selbstheilung testen (roter Balken)"),
+
+      /* ═══ v332: WAS STEHT WIRKLICH IN DEN BUCHUNGEN? ═══
+         Der Bericht rechnet aus eatdesi_orders. Wenn er etwas anderes
+         zeigt als der Beleg, hilft nur der Blick in die Rohdaten: fehlt
+         das Feld, oder fehlt die ganze Buchung? Alles andere ist Raten. */
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => {
+          try {
+            const alle = LS.get("eatdesi_orders", []) || [];
+            const heute = new Date().toLocaleDateString("de-DE");
+            const vonHeute = alle.filter(o => {
+              try { return new Date(o.time).toLocaleDateString("de-DE") === heute; } catch(e){ return false; }
+            });
+            let t = "\uD83E\uDDFE BUCHUNGEN HEUTE (" + heute + ")\n";
+            t += "Gespeichert insgesamt: " + alle.length + "\n";
+            t += "Davon heute: " + vonHeute.length + "\n";
+            t += "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n";
+            if (vonHeute.length === 0) {
+              t += "Keine Buchung von heute im Speicher.\n";
+              t += "Wurde ein Tagesabschluss gemacht? Der leert die Liste.\n";
+            }
+            let sU = 0, sG = 0, sE = 0, sT = 0, sF = 0;
+            vonHeute.forEach(o => {
+              const zeit = (function(){ try { return new Date(o.time).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}); } catch(e){ return "??:??"; } })();
+              const gv = o.gutscheinVerkauf ? " GUTSCHEIN-VERKAUF" : "";
+              t += zeit + "  Bon " + (o.bonNr||"?") + "  " + Number(o.total||0).toFixed(2) + " " + (o.payMethod||"?") + gv + "\n";
+              const zusatz = [];
+              if (Number(o.trinkgeld)   > 0) zusatz.push("Trinkgeld " + Number(o.trinkgeld).toFixed(2));
+              if (Number(o.gutscheinBetrag) > 0) zusatz.push("mit Gutschein " + Number(o.gutscheinBetrag).toFixed(2));
+              if (Number(o.lieferFee)   > 0) zusatz.push("Liefergeb. " + Number(o.lieferFee).toFixed(2));
+              if (Number(o.rabatt)      > 0) zusatz.push("Rabatt " + Number(o.rabatt).toFixed(2));
+              if (o.storniert) zusatz.push("STORNIERT");
+              if (!o.tse) zusatz.push("OHNE TSE");
+              if (zusatz.length) t += "        " + zusatz.join(" \u00b7 ") + "\n";
+              if (o.gutscheinVerkauf) sG += Number(o.total)||0; else sU += Number(o.total)||0;
+              sE += Number(o.gutscheinBetrag)||0;
+              sT += Number(o.trinkgeld)||0;
+              sF += Number(o.lieferFee)||0;
+            });
+            t += "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n";
+            t += "Umsatz: " + sU.toFixed(2) + "\n";
+            t += "Gutschein verkauft: " + sG.toFixed(2) + "\n";
+            t += "Mit Gutschein bezahlt: " + sE.toFixed(2) + "\n";
+            t += "Trinkgeld: " + sT.toFixed(2) + "\n";
+            t += "Liefergebuehr: " + sF.toFixed(2) + "\n";
+            const gs = LS.get("eatdesi_gutscheine", []) || [];
+            t += "\nGutschein-Liste: " + gs.length + " St\u00fcck\n";
+            gs.forEach(g => {
+              t += "  " + g.code + "  Wert " + Number(g.betrag||0).toFixed(2)
+                 + " / Rest " + Number(g.rest||0).toFixed(2)
+                 + (g.zahlart ? " / " + g.zahlart : " / Zahlart fehlt")
+                 + (g.bonNr ? " / Bon " + g.bonNr : " / OHNE BUCHUNG")
+                 + (g.used ? " / eingeloest" : "") + "\n";
+            });
+            alert(t);
+          } catch (e) { alert("Diagnose fehlgeschlagen: " + (e && e.message ? e.message : e)); }
+        },
+        style:{ width:"100%", padding:10, borderRadius:9, border:"1.5px dashed #90a4ae", background:"#fff", color:"#546e7a", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5, marginTop:8 }
+      }, "\uD83E\uDDFE Buchungen von heute pr\u00fcfen")
     ),
 
     /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:12, padding:14, marginBottom:12, border:"2px solid #a5d6a7" } },
@@ -13922,7 +14005,7 @@ function OrderView({
       fontSize: 11
     }
   }, order?.saved ? "✓ BON" : "💾 Bon"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => onPay(tableId, items, total, "split"),
+    onClick: () => onPay(tableId, items, total, "split", lieferFee),   // v330
     style: {
       padding: "9px 10px",
       borderRadius: 10,
@@ -13935,7 +14018,7 @@ function OrderView({
       fontSize: 11
     }
   }, "\uD83D\uDC65 Split"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => onPay(tableId, items, total),
+    onClick: () => onPay(tableId, items, total, false, lieferFee),   // v330
     style: {
       padding: "9px 14px",
       borderRadius: 10,
@@ -14885,7 +14968,7 @@ ${filtered.map((o, i) => {
       color: "#fff",
       fontWeight: 700
     }
-  }, "\uD83D\uDCB0 Umsatz netto"), /*#__PURE__*/React.createElement("span", {
+  }, "\uD83D\uDCB0 Einnahmen \u2212 Ausgaben"), /*#__PURE__*/React.createElement("span", {
     style: {
       color: "#fff",
       fontWeight: 900,
@@ -15509,17 +15592,29 @@ function OrderListView({
         React.createElement("button", {
           onClick: () => {
             const o = completedOrders[selected]; if(!o) return;
-            const t7 = calcTax7(o.items||[]);
-            const t19 = calcTax19(o.items||[]);
+            /* v330: let statt const - die Steuer der Liefergebuehr wird
+               weiter unten aufaddiert. Mit const waere das ein
+               "Assignment to constant variable" erst zur Laufzeit
+               aufgefallen, also beim Nachdruck im Betrieb. */
+            let t7 = calcTax7(o.items||[]);
+            let t19 = calcTax19(o.items||[]);
             let bonLines = (o.items||[]).map(i => {
               const price = fmt(i.finalPrice*i.qty);
               const head = i.qty+"× "+(i.nr?i.nr+". ":"")+i.name;
               const noteLine = i.note ? "<div style=\"font-size:12px;padding-left:14px\">("+i.note+")</div>" : "";
               return "<div class=\"row\"><span>"+head+"</span><span>"+price+"</span></div>"+noteLine;
             }).join("");
+            /* v330: auch beim Nachdruck muss die Liefergebuehr erscheinen. */
+            var _nfee = Math.max(0, Number(o.lieferFee) || 0);
+            if(_nfee>0){
+              bonLines += "<div class=\"row\"><span>Liefergebühr</span><span>"+fmt(_nfee)+"</span></div>";
+              var _nfs = belksLieferSteuer(o.items||[], _nfee);
+              t7 = Math.round((t7 + _nfs.t7)*100)/100;
+              t19 = Math.round((t19 + _nfs.t19)*100)/100;
+            }
             bonLines += "<div class=\"line\"></div>";
             if(t7>0)  bonLines += "<div class=\"row\"><span>MwSt. 7% (Speisen)</span><span>"+fmt(t7)+"</span></div>";
-            if(t19>0) bonLines += "<div class=\"row\"><span>MwSt. 19% (Getränke)</span><span>"+fmt(t19)+"</span></div>";
+            if(t19>0) bonLines += "<div class=\"row\"><span>MwSt. 19% "+(_nfee>0?"(Getränke/Lieferung)":"(Getränke)")+"</span><span>"+fmt(t19)+"</span></div>";   // v331
             bonLines += "<div class=\"line\"></div>";
             bonLines += "<div class=\"row bold\" style=\"font-size:16px\"><span>GESAMT</span><span>"+fmt(o.total||0)+"</span></div>";
             if(o.trinkgeld>0) bonLines += "<div class=\"row\"><span>Trinkgeld</span><span>"+fmt(o.trinkgeld)+"</span></div>";
@@ -20337,10 +20432,27 @@ function DeliveryPersonView({ drivers, takeaway, completedOrders, onSave }) {
                   (ta.customerStreet||ta.customerCity) && /*#__PURE__*/React.createElement("div",{style:{fontSize:11,color:C.green,fontWeight:600}},"📍 "+[ta.customerStreet,[ta.customerPlz,ta.customerCity].filter(Boolean).join(" ")].filter(Boolean).join(", "))
                 ),
                 /*#__PURE__*/React.createElement("div",{style:{textAlign:"right"}},
-                  /*#__PURE__*/React.createElement("div",{style:{fontWeight:700,color:C.green,fontSize:14}},fmt(ta.items.reduce((s,it)=>s+it.finalPrice*it.qty,0))),
+                  /*#__PURE__*/React.createElement("div",{style:{fontWeight:700,color:C.green,fontSize:14}},fmt(ta.items.reduce((s,it)=>s+it.finalPrice*it.qty,0)+(Number(ta.lieferFee)||0))),
+                  (Number(ta.lieferFee)||0) > 0 && /*#__PURE__*/React.createElement("div",{style:{fontSize:11,color:"#1565c0"}},"davon 🛵 "+fmt(Number(ta.lieferFee)||0)),
                   assignedDriver && /*#__PURE__*/React.createElement("div",{style:{fontSize:11,color:C.orange,fontWeight:600}},"🚴 "+assignedDriver.name)
                 )
               ),
+              /* v330: Liefergebuehr direkt hier aendern */
+              feeEdit && feeEdit.taId === ta.id
+                ? /*#__PURE__*/React.createElement("div",{style:{display:"flex",gap:6,alignItems:"center",marginBottom:8}},
+                    /*#__PURE__*/React.createElement("span",{style:{fontSize:12,color:"#555",whiteSpace:"nowrap"}},"🛵 Liefergebühr €"),
+                    /*#__PURE__*/React.createElement("input",{type:"number",step:"0.10",min:"0",value:feeEdit.wert,autoFocus:true,
+                      onChange:e=>setFeeEdit({taId:ta.id,wert:e.target.value}),
+                      style:{flex:1,minWidth:0,padding:"7px 9px",borderRadius:8,border:"2px solid #1565c0",fontFamily:"inherit",fontSize:14,fontWeight:700}}),
+                    /*#__PURE__*/React.createElement("button",{onClick:()=>speichereFee(ta.id,feeEdit.wert),
+                      style:{padding:"7px 12px",borderRadius:8,border:"none",background:C.green,color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:800,fontSize:13}},"✓"),
+                    /*#__PURE__*/React.createElement("button",{onClick:()=>setFeeEdit(null),
+                      style:{padding:"7px 10px",borderRadius:8,border:"2px solid #ddd",background:"#f5f5f5",color:"#666",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:13}},"✕")
+                  )
+                : /*#__PURE__*/React.createElement("button",{
+                    onClick:()=>setFeeEdit({taId:ta.id,wert:String(Number(ta.lieferFee)||0)}),
+                    style:{width:"100%",padding:"7px 0",marginBottom:8,borderRadius:8,border:"2px dashed #90caf9",background:"#f5faff",color:"#1565c0",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12}
+                  }, (Number(ta.lieferFee)||0) > 0 ? "🛵 Liefergebühr "+fmt(Number(ta.lieferFee)||0)+" ✏️" : "🛵 Liefergebühr hinzufügen"),
               /*#__PURE__*/React.createElement("button",{
                 onClick:()=>setAssignModal({taId:ta.id}),
                 style:{width:"100%",padding:"8px 0",borderRadius:8,border:`2px solid ${assignedDriver?"#ddd":C.green}`,background:assignedDriver?"#f5f5f5":"#e8f5e9",color:assignedDriver?"#888":C.green,cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12}
@@ -20548,6 +20660,15 @@ function FloorsView({ floors, onSave }) {
 /* ===== \uD83D\uDEF5 FAHRER-ANSICHT =====
    Fuer das eigene Handy des Fahrers. Zeigt alle offenen Lieferungen. */
 function FahrerView({ takeaway, setTakeaway, completedOrders, setCompletedOrders, loggedInUser, printerSettings }) {
+  /* v330: Die Liefergebuehr liess sich nur beim Anlegen der Bestellung
+     setzen. Wer die Lieferung hier verwaltet - und genau hier faellt auf,
+     dass der Weg weiter ist als gedacht - konnte sie nicht mehr aendern. */
+  const [feeEdit, setFeeEdit] = React.useState(null);   // { taId, wert }
+  const speichereFee = (taId, wert) => {
+    const f = Math.max(0, parseFloat(String(wert).replace(",", ".")) || 0);
+    setTakeaway(t => t.map(x => x.id === taId ? { ...x, lieferFee: f } : x));
+    setFeeEdit(null);
+  };
   const ich = (loggedInUser && loggedInUser.name) || "Fahrer";
   const [nurMeine, setNurMeine] = React.useState(false);
 
@@ -22641,7 +22762,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v329"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v332"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -23563,21 +23684,32 @@ function App() {
       setTableOrders(p => p[tid] ? { ...p, [tid]: { ...p[tid], items: setzen(p[tid].items) } } : p);
     }
   };
-  const startPay = (tid, items, total, directSplit = false) => {
+  const startPay = (tid, items, total, directSplit = false, lieferFee = 0) => {
     const label = String(tid).startsWith("ta_") ? `Takeaway #${String(tid).replace("ta_", "")}` : `Tisch ${tid}`;
+    /* v330: total enthaelt die Liefergebuehr bereits - der Betrag, den der
+       Gast zahlt, stimmte immer. Falsch war die Buchung, weil completeOrder
+       die Summe neu aus den Artikeln rechnete. Deshalb muss die Gebuehr
+       hier mitfahren. */
     setCheckout({
       tableId: tid,
       label,
       items,
       total,
-      directSplit
+      directSplit,
+      lieferFee: Number(lieferFee) || 0
     });
     setBonModal(null);
   };
   // Baut die Bon-Zeilen fuer Zahlungs-Beleg (wie in der App-Ansicht: Artikel + MwSt + GESAMT)
-  const buildZahlungLines = (bitems, btotal, btrinkgeld, bpayMethod) => {
-    const t7 = calcTax7(bitems);
-    const t19 = calcTax19(bitems);
+  const buildZahlungLines = (bitems, btotal, btrinkgeld, bpayMethod, bfee = 0) => {
+    /* v330: Die Liefergebuehr ist Teil der Rechnung und muss auf dem
+       Kundenbeleg stehen - sonst kann der Gast nicht nachvollziehen, warum
+       er mehr zahlt als die Summe der Artikel. Ihre Steuer wird den
+       MwSt-Zeilen zugeschlagen (Nebenleistung, siehe belksLieferSteuer). */
+    const _fee = Math.max(0, Number(bfee) || 0);
+    const _fs = belksLieferSteuer(bitems, _fee);
+    const t7 = Math.round((calcTax7(bitems) + _fs.t7) * 100) / 100;
+    const t19 = Math.round((calcTax19(bitems) + _fs.t19) * 100) / 100;
     let L = (bitems||[]).map(i => {
       const head = `${i.qty}× ${i.nr?i.nr+'. ':''}${i.name}`;
       const price = fmt(i.finalPrice*i.qty);
@@ -23585,9 +23717,12 @@ function App() {
       const noteLine = i.note ? `<div style="font-size:12px;padding-left:14px">(${i.note})</div>` : "";
       return `<div class="row"><span>${head}</span><span>${price}</span></div>${noteLine}`;
     }).join("");
+    if(_fee>0) L += `<div class="row"><span>Liefergebühr</span><span>${fmt(_fee)}</span></div>`;
     L += `<div class="line"></div>`;
     if(t7>0)  L += `<div class="row"><span>MwSt. 7% (Speisen)</span><span>${fmt(t7)}</span></div>`;
-    if(t19>0) L += `<div class="row"><span>MwSt. 19% (Getränke)</span><span>${fmt(t19)}</span></div>`;
+    /* v331: Die 19 %-Zeile enthaelt jetzt auch die Liefergebuehr - die
+       Beschriftung "(Getraenke)" waere dann irrefuehrend. */
+    if(t19>0) L += `<div class="row"><span>MwSt. 19% ${_fee>0?"(Getränke/Lieferung)":"(Getränke)"}</span><span>${fmt(t19)}</span></div>`;
     L += `<div class="line"></div>`;
     L += `<div class="row bold" style="font-size:16px"><span>GESAMT</span><span>${fmt(btotal)}</span></div>`;
     if(btrinkgeld>0) L += `<div class="row"><span>Trinkgeld</span><span>${fmt(btrinkgeld)}</span></div>`;
@@ -23677,7 +23812,7 @@ function App() {
     setActiveTable(null);
   };
 
-  const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0, loyaltyPhone = null, redeemedPts = 0, splitDetails = null, gutscheinBetrag = 0) => {
+  const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0, loyaltyPhone = null, redeemedPts = 0, splitDetails = null, gutscheinBetrag = 0, lieferFee = 0) => {
     const isTA = String(tid).startsWith("ta_");
     // Auto-deduct inventory: match item names to inventory articles
     const autoDeductItems = isTA
@@ -23700,17 +23835,23 @@ function App() {
       const taId = parseInt(String(tid).replace("ta_", ""));
       const ta = takeaway.find(t => t.id === taId);
       if (ta) {
-        const orderTotal = ta.items.reduce((s, i) => s + i.finalPrice * i.qty, 0) - (rabatt||0);
+        /* ═══ v330: LIEFERGEBUEHR GEHOERT IN DEN GESAMTBETRAG ═══
+           Sie kommt entweder aus dem Kassiervorgang (lieferFee) oder, wenn
+           vorher der BON-Knopf gedrueckt wurde, aus der Bestellung selbst.
+           Vorher fiel sie hier lautlos weg: der Gast zahlte 10,80 und die
+           Kasse buchte 7,90. */
+        const _fee = Math.max(0, Number(lieferFee) || Number(ta.lieferFee) || 0);
+        const orderTotal = ta.items.reduce((s, i) => s + i.finalPrice * i.qty, 0) + _fee - (rabatt||0);
         const _bonNr = ta.bonNr || genNr();
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: ta.items, tableId: null }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
         try { window.maybeOpenDrawer && window.maybeOpenDrawer(payMethod); } catch (e) {}
-        setCompletedOrders(p => [...p, { ...ta, time: new Date(), tableId: null, label: "Takeaway #"+taId, isTakeaway: true, orderType: (ta.customerStreet ? "Lieferung" : "Abholung"), payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse, gutscheinBetrag: gutscheinBetrag||0 }]);
+        setCompletedOrders(p => [...p, { ...ta, time: new Date(), tableId: null, label: "Takeaway #"+taId, isTakeaway: true, orderType: (ta.customerStreet ? "Lieferung" : "Abholung"), payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse, gutscheinBetrag: gutscheinBetrag||0, lieferFee: _fee }]);
         // Zahlungs-Beleg automatisch drucken (mit Firma + MwSt + TSE).
         // Bei getrennter Zahlung NICHT (jeder Gast hat seinen eigenen Bon).
         if (payMethod !== "Getrennt") {
           try {
-            const bonLines = buildZahlungLines(ta.items||[], orderTotal, trinkgeld, payMethod);
+            const bonLines = buildZahlungLines(ta.items||[], orderTotal, trinkgeld, payMethod, _fee);   // v330
             const delivery = ta.customerName ? {name:ta.customerName,phone:ta.customerPhone,street:ta.customerStreet,city:ta.customerCity} : null;
             /* v296: "Takeaway" allein sagt dem Fahrer und dem Gast nichts.
                Auf dem Bon muss stehen, ob abgeholt oder geliefert wird. */
@@ -25339,7 +25480,7 @@ function App() {
           usedAt: new Date().toISOString()
         } : g));
       }
-      completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts, splitDetails, usedGutschein ? (usedGutschein.rabatt||0) : 0);
+      completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts, splitDetails, usedGutschein ? (usedGutschein.rabatt||0) : 0, checkout.lieferFee || 0);   // v330
     },
     onTeilzahlung: (gastItems, tg, rabatt, gastNr) => belksTeilzahlung(checkout.tableId, gastItems, tg, rabatt, gastNr),
     onNurKarte: () => belksTischOhneBuchung(checkout.tableId),
