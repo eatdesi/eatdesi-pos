@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v334</title>
+<title>eatDeSi POS v335</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -15725,7 +15725,15 @@ function OrderListView({
       color: "#888",
       marginBottom: 10
     }
-  }, label, " \xB7 ", filtered.length, " Bestellungen \xB7 ", fmt(filtered.reduce((s, o) => s + o.total, 0))), filtered.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, label, " \xB7 ", belksUmsatzBuchungen(filtered).length, " Bestellungen \xB7 ",
+     fmt(belksUmsatzBuchungen(filtered).reduce((s, o) => s + o.total, 0)),
+     /* v335: Verkaufte Gutscheine sind kein Umsatz. Bisher zaehlten sie hier
+        mit - der Bericht daneben wies 0,00 aus. Sie bleiben in der Liste
+        sichtbar (sie sind ja Kassenvorgaenge), stehen aber in einer eigenen
+        Zeile. */
+     belksSummeGutschein(filtered) > 0 && /*#__PURE__*/React.createElement("div", {
+       style: { fontSize: 11, color: "#8a6d00", fontWeight: 700, marginTop: 2 }
+     }, "\uD83C\uDF9F\uFE0F Gutschein-Verkauf " + fmt(belksSummeGutschein(filtered)) + " (kein Umsatz)")), filtered.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       color: "#bbb",
@@ -15780,7 +15788,7 @@ function OrderListView({
         color: C.pink,
         fontSize: 13
       }
-    }, o.tableId ? `Tisch ${o.tableId}` : (o.orderType === "Lieferung" ? `🛵 Lieferung` : `🥡 Abholung`))), /*#__PURE__*/React.createElement("span", {
+    }, o.gutscheinVerkauf ? `🎟️ Gutschein` : (o.tableId ? `Tisch ${o.tableId}` : (o.orderType === "Lieferung" ? `🛵 Lieferung` : `🥡 Abholung`)))), /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 700,
         color: o.storniert ? "#aaa" : C.green,
@@ -22762,7 +22770,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v334"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v335"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -22911,6 +22919,36 @@ function App() {
     var wake = ['kueche','bar','kdspro','kds','kiosk','online_orders'].indexOf(String(view)) >= 0;
     try{ nativeKeepAwake(wake); }catch(e){}
   }, [view]);
+  /* ═══ v335: ZUSTAND NACH DEM ABGLEICH NACHZIEHEN ═══
+     Listen wie die Gutscheine werden beim Start EINMAL aus dem Speicher
+     gelesen und leben danach im React-Zustand. Der Abgleich schreibt die
+     neue Fassung zwar in den Speicher, aber niemand liest sie noch einmal:
+     Neuzeichnen allein holt keine Daten. Auf dem zweiten Geraet stand die
+     Liste deshalb so lange still, bis jemand von Hand abglich.
+     Dieser Helfer horcht auf den Abgleich und setzt den Zustand nach -
+     aber nur, wenn sich wirklich etwas geaendert hat, sonst zeichnet die
+     Kasse sich im Kreis. */
+  const belksZustandVomAbgleich = (lsKey, wert, setzen) => {
+    React.useEffect(() => {
+      const uebernehmen = (neu) => {
+        try {
+          if (!Array.isArray(neu) && (neu === null || neu === undefined)) return;
+          if (JSON.stringify(neu) === JSON.stringify(wert)) return;
+          setzen(neu);
+        } catch (e) { console.warn("Abgleich " + lsKey + ":", e); }
+      };
+      const beiSync = (ev) => {
+        try {
+          const d = ev && ev.detail;
+          if (!d || d.key !== lsKey) return;
+          uebernehmen(d.value !== undefined ? d.value : LS.get(lsKey, null));
+        } catch (e) { console.warn("Abgleich " + lsKey + ":", e); }
+      };
+      window.addEventListener('eatdesi_state_synced', beiSync);
+      return () => window.removeEventListener('eatdesi_state_synced', beiSync);
+    });
+  };
+
   const [_syncTick, _setSyncTick] = React.useState(0);
   // Bei jeder Remote-Synchronisation die ganze App neu rendern,
   // damit auch Views die direkt aus LS lesen (Firma, Gutscheine, Inventar,
@@ -23275,6 +23313,10 @@ function App() {
   }, [expenses]);
   useEffect(() => { LS.set("eatdesi_customers", customers); }, [customers]);
   useEffect(() => { LS.set("eatdesi_gutscheine", gutscheine); }, [gutscheine]);
+  /* v335: Ein Gutschein, der an der Theke verkauft wird, muss beim Kellner
+     am anderen Geraet ankommen - sonst sagt er dem Gast, der Code sei
+     ungueltig. */
+  belksZustandVomAbgleich("eatdesi_gutscheine", gutscheine, setGutscheine);
   useEffect(() => {
     LS.set("eatdesi_optiongroups", optionGroups);
   }, [optionGroups]);
