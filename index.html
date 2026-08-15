@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v332</title>
+<title>eatDeSi POS v333</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -22762,7 +22762,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v332"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v333"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -29110,6 +29110,39 @@ function mergeRemoteOrders(remoteOrders) {
   Object.keys(remoteByBon).forEach(function(k){
     if (!remoteByBon[k].tse && localByBon[k] && localByBon[k].tse) {
       remoteByBon[k].tse = localByBon[k].tse;
+    }
+  });
+
+  /* ═══ v333: DER ABGLEICH DARF KEINE FELDER LOESCHEN ═══
+     Oben wird jede Cloud-Buchung neu zusammengebaut - aus den Spalten, die
+     die Tabelle eatdesi_orders hat. Alles, was dort keine Spalte hat, war
+     danach weg: Trinkgeld, Rabatt, die Marke fuer den Gutschein-Verkauf,
+     der eingeloeste Gutscheinbetrag, die Liefergebuehr und die Aufteilung
+     bei getrennter Zahlung.
+     Sichtbar wurde es am 15.08.: zwei verkaufte Gutscheine standen als
+     normaler Umsatz mit 7 % MwSt im Bericht, und ein Beleg mit 7,80
+     Trinkgeld erschien im Bericht mit 0,00.
+     Das Geraet, das kassiert hat, kennt diese Werte noch. Also werden sie
+     hier zurueckgeschrieben, statt sie zu verlieren.
+     ACHTUNG: Auf einem anderen Geraet fehlen sie weiterhin - dort gab es
+     nie eine lokale Fassung. Endgueltig geloest ist das erst, wenn die
+     Werte auch in der Cloud stehen. */
+  var BELKS_NUR_LOKAL = ['trinkgeld','rabatt','gutscheinVerkauf','gutscheinCode',
+                         'gutscheinBetrag','lieferFee','splitDetails','teilzahlung'];
+  Object.keys(remoteByBon).forEach(function(k){
+    var lo = localByBon[k];
+    if (!lo) return;
+    BELKS_NUR_LOKAL.forEach(function(feld){
+      if (lo[feld] !== undefined && lo[feld] !== null) remoteByBon[k][feld] = lo[feld];
+    });
+    /* Ein verkaufter Gutschein hat keinen Tisch und ist kein Takeaway. Weil
+       die Cloud das nicht weiss, macht sie aus tableId=null eine
+       Abholung - im Bericht tauchte er dann unter "Takeaway" auf. */
+    if (lo.gutscheinVerkauf) {
+      remoteByBon[k].tableId = null;
+      remoteByBon[k].isTakeaway = undefined;
+      remoteByBon[k].orderType = undefined;
+      remoteByBon[k].label = lo.label || remoteByBon[k].label;
     }
   });
 
