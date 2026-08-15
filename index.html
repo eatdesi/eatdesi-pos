@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v333</title>
+<title>eatDeSi POS v334</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -22762,7 +22762,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v333"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v334"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -28712,19 +28712,58 @@ function supaFetch(path, method, body) {
   });
 }
 
+/* ═══ v334: WAS DIE TABELLE eatdesi_orders NICHT ALS SPALTE KENNT ═══
+   Diese Felder gehen gesammelt in die Spalte `extra` (jsonb). Die Liste
+   steht hier EINMAL - Hochladen, Zurueckladen und der Schutz beim
+   Zusammenfuehren benutzen dieselbe. Sonst faengt genau hier wieder an,
+   dass irgendwo eines fehlt. */
+var BELKS_EXTRA_FELDER = ['trinkgeld','rabatt','gutscheinVerkauf','gutscheinCode',
+                          'gutscheinBetrag','lieferFee','splitDetails','teilzahlung'];
+
+function belksExtraBauen(order){
+  if(!order) return null;
+  var e = {}, hat = false;
+  BELKS_EXTRA_FELDER.forEach(function(f){
+    var w = order[f];
+    if(w === undefined || w === null) return;
+    if(typeof w === 'number' && w === 0) return;      // Nullwerte sparen Platz
+    if(w === false) return;
+    e[f] = w; hat = true;
+  });
+  /* Ein verkaufter Gutschein hat keinen Tisch. Ohne die Bezeichnung macht
+     die Cloud beim Zurueckladen eine Abholung daraus. */
+  if(order.gutscheinVerkauf && order.label){ e.label = order.label; hat = true; }
+  return hat ? e : null;
+}
+
+function belksExtraAnwenden(ziel, extra){
+  if(!ziel || !extra) return ziel;
+  var e = extra;
+  if(typeof e === 'string'){ try { e = JSON.parse(e); } catch(err){ return ziel; } }
+  if(!e || typeof e !== 'object') return ziel;
+  BELKS_EXTRA_FELDER.forEach(function(f){
+    if(e[f] !== undefined && e[f] !== null) ziel[f] = e[f];
+  });
+  if(e.gutscheinVerkauf){
+    ziel.tableId = null;
+    ziel.isTakeaway = undefined;
+    ziel.orderType = undefined;
+    if(e.label) ziel.label = e.label;
+  }
+  return ziel;
+}
+
+/* Merkt sich, dass die Spalte in dieser Datenbank fehlt - dann wird sie
+   nicht bei jeder Buchung erneut vergeblich mitgeschickt. */
+window.__belksKeinExtra = false;
+
 // Push eine Bestellung zu Supabase (UPSERT auf location_id+bon_nr,
 // damit Stornierungen denselben Beleg aktualisieren statt zu duplizieren)
 async function pushOrderToSupabase(order) {
   try {
-    var resp = await fetch(SUPA_URL + '/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr', {
-      method: 'POST',
-      headers: {
-        'apikey': SUPA_KEY,
-        'Authorization': 'Bearer ' + SUPA_KEY,
-        'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates'
-      },
-      body: JSON.stringify({
+    var _extra = window.__belksKeinExtra ? null : belksExtraBauen(order);
+    var _senden = async function(mitExtra){
+      var koerper = {
         location_id: LOCATION_ID,
         bon_nr: String(order.bonNr || ''),
         /* ═══ v296 ═══
@@ -28747,8 +28786,34 @@ async function pushOrderToSupabase(order) {
         storno_von: order.stornoVon || null,
         storno_zeit: order.stornoZeit || null,
         tse: order.tse ? JSON.stringify(order.tse) : null
-      })
-    });
+      };
+      if(mitExtra && _extra) koerper.extra = _extra;
+      return fetch(SUPA_URL + '/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr', {
+        method: 'POST',
+        headers: {
+          'apikey': SUPA_KEY,
+          'Authorization': 'Bearer ' + SUPA_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates'
+        },
+        body: JSON.stringify(koerper)
+      });
+    };
+
+    var resp = await _senden(true);
+    /* Fehlt die Spalte `extra`, lehnt PostgREST den ganzen Datensatz mit
+       400 ab. Dann lieber die Buchung ohne die Zusatzfelder hochladen als
+       sie zu verlieren - und ab jetzt gar nicht mehr mitschicken. */
+    if (!resp.ok && resp.status !== 409 && _extra) {
+      var grund = '';
+      try { grund = await resp.clone().text(); } catch(e2) {}
+      if (resp.status === 400 || resp.status === 404 || grund.indexOf('extra') !== -1) {
+        console.warn('Spalte extra fehlt - Buchung wird ohne Zusatzfelder hochgeladen. Bitte in Supabase anlegen:',
+                     'alter table public.eatdesi_orders add column if not exists extra jsonb;');
+        window.__belksKeinExtra = true;
+        resp = await _senden(false);
+      }
+    }
     return resp.ok || resp.status === 409;
   } catch(e) {
     console.warn('pushOrder error:', e.message);
@@ -29087,6 +29152,10 @@ function mergeRemoteOrders(remoteOrders) {
       tse: (function(){ try { return ro.tse ? (typeof ro.tse === 'string' ? JSON.parse(ro.tse) : ro.tse) : null; } catch(e){ return null; } })(),
       storniert: ro.storniert || false, stornoVon: ro.storno_von || null, stornoZeit: ro.storno_zeit || null
     };
+    /* v334: Trinkgeld, Rabatt, Gutschein- und Liefergebuehr-Angaben aus der
+       Spalte `extra` zurueckholen. Ohne sie zeigte ein zweites Geraet einen
+       anderen Bericht als das Geraet, das kassiert hat. */
+    belksExtraAnwenden(remoteByBon[String(ro.bon_nr || '')], ro.extra);
     // DEBUG: jede Web/Online-relevante Order loggen
     try {
       var _n = ro.note || '';
@@ -29127,8 +29196,7 @@ function mergeRemoteOrders(remoteOrders) {
      ACHTUNG: Auf einem anderen Geraet fehlen sie weiterhin - dort gab es
      nie eine lokale Fassung. Endgueltig geloest ist das erst, wenn die
      Werte auch in der Cloud stehen. */
-  var BELKS_NUR_LOKAL = ['trinkgeld','rabatt','gutscheinVerkauf','gutscheinCode',
-                         'gutscheinBetrag','lieferFee','splitDetails','teilzahlung'];
+  var BELKS_NUR_LOKAL = BELKS_EXTRA_FELDER;   // v334: eine Liste fuer beide Wege
   Object.keys(remoteByBon).forEach(function(k){
     var lo = localByBon[k];
     if (!lo) return;
