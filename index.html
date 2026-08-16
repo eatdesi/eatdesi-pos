@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v338</title>
+<title>eatDeSi POS v340</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -11933,7 +11933,16 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
      "tisch" = wie bisher, die Bestellung landet auf einem Tisch.
      "takeaway" = Priya fragt zuerst Lieferung oder Abholung und legt am
      Ende eine Takeaway-Bestellung an. */
-  const [modus, setModus] = React.useState("tisch");
+  /* v339: Kommt der Aufruf von der Startseite-Kachel "Priya (Telefon)",
+     ist der Modus schon gesetzt - dann muss niemand mehr umschalten,
+     waehrend der Gast am Telefon wartet. */
+  const [modus, setModus] = React.useState(() => {
+    try {
+      var v = localStorage.getItem("eatdesi_ki_startmodus");
+      if (v === "takeaway" || v === "tisch") { localStorage.removeItem("eatdesi_ki_startmodus"); return v; }
+    } catch(e) {}
+    return "tisch";
+  });
   const [taTyp, setTaTyp] = React.useState(null);         // "abholung" | "lieferung"
   const [taKunde, setTaKunde] = React.useState(null);     // {name, phone, street, plz, city}
   const taTypRef = React.useRef(null);
@@ -12458,7 +12467,25 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
         }
       }
       if (data && data.error) {
-        throw new Error("Gerade ist sehr viel los bei meinem KI-Dienst 🙏 Bitte in ein paar Sekunden noch einmal senden.");
+        /* ═══ v340: DEN GRUND NICHT MEHR VERSTECKEN ═══
+           Hier stand fuer JEDEN Fehler derselbe Satz ueber Ueberlastung.
+           Ein falscher Schluessel, ein abgeschaltetes Modell und ein
+           aufgebrauchtes Kontingent sahen damit gleich aus - und keiner
+           davon loest sich dadurch, dass man "in ein paar Sekunden noch
+           einmal sendet". */
+        const _c  = (data.error && data.error.code) || 0;
+        const _m  = (data.error && data.error.message) || _lastErr || "unbekannt";
+        const _st = (data.error && data.error.status) || "";
+        const _wirklichVoll = _c === 429 || _c === 503 || /quota|rate limit|exceeded|overloaded|high demand|unavailable/i.test(_m);
+        if (_wirklichVoll) {
+          throw new Error("Gerade ist sehr viel los bei meinem KI-Dienst \uD83D\uDE4F Bitte in ein paar Sekunden noch einmal senden."
+            + "\n(" + (_st || _c) + ")");
+        }
+        var _tipp = "";
+        if (_c === 400) _tipp = "\nDer Auftrag wurde abgelehnt. Meist: API-Key ung\u00fcltig oder Anfrage zu lang.";
+        else if (_c === 403) _tipp = "\nZugriff verweigert. Meist: API-Key falsch, sein Kontingent ist gesperrt, oder er ist auf andere Adressen beschr\u00e4nkt.\nNeuen Key holen: aistudio.google.com/apikey";
+        else if (_c === 404) _tipp = "\nDas Modell \u201E" + _models.join(" / ") + "\u201C gibt es nicht (mehr).\nIn den Drucker-Einstellungen ein anderes Modell eintragen.";
+        throw new Error("\u274C KI-Dienst meldet Fehler " + (_st || _c) + ":\n" + _m + _tipp);
       }
       const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "...";
       const cleanText = processAiBlocks(raw);
@@ -12582,6 +12609,40 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
     /*#__PURE__*/React.createElement("div", { style:{ fontSize:80, marginBottom:8 } }, "👩🍳"),
     /*#__PURE__*/React.createElement("div", { style:{ fontWeight:900, fontSize:28, color:"#fff", marginBottom:4 } }, "Priya"),
     /*#__PURE__*/React.createElement("div", { style:{ color:"#a5d6a7", fontSize:14, marginBottom:24 } }, "KI-Kellnerin · eatDeSi"),
+    /* v340: Ein Anruf ist der falsche Moment, um herauszufinden, dass der
+       KI-Dienst nicht antwortet. Dieser Knopf stellt eine winzige Frage und
+       zeigt die Antwort des Dienstes ungefiltert. */
+    /*#__PURE__*/React.createElement("button", {
+      onClick: async () => {
+        if (!geminiKey) { alert("\u26A0\uFE0F Kein Gemini API Key hinterlegt.\n\n\u2630 \u2192 Drucker Einstellungen \u2192 AI Kellnerin.\nKostenlos holen: aistudio.google.com/apikey"); return; }
+        const modell = (printerSettings && printerSettings.geminiModel) || 'gemini-2.5-flash-lite';
+        try {
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modell}:generateContent?key=${geminiKey}`, {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({ contents:[{role:"user",parts:[{text:"Antworte nur mit dem Wort: OK"}]}],
+                                   generationConfig:{ maxOutputTokens:10 } })
+          });
+          let d = {}; try { d = await res.json(); } catch(e) {}
+          if (d && d.error) {
+            alert("\u274C KI-Dienst antwortet mit einem Fehler\n\n"
+                + "Modell: " + modell + "\n"
+                + "Code: " + ((d.error.status||"") + " " + (d.error.code||"")) + "\n\n"
+                + (d.error.message || "keine Meldung") + "\n\n"
+                + "Schl\u00fcssel endet auf: \u2026" + String(geminiKey).slice(-6));
+            return;
+          }
+          const antwort = (((d.candidates||[])[0]||{}).content||{}).parts;
+          alert("\u2705 KI-Dienst erreichbar\n\nModell: " + modell
+              + "\nAntwort: " + ((antwort && antwort[0] && antwort[0].text) ? antwort[0].text.trim() : "(leer)")
+              + "\n\nWenn Priya trotzdem Fehler meldet, liegt es nicht am Schl\u00fcssel.");
+        } catch(e) {
+          alert("\u274C Der KI-Dienst war nicht erreichbar.\n\n" + (e && e.message ? e.message : e)
+              + "\n\nMeist fehlt Internet oder eine Firewall blockiert generativelanguage.googleapis.com.");
+        }
+      },
+      style:{ background:"rgba(255,255,255,0.15)", border:"1.5px dashed rgba(255,255,255,.5)", color:"#fff",
+              borderRadius:10, padding:"8px 14px", marginBottom:8, cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:700 }
+    }, "\uD83E\uDDE0 KI-Dienst pr\u00fcfen"),
     /*#__PURE__*/React.createElement("button", {
       onClick: () => { try { alert(belksSprachPruefung()); } catch(e) { alert("Pr\u00fcfung fehlgeschlagen: " + e); } },
       style:{ background:"rgba(255,255,255,0.15)", border:"1.5px dashed rgba(255,255,255,.5)", color:"#fff",
@@ -23135,7 +23196,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v338"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v340"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -23170,6 +23231,12 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
     React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:12, marginBottom:16 } },
       pendingOnlineOrders.length > 0 && card("🔔", "Online NEU", pendingOnlineOrders.length, "#e53935", "Annehmen!", () => setView("online_orders")),
       card("🪑", "Tische", openTables.length, C2.green, openTables.length + " belegt", () => setView("tables")),
+      /* v339: Priya nimmt Telefonbestellungen auf - der Knopf muss dort
+         sein, wo man beim Klingeln hinschaut, nicht im Menue. */
+      card("\uD83D\uDC69\u200D\uD83C\uDF73", "Priya", "\uD83C\uDFA4", "#6a1b9a", "Telefon-Bestellung", () => {
+        try { localStorage.setItem("eatdesi_ki_startmodus", "takeaway"); } catch(e) {}
+        setView("ai_kellnerin");
+      }),
       card("🥡", "Takeaway", activeTakeaway.length > 0 ? activeTakeaway.length : "+", C2.blue, activeTakeaway.length > 0 ? activeTakeaway.length + " aktiv" : "Neue Bestellung", () => activeTakeaway.length > 0 ? setShowTaList(true) : setShowTaCustomerSearch(true))
     ),
 
@@ -23184,6 +23251,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
           { icon:"🍺", label:"Bar", id:"bar" },
           { icon:"🍳", label:"KDS Pro", id:"kds_pro" },
           { icon:"📅", label:"Reservierung", id:"reservations" },
+          { icon:"\uD83D\uDC69\u200D\uD83C\uDF73", label:"AI Kellnerin", id:"ai_kellnerin" },
           { icon:"📊", label:"Tagesbericht", id:"summary" },
           { icon:"⏱️", label:"Zeiterfassung", id:"zeiterfassung" },
         ].filter(item => {
@@ -30270,6 +30338,10 @@ var SYNC_BLACKLIST = [
   'eatdesi_sumup_rueckweg',// SumUp-Rueckweg: haengt am Geraet, nicht am Restaurant
   'eatdesi_bt_freigeben',  // Drucker teilen: haengt am Geraet
   'eatdesi_bereich_wahl',  // v311: welcher Tisch-Bereich zuletzt offen war (pro Geraet)
+  /* v339: Merker fuer EINEN Aufruf der KI-Kellnerin von der Startseite.
+     Reine Bedienung dieses Geraets - waere er in der Cloud, wuerde ein
+     Tippen an der Theke die Kasse in der Kueche umschalten. */
+  'eatdesi_ki_startmodus',
   'eatdesi_kuechen_schrift',// Schriftgroesse Kueche/Bar: haengt am Drucker
   'eatdesi_sb_url',        // Sync-interne Konfiguration
   'eatdesi_sb_key',
