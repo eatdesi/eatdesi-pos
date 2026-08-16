@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v340</title>
+<title>eatDeSi POS v342</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -11855,6 +11855,22 @@ function MonatsreportView({ completedOrders }) {
    Ob die Sprach-Plugins in der APK stecken, laesst sich nur auf dem Geraet
    feststellen. Diese Funktion schaut nach und sagt es im Klartext, statt
    dass jemand rateraet, warum das Mikrofon schweigt. */
+/* ═══ v341: SIEHT DAS UEBERHAUPT WIE EIN GEMINI-SCHLUESSEL AUS? ═══
+   Google-API-Keys beginnen mit "AIza" und sind 39 Zeichen lang, nur
+   Buchstaben, Ziffern, Bindestrich und Unterstrich. Das ersetzt keinen
+   echten Test beim Dienst - aber es faengt genau die Faelle ab, die im
+   Betrieb vorkommen: ein Platzhalter, eine halb kopierte Zeile, ein
+   angehaengter Zeilenumbruch. */
+function belksGeminiKeyForm(k){
+  var v = String(k == null ? "" : k).trim();
+  if (!v) return { ok:false, grund:"leer" };
+  if (/\s/.test(v)) return { ok:false, grund:"enth\u00e4lt Leerzeichen oder Zeilenumbruch" };
+  if (v.indexOf("AIza") !== 0) return { ok:false, grund:"beginnt nicht mit AIza" };
+  if (!/^[A-Za-z0-9_\-]+$/.test(v)) return { ok:false, grund:"enth\u00e4lt ungewohnte Zeichen" };
+  if (v.length !== 39) return { ok:false, grund:v.length + " Zeichen statt 39" };
+  return { ok:true, grund:"" };
+}
+
 function belksSprachPruefung(){
   var z = [];
   var cap = null, nativ = false, plugins = {};
@@ -11945,6 +11961,13 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
   });
   const [taTyp, setTaTyp] = React.useState(null);         // "abholung" | "lieferung"
   const [taKunde, setTaKunde] = React.useState(null);     // {name, phone, street, plz, city}
+  /* ═══ v342: DER MODUS DARF NICHT VERLOREN GEHEN ═══
+     Eine Telefonbestellung, die in einem besetzten Tisch landet, ist
+     schlimmer als gar keine: Artikel vermischt, kein Name, keine Adresse.
+     Deshalb liegt der Modus zusaetzlich in einem Ref - alte
+     Funktionskopien greifen dann trotzdem auf den aktuellen Wert zu. */
+  const modusRef = React.useRef("tisch");
+  React.useEffect(() => { modusRef.current = modus; }, [modus]);
   const taTypRef = React.useRef(null);
   const taKundeRef = React.useRef(null);
   React.useEffect(() => { taTypRef.current = taTyp; }, [taTyp]);
@@ -12124,7 +12147,10 @@ TAKEAWAY (SEHR WICHTIG — dieser Ablauf gilt jetzt):
 
 - LIEFERUNG: frage nacheinander (immer nur EINE Frage auf einmal):
   1. "Wie ist Ihr Name?"
-  2. "Ihre Handynummer?"
+  2. "Ihre Handynummer?" - LIES SIE DANACH ZUR KONTROLLE ZIFFERNWEISE VOR
+     ("Ich habe null eins fuenf eins ... - stimmt das?"). Spracherkennung
+     verschluckt bei Nummern gerne den Rest; ohne Rueckfrage merkt es
+     niemand. Erst weitermachen, wenn der Gast bestaetigt."
   3. "Und die Lieferadresse - Strasse und Hausnummer?"
   4. "Postleitzahl und Ort?"
   Danach haenge an:
@@ -12179,6 +12205,10 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
       : curLang.greeting;
     setTaTyp(null);
     setTaKunde(null);
+    /* v342: Am Telefon kann niemand zwischen jedem Satz das Mikrofon
+       druecken. Im Takeaway startet Priya deshalb gleich im
+       Gespraechs-Modus: nach dem Sprechen hoert sie von selbst wieder zu. */
+    if (modus === "takeaway") { setHandsFree(true); handsFreeRef.current = true; }
     setMsgs([{role:"assistant", text: greeting}]);
     setOrder([]);
     setStarted(true);
@@ -12251,6 +12281,21 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
           var handled = false;
           var lastText = "";
           var silenceTimer = null;
+          /* ═══ v342: WIE LANGE STILLE IST "FERTIG"? ═══
+             1,4 Sekunden reichen fuer "einmal Pommes". Wer eine
+             Telefonnummer diktiert, macht aber genau dort Pausen -
+             "0151 ... 751 ... 56664". Die Erkennung schickte dann
+             "0151751" ab und der Rest ging verloren.
+             Also richtet sich die Wartezeit danach, wonach Priya zuletzt
+             gefragt hat. */
+          var _letzteFrage = "";
+          try {
+            for (var _fi = msgs.length - 1; _fi >= 0; _fi--) {
+              if (msgs[_fi] && msgs[_fi].role === "assistant") { _letzteFrage = String(msgs[_fi].text || "").toLowerCase(); break; }
+            }
+          } catch(e) {}
+          var _langeAntwort = /nummer|telefon|handy|adresse|stra\u00dfe|strasse|hausnummer|postleitzahl|plz|ort|uhrzeit|wie viel uhr|kundennummer/.test(_letzteFrage);
+          var _stille = _langeAntwort ? 4500 : 2500;
           var doAutoSend = function(){
             if (handled) return;
             var t = (lastText||"").trim();
@@ -12271,7 +12316,7 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
               setInput(lastText);
               // nach 1,4s Stille automatisch senden
               if (silenceTimer) clearTimeout(silenceTimer);
-              silenceTimer = setTimeout(doAutoSend, 1400);
+              silenceTimer = setTimeout(doAutoSend, _stille);
             }
           });
           // Manche Versionen feuern 'listeningState' wenn der Nutzer aufhört
@@ -12402,7 +12447,7 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
     // CONFIRM (Gast hat bestätigt → an Küche/Bar senden + Bon drucken)
     var cm = raw.match(/\{"confirm":\s*true\}/);
     if (cm) {
-      setTimeout(function(){ if (modus === "takeaway") sendToTakeaway(); else sendToTable(); }, 300);
+      setTimeout(function(){ if (modusRef.current === "takeaway") sendToTakeaway(); else sendToTable(); }, 300);
     }
     // Alle versteckten Blöcke aus dem Text entfernen
     text = text
@@ -12648,6 +12693,13 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
       style:{ background:"rgba(255,255,255,0.15)", border:"1.5px dashed rgba(255,255,255,.5)", color:"#fff",
               borderRadius:10, padding:"8px 14px", marginBottom:14, cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:700 }
     }, "\uD83D\uDD0E Mikrofon & Plugins pr\u00fcfen"),
+    /* v341: Ein offensichtlich falscher Key soll auffallen, BEVOR jemand
+       mit einem Gast am Telefon auf eine Antwort wartet. */
+    geminiKey && !belksGeminiKeyForm(geminiKey).ok && /*#__PURE__*/React.createElement("div", { style:{ background:"#ffebee", borderRadius:10, padding:"10px 16px", marginBottom:14, fontSize:12.5, color:"#c62828", fontWeight:700, maxWidth:380 } },
+      "\u274C Der hinterlegte Gemini-Key ist unbrauchbar (" + belksGeminiKeyForm(geminiKey).grund + ").",
+      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:500, fontSize:11, marginTop:4 } },
+        "\u2630 \u2192 Drucker Einstellungen \u2192 Google Gemini API Key. Kostenlos: aistudio.google.com/apikey")
+    ),
     !geminiKey && /*#__PURE__*/React.createElement("div", { style:{ background:"#ffebee", borderRadius:10, padding:"10px 16px", marginBottom:20, fontSize:13, color:"#c62828", textAlign:"center" } },
       "⚠️ API Key fehlt — Drucker Einstellungen"
     ),
@@ -12723,12 +12775,27 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
       /*#__PURE__*/React.createElement("span", { style:{ fontSize:12, color:"#999" } }, (aiCustomer.points!=null?aiCustomer.points+" Punkte":"") + (aiCustomer.visits?" · "+aiCustomer.visits+" Besuche":"")),
       /*#__PURE__*/React.createElement("button", { onClick:()=>setAiCustomer(null), style:{ marginLeft:"auto", background:"none", border:"none", color:"#999", cursor:"pointer", fontSize:16 } }, "✕")
     ),
+    /* v342: Im Gespraech war nirgends zu sehen, wohin die Bestellung
+       geht. Diese Zeile sagt es die ganze Zeit. */
+    /*#__PURE__*/React.createElement("div", { style:{ background: modus === "takeaway" ? "#f3e5f5" : "#e8f5e9", padding:"5px 14px", flexShrink:0, fontSize:11.5, fontWeight:700, color: modus === "takeaway" ? "#6a1b9a" : C.green, display:"flex", alignItems:"center", gap:8 } },
+      modus === "takeaway"
+        ? ("\uD83E\uDD61 Takeaway" + (taTyp === "lieferung" ? " \u00b7 Lieferung" : taTyp === "abholung" ? " \u00b7 Abholung" : " \u00b7 Art noch offen"))
+        : ("\uD83E\uDE91 Tisch " + selTable),
+      /*#__PURE__*/React.createElement("button", { onClick:()=>{ const n = modus === "takeaway" ? "tisch" : "takeaway"; setModus(n); modusRef.current = n; },
+        style:{ marginLeft:"auto", background:"none", border:"1px solid currentColor", borderRadius:6, padding:"2px 8px", color:"inherit", cursor:"pointer", fontFamily:"inherit", fontSize:10.5, fontWeight:700 }
+      }, "wechseln")
+    ),
     order.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", padding:"8px 14px", borderTop:"2px solid #a5d6a7", flexShrink:0 } },
       /*#__PURE__*/React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 } },
         /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:C.green } }, "🛒 Bestellung (", order.reduce((s,o)=>s+o.qty,0), " Artikel)"),
-        /*#__PURE__*/React.createElement("button", { onClick:sendToTable,
-          style:{ background:C.green, border:"none", color:"#fff", borderRadius:8, padding:"7px 14px", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
-        }, "→ Tisch ", selTable, " senden")
+        /* v342: Dieser Knopf rief IMMER sendToTable() - auch wenn Priya
+           gerade eine Telefonbestellung aufnahm. Er richtet sich jetzt
+           nach dem Modus. */
+        /*#__PURE__*/React.createElement("button", { onClick: () => { if (modusRef.current === "takeaway") sendToTakeaway(); else sendToTable(); },
+          style:{ background: modus === "takeaway" ? "#6a1b9a" : C.green, border:"none", color:"#fff", borderRadius:8, padding:"7px 14px", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
+        }, modus === "takeaway"
+             ? ("→ " + (taTyp === "lieferung" ? "Lieferung" : taTyp === "abholung" ? "Abholung" : "Takeaway") + " senden")
+             : ("→ Tisch " + selTable + " senden"))
       ),
       /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6, flexWrap:"wrap" } },
         order.map((o,i)=>/*#__PURE__*/React.createElement("span",{key:i,style:{background:"#fff",borderRadius:6,padding:"3px 8px",fontSize:11,color:C.green,fontWeight:700}}, o.qty,"× ",o.name," (",o.price?.toFixed(2),"€)"))
@@ -17532,12 +17599,24 @@ function PrinterSettingsView({
       "Kostenlos: aistudio.google.com \u2192 Get API Key"
     ),
     /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#555", marginBottom:4, fontWeight:600 } }, "Google Gemini API Key"),
+    /* v341: Beim Kopieren aus dem Browser haengt fast immer ein
+       Zeilenumbruch oder Leerzeichen am Schluessel. Google lehnt ihn dann
+       ab - mit derselben Meldung wie bei einem voellig falschen Key. */
     /*#__PURE__*/React.createElement("input", { type:"password", value:form.geminiKey||"", placeholder:"AIza...",
-      onChange:e=>setForm(f=>({...f, geminiKey:e.target.value})),
+      onChange:e=>setForm(f=>({...f, geminiKey:String(e.target.value||"").replace(/\s+/g,"")})),
       style:{ width:"100%", padding:"10px 12px", borderRadius:8, border:"2px solid #ce93d8", fontSize:13, fontFamily:"monospace", boxSizing:"border-box", marginBottom:10 }
     }),
-    form.geminiKey && /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:8, padding:"6px 10px", fontSize:12, color:C.green, fontWeight:700 } },
-      "\u2705 API Key gespeichert \u2014 AI Kellnerin aktiv"
+    /* v341: Hier stand fruher bei JEDEM Text ein gruener Haken - auch bei
+       "0000". Genau daran ist der Betrieb haengen geblieben. */
+    form.geminiKey && belksGeminiKeyForm(form.geminiKey).ok && /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:8, padding:"8px 10px", fontSize:12, color:C.green, fontWeight:700 } },
+      "\u2705 Form stimmt (AIza\u2026, 39 Zeichen)",
+      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:500, fontSize:11, color:"#4a7c4e", marginTop:3 } },
+        "Ob er wirklich funktioniert, zeigt \uD83E\uDDE0 \u201EKI-Dienst pr\u00fcfen\u201C in der AI Kellnerin.")
+    ),
+    form.geminiKey && !belksGeminiKeyForm(form.geminiKey).ok && /*#__PURE__*/React.createElement("div", { style:{ background:"#ffebee", border:"2px solid #ef9a9a", borderRadius:8, padding:"8px 10px", fontSize:12, color:"#c62828", fontWeight:700 } },
+      "\u274C Das sieht nicht wie ein Gemini-Key aus \u2014 " + belksGeminiKeyForm(form.geminiKey).grund,
+      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:500, fontSize:11, marginTop:3 } },
+        "Ein g\u00fcltiger Key beginnt mit AIza und hat 39 Zeichen. Kostenlos: aistudio.google.com/apikey")
     ),
     !form.geminiKey && /*#__PURE__*/React.createElement("div", { style:{ background:"#fff8e1", borderRadius:8, padding:"6px 10px", fontSize:11, color:"#e65100" } },
       "\u26A0\uFE0F Kein Key \u2014 AI Kellnerin nicht verf\xFCgbar"
@@ -23196,7 +23275,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v340"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v342"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
