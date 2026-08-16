@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v335</title>
+<title>eatDeSi POS v338</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -10769,8 +10769,12 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
   /* Runde Betraege, die ein Gast typischerweise nennt: erst auf den vollen
      Euro, danach die naechsten 5er-Schritte. Aus 76,00 wird 80 / 85 / 90,
      aus 76,40 wird 77 / 80 / 85 / 90. */
+  /* ═══ v336: DIE VORSCHLAEGE MUESSEN ZUM ZAHLBETRAG PASSEN ═══
+     Deckt ein Gutschein 10,00 von 10,80, legt der Gast 0,80 hin. Knoepfe
+     mit 11/15/20/25 sind dann sinnlos - und wer 11 tippt, bekommt 0,20
+     Trinkgeld gebucht statt der 10,20, die er vermutlich meinte. */
   const zahlVorschlaege = (() => {
-    const b = totalNachRabatt;
+    const b = zuZahlen;
     if (!(b > 0)) return [];
     const out = [];
     const voll = Math.ceil(b);
@@ -10789,7 +10793,8 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
     setZahlText(roh);
     const v = parseFloat(roh.replace(",", "."));
     if (!isFinite(v)) { setTrinkgeld(""); return; }
-    const diff = Math.round((v - totalNachRabatt) * 100) / 100;
+    /* v336: gegen den Zahlbetrag, nicht gegen die Rechnung. */
+    const diff = Math.round((v - zuZahlen) * 100) / 100;
     setTrinkgeld(diff > 0 ? String(diff) : "");
   };
   // Knopf gedrueckt -> Feld soll den Betrag zeigen
@@ -11009,14 +11014,17 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
           /*#__PURE__*/React.createElement("div", { style:{ background:"#fffde7", border:"2px solid #f9a825", borderRadius:12, padding:12, marginBottom:14 } },
             /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#e65100", marginBottom:2 } }, "\uD83C\uDF1F Wie viel zahlt der Gast?"),
             /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, color:"#8d6e63", marginBottom:8 } },
-              "Rechnung ", fmt(totalNachRabatt), " \u2013 Gesamtbetrag eintippen, Trinkgeld rechnet sich von selbst."),
+              gutscheinAbzug > 0
+                ? "Rechnung " + fmt(totalNachRabatt) + ", davon " + fmt(gutscheinAbzug)
+                  + " per Gutschein \u2013 der Gast zahlt noch " + fmt(zuZahlen) + "."
+                : "Rechnung " + fmt(zuZahlen) + " \u2013 Gesamtbetrag eintippen, Trinkgeld rechnet sich von selbst."),
             zahlVorschlaege.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6, marginBottom:8, flexWrap:"wrap" } },
               /*#__PURE__*/React.createElement("button", {
                 onClick:leereBetrag,
                 style:{ padding:"9px 14px", borderRadius:10, border:`2px solid ${tg===0?C.orange:"#ddd"}`, background:tg===0?"#fff3e0":"#fff", color:tg===0?C.orange:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
               }, "Passend"),
               zahlVorschlaege.map(v => {
-                const aktiv = Math.abs((totalNachRabatt + tg) - v) < 0.005 && tg > 0;
+                const aktiv = Math.abs((zuZahlen + tg) - v) < 0.005 && tg > 0;   // v336
                 return /*#__PURE__*/React.createElement("button", { key:v,
                   onClick:()=>waehleBetrag(v),
                   style:{ padding:"9px 14px", borderRadius:10, border:`2px solid ${aktiv?C.orange:"#ddd"}`, background:aktiv?"#fff3e0":"#fff", color:aktiv?C.orange:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
@@ -11027,15 +11035,15 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
               value: zahlText,
               onChange:e=>setzeZahlbetrag(e.target.value),
               onFocus:e=>{ try{ e.target.select(); }catch(err){} },
-              placeholder:"Gast zahlt \u2026 z.B. " + Math.ceil(totalNachRabatt/5)*5,
+              placeholder:"Gast zahlt \u2026 z.B. " + Math.max(5, Math.ceil(zuZahlen/5)*5),   // v336
               style:{ width:"100%", padding:12, borderRadius:8, border:"2px solid #ffe082", fontSize:18, fontWeight:800, fontFamily:"inherit", boxSizing:"border-box", textAlign:"center" }
             }),
             /*#__PURE__*/React.createElement("div", { style:{ textAlign:"center", marginTop:8, fontSize:14, fontWeight:800,
-              color: tg > 0 ? C.orange : (zahlText && parseFloat(zahlText.replace(",",".")) < totalNachRabatt ? "#c62828" : "#999") } },
+              color: tg > 0 ? C.orange : (zahlText && parseFloat(zahlText.replace(",",".")) < zuZahlen ? "#c62828" : "#999") } },
               tg > 0 ? ("Trinkgeld " + fmt(tg) + "  \u00B7  Gesamt " + fmt(totalWithTG))
-              : (zahlText && isFinite(parseFloat(zahlText.replace(",","."))) && parseFloat(zahlText.replace(",",".")) < totalNachRabatt)
-                ? ("\u26A0\uFE0F Weniger als die Rechnung \u2013 es werden " + fmt(totalNachRabatt) + " gebucht")
-                : ("Ohne Trinkgeld \u00B7 " + fmt(totalNachRabatt)))
+              : (zahlText && isFinite(parseFloat(zahlText.replace(",","."))) && parseFloat(zahlText.replace(",",".")) < zuZahlen)
+                ? ("\u26A0\uFE0F Weniger als der Zahlbetrag \u2013 es werden " + fmt(zuZahlen) + " gebucht")
+                : ("Ohne Trinkgeld \u00B7 " + fmt(zuZahlen)))
           ),
           // Zahlungsart
           /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#333", marginBottom:10 } }, "Zahlungsart"),
@@ -11314,7 +11322,10 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
               /*#__PURE__*/React.createElement("span", { style:{ color:["#1565c0","#2e7d32","#e65100","#880e4f","#4a148c","#bf360c"][i]||C.blue, fontWeight:700 } }, "Person ", i+1, " \xB7 ", p.method),
               /*#__PURE__*/React.createElement("span", { style:{ fontWeight:700, color:C.green } }, fmt(p.amount), p.trinkgeld>0 ? ` +\uD83C\uDF1F${fmt(p.trinkgeld)}` : "")
             ))
-          ) : /*#__PURE__*/React.createElement("div", { style:{ color:"#888", marginBottom:12 } }, done.method, " \xB7 ", fmt(done.total)),
+          ) : /*#__PURE__*/React.createElement("div", { style:{ color:"#888", marginBottom:12 } },
+            /* v336: Der Gutschein-Anteil kam nicht bar herein - hier stand
+               sonst "Bar 10,80", obwohl nur 0,80 in die Schublade ging. */
+            done.method, " \xB7 ", fmt(Math.max(0, (done.total||0) - (done.gutschein||0)))),
           done.trinkgeld > 0 && /*#__PURE__*/React.createElement("div", { style:{ background:"#fffde7", border:"2px solid #f9a825", borderRadius:10, padding:"10px 14px", marginBottom:12, display:"flex", justifyContent:"space-between", color:"#e65100", fontWeight:700, fontSize:15 } },
             /*#__PURE__*/React.createElement("span", null, "\uD83C\uDF1F Trinkgeld"), /*#__PURE__*/React.createElement("span", null, fmt(done.trinkgeld))
           ),
@@ -11840,7 +11851,64 @@ function MonatsreportView({ completedOrders }) {
 
 
 // --- AI KELLNERIN -------------------------------------------------------------
-function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders, setView, setActiveTable, menuData, customers, setCustomers, loyaltySettings }) {
+/* ═══ v338: WAS KANN DIESES GERAET WIRKLICH? ═══
+   Ob die Sprach-Plugins in der APK stecken, laesst sich nur auf dem Geraet
+   feststellen. Diese Funktion schaut nach und sagt es im Klartext, statt
+   dass jemand rateraet, warum das Mikrofon schweigt. */
+function belksSprachPruefung(){
+  var z = [];
+  var cap = null, nativ = false, plugins = {};
+  try { cap = window.Capacitor; } catch(e){}
+  try { nativ = !!(cap && cap.isNativePlatform && cap.isNativePlatform()); } catch(e){}
+  try { plugins = (cap && cap.Plugins) || {}; } catch(e){}
+
+  z.push(nativ ? "\uD83D\uDCF1 App (APK) \u2013 Capacitor aktiv"
+               : "\uD83C\uDF10 Browser \u2013 kein Capacitor");
+
+  var srPlugin  = !!plugins.SpeechRecognition;
+  var ttsPlugin = !!plugins.TextToSpeech;
+  var srWeb  = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  var ttsWeb = !!window.speechSynthesis;
+
+  z.push("");
+  z.push("ZUH\u00d6REN (Mikrofon)");
+  z.push("  Plugin SpeechRecognition: " + (srPlugin ? "\u2705 da" : "\u274c fehlt"));
+  z.push("  Browser-Spracherkennung:  " + (srWeb ? "\u2705 da" : "\u274c fehlt"));
+  z.push("");
+  z.push("SPRECHEN (Lautsprecher)");
+  z.push("  Plugin TextToSpeech:      " + (ttsPlugin ? "\u2705 da" : "\u274c fehlt"));
+  z.push("  Browser-Sprachausgabe:    " + (ttsWeb ? "\u2705 da" : "\u274c fehlt"));
+
+  var hoeren  = nativ ? (srPlugin || srWeb)   : srWeb;
+  var reden   = nativ ? (ttsPlugin || ttsWeb) : ttsWeb;
+  z.push("");
+  z.push(hoeren && reden ? "\u2705 Priya kann sprechen UND zuh\u00f6ren."
+        : hoeren ? "\u26a0\uFE0F Priya h\u00f6rt, spricht aber nicht."
+        : reden  ? "\u26a0\uFE0F Priya spricht, h\u00f6rt aber nicht \u2013 Bestellung nur per Tastatur."
+                 : "\u274c Weder H\u00f6ren noch Sprechen m\u00f6glich \u2013 nur Tastatur.");
+
+  if (nativ && !srPlugin) {
+    z.push("");
+    z.push("Fehlendes Plugin nachinstallieren (im Projektordner):");
+    z.push("  npm i @capacitor-community/speech-recognition --legacy-peer-deps");
+  }
+  if (nativ && !ttsPlugin) {
+    z.push("  npm i @capacitor-community/text-to-speech --legacy-peer-deps");
+  }
+  if (nativ && (!srPlugin || !ttsPlugin)) z.push("  npx cap sync android");
+
+  try {
+    var namen = Object.keys(plugins).sort();
+    if (namen.length) {
+      z.push("");
+      z.push("Alle geladenen Plugins (" + namen.length + "):");
+      z.push("  " + namen.join(", "));
+    }
+  } catch(e){}
+  return z.join("\n");
+}
+
+function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders, setView, setActiveTable, menuData, customers, setCustomers, loyaltySettings, onTakeawayAnlegen, onReservierung }) {
   const LANGS = [
     { code:"de", name:"Deutsch", flag:"🇩🇪", greeting:"Hallo! Ich bin Priya, Ihre KI-Kellnerin. Wie kann ich Ihnen helfen?" },
     { code:"en", name:"English", flag:"🇬🇧", greeting:"Hello! I'm Priya, your AI waitress. How can I help you?" },
@@ -11861,6 +11929,17 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
 
   const [lang, setLang] = React.useState(function(){ try{ var k=localStorage.getItem('eatdesi_kiosk_lang'); if(k){ localStorage.removeItem('eatdesi_kiosk_lang'); return k; } }catch(e){} return "de"; });
   const [selTable, setSelTable] = React.useState(1);
+  /* ═══ v337: BETRIEBSMODUS ═══
+     "tisch" = wie bisher, die Bestellung landet auf einem Tisch.
+     "takeaway" = Priya fragt zuerst Lieferung oder Abholung und legt am
+     Ende eine Takeaway-Bestellung an. */
+  const [modus, setModus] = React.useState("tisch");
+  const [taTyp, setTaTyp] = React.useState(null);         // "abholung" | "lieferung"
+  const [taKunde, setTaKunde] = React.useState(null);     // {name, phone, street, plz, city}
+  const taTypRef = React.useRef(null);
+  const taKundeRef = React.useRef(null);
+  React.useEffect(() => { taTypRef.current = taTyp; }, [taTyp]);
+  React.useEffect(() => { taKundeRef.current = taKunde; }, [taKunde]);
   const [msgs, setMsgs] = React.useState([]);
   const [input, setInput] = React.useState("");
   const [loading, setLoading] = React.useState(false);
@@ -11896,12 +11975,62 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
     return parts.join(" · ");
   };
   // Neuen Kunden direkt aus dem Gespräch anlegen/aktualisieren
-  const registerCustomer = (name, phone) => {
+  /* v338: Reservierung aus dem Gespraech. Datum und Uhrzeit werden
+     geprueft, BEVOR etwas gespeichert wird - eine Reservierung fuer
+     gestern oder ohne Uhrzeit ist schlimmer als gar keine, weil sich
+     niemand mehr darum kuemmert. Rueckgabe: Hinweistext oder null. */
+  const belksReservierungAnlegen = (r) => {
+    if (typeof onReservierung !== "function") return "\u26a0\uFE0F Reservierungen sind in dieser Ansicht nicht verf\u00fcgbar.";
+    var name = String((r && r.name) || "").trim();
+    var datum = String((r && r.date) || "").trim();
+    var zeit  = String((r && r.time) || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(datum)) return "\u26a0\uFE0F Reservierung nicht gespeichert: Datum unklar.";
+    if (!/^\d{1,2}:\d{2}$/.test(zeit))      return "\u26a0\uFE0F Reservierung nicht gespeichert: Uhrzeit unklar.";
+    if (zeit.length === 4) zeit = "0" + zeit;
+    if (!name) return "\u26a0\uFE0F Reservierung nicht gespeichert: Name fehlt.";
+    var heute = new Date(); heute.setHours(0,0,0,0);
+    var d = new Date(datum + "T00:00:00");
+    if (isNaN(d.getTime())) return "\u26a0\uFE0F Reservierung nicht gespeichert: Datum ung\u00fcltig.";
+    if (d < heute) return "\u26a0\uFE0F Reservierung nicht gespeichert: " + datum + " liegt in der Vergangenheit.";
+    var personen = parseInt(r && r.persons, 10);
+    if (!(personen > 0)) personen = 2;
+    try {
+      onReservierung({
+        id: Date.now(), date: datum, time: zeit, name: name,
+        phone: String((r && r.phone) || "").trim(),
+        persons: personen, tableId: "",
+        note: String((r && r.note) || "").trim() + (r && r.note ? " \u00b7 " : "") + "per KI-Kellnerin"
+      });
+    } catch(e) { return "\u26a0\uFE0F Reservierung konnte nicht gespeichert werden: " + (e && e.message ? e.message : e); }
+    return "\uD83D\uDCC5 Reservierung gespeichert: " + datum + " um " + zeit + " \u00b7 " + personen + " Personen \u00b7 " + name;
+  };
+
+  const registerCustomer = (name, phone, adr) => {
     if (!phone) return null;
+    var a = adr || {};
     var existing = findCustomer(phone);
-    if (existing) { setAiCustomer(existing); return existing; }
+    if (existing) {
+      /* v337: Bei einer Lieferung kann sich die Adresse geaendert haben.
+         Nur ergaenzen, niemals eine vorhandene Angabe mit Leer ueberschreiben -
+         genau daran sind schon einmal Kundendaten verloren gegangen. */
+      var erg = {};
+      if (a.street && a.street !== existing.street) erg.street = a.street;
+      if (a.plz    && a.plz    !== existing.plz)    erg.plz    = a.plz;
+      if (a.city   && a.city   !== existing.city)   erg.city   = a.city;
+      if (name && !existing.name) erg.name = name;
+      var zusammen = Object.keys(erg).length ? Object.assign({}, existing, erg) : existing;
+      if (Object.keys(erg).length && typeof setCustomers === "function") {
+        setCustomers(function(prev){ return (prev||[]).map(function(c){
+          return (c.kundenNr===existing.kundenNr || c.phone===existing.phone) ? zusammen : c;
+        }); });
+      }
+      setAiCustomer(zusammen);
+      return zusammen;
+    }
     var kundenNr = phone;
-    var neu = { name: name||"Gast", phone: phone, kundenNr: kundenNr, points: 0, visits: 0, since: new Date().toISOString(), pointsHistory: [] };
+    var neu = { name: name||"Gast", phone: phone, kundenNr: kundenNr, points: 0, visits: 0,
+                since: new Date().toISOString(), pointsHistory: [],
+                street: a.street||null, plz: a.plz||null, city: a.city||null };
     if (typeof setCustomers === "function") {
       setCustomers(function(prev){ return [...(prev||[]), neu]; });
     }
@@ -11973,13 +12102,74 @@ BESTÄTIGUNG (SEHR WICHTIG — immer so machen):
 - Wenn der Gast etwas KORRIGIEREN will: erst die Korrektur erledigen (Artikel ändern/entfernen — nutze wieder {"order":...} oder sag welcher Artikel raus soll mit {"remove":"Artikelname"}), dann NOCHMAL vorlesen und erneut nach Bestätigung fragen. NICHT bestätigen bevor der Gast wirklich zufrieden ist.
 - Sende {"confirm":true} NUR nach echter Zustimmung.
 
+${modus === "takeaway" ? `
+TAKEAWAY (SEHR WICHTIG — dieser Ablauf gilt jetzt):
+- Der Gast steht NICHT am Tisch. Frage ZUERST, noch vor allem anderen:
+  "Moechten Sie abholen oder sollen wir liefern?"
+- Sobald es feststeht, haenge diesen versteckten Block an:
+  {"typ":"abholung"}  oder  {"typ":"lieferung"}
+
+- ABHOLUNG: keine Adresse noetig. Frage nur kurz nach dem Namen fuer die
+  Abholung, dann beginne SOFORT mit der Bestellaufnahme.
+  Namen melden mit: {"kunde":{"name":"NAME"}}
+
+- LIEFERUNG: frage nacheinander (immer nur EINE Frage auf einmal):
+  1. "Wie ist Ihr Name?"
+  2. "Ihre Handynummer?"
+  3. "Und die Lieferadresse - Strasse und Hausnummer?"
+  4. "Postleitzahl und Ort?"
+  Danach haenge an:
+  {"kunde":{"name":"NAME","phone":"NUMMER","street":"STRASSE NR","plz":"PLZ","city":"ORT"}}
+  Und sage dem Gast GENAU DAS, wenn er neu ist:
+  "Ihre Handynummer ist ab jetzt Ihre Kundennummer bei uns. Beim naechsten
+   Mal nennen Sie mir einfach die Nummer, dann geht es sofort los."
+  Erst danach beginnt die Bestellaufnahme.
+
+- STAMMKUNDE: Nennt der Gast am Anfang eine Kundennummer oder Handynummer,
+  melde sie sofort mit {"lookup":"NUMMER"} und frage NICHT nochmal nach
+  Name und Adresse. Bei Lieferung bestaetige nur kurz die gespeicherte
+  Adresse ("Liefern wir wieder nach ...?") und gehe dann direkt in die
+  Bestellaufnahme.
+${taTyp ? `\nDer Gast hat sich bereits entschieden: ${taTyp === "lieferung" ? "LIEFERUNG" : "ABHOLUNG"}. Frage das nicht noch einmal.` : ""}${taKunde ? `\nBereits erfasst: ${taKunde.name||""} ${taKunde.phone||""} ${[taKunde.street,taKunde.plz,taKunde.city].filter(Boolean).join(" ")}. Frage diese Angaben nicht noch einmal ab.` : ""}
+` : ""}
+ALLGEMEINE FRAGEN (am Telefon kommen die zuerst):
+- Beantworte Fragen zu Haus und Karte freundlich und KURZ.
+${_oeff ? `- \u00d6ffnungszeiten: ${_oeff}` : "- \u00d6ffnungszeiten sind hier nicht hinterlegt: sage das ehrlich und biete an, dass ein Kollege zur\u00fcckruft."}
+${_adr ? `- Adresse: ${_adr}` : ""}
+${_tel ? `- Telefon: ${_tel}` : ""}
+- Zu Gerichten: Preis, vegetarisch/vegan, Sch\u00e4rfe und Zutaten stehen in der Karte unten. Antworte NUR daraus.
+- WICHTIG: Was du nicht sicher weisst, erfindest du NICHT. Sage dann:
+  "Das kann ich Ihnen nicht sicher sagen \u2013 ein Kollege ruft Sie gleich zur\u00fcck."
+  Das gilt besonders bei Allergien: verspreche NIE, dass etwas allergenfrei ist.
+
+TISCH RESERVIEREN:
+- Heute ist ${new Date().toLocaleDateString("de-DE",{weekday:"long",day:"2-digit",month:"2-digit",year:"numeric"})} (${new Date().toISOString().slice(0,10)}).
+- Will jemand einen Tisch reservieren, frage nacheinander (immer nur EINE Frage):
+  1. "F\u00fcr wann \u2013 welcher Tag?"   2. "Um wie viel Uhr?"
+  3. "F\u00fcr wie viele Personen?"        4. "Auf welchen Namen?"
+  5. "Und eine Telefonnummer f\u00fcr den Fall der F\u00e4lle?"
+- Rechne "morgen", "Samstag" usw. selbst in ein Datum um.
+- Dann haenge diesen versteckten Block an:
+  {"reservierung":{"name":"NAME","phone":"NUMMER","persons":4,"date":"JJJJ-MM-TT","time":"HH:MM","note":"z.B. Geburtstag"}}
+- Sage danach kurz zur\u00fcck, was du notiert hast (Tag, Uhrzeit, Personen, Name).
+- Einen bestimmten Tisch sagst du NICHT zu \u2013 das entscheidet der Betrieb.
+
 Aktuelle Speisekarte:
 ${menuContext}
 
 Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(", ") : "noch nichts"}${_custInfo}`;
 
   const startSession = () => {
-    const greeting = curLang.greeting;
+    /* v337: Im Takeaway ist die erste Frage eine andere - der Gast steht
+       nicht am Tisch, sondern will abholen oder beliefert werden. */
+    const greeting = modus === "takeaway"
+      ? (curLang.code === "de" || !curLang.code
+          ? "Hallo! Ich bin Priya vom " + ((typeof tenantDisplayName==='function')?tenantDisplayName():'Restaurant')
+            + ". M\u00f6chten Sie abholen oder sollen wir liefern?"
+          : curLang.greeting)
+      : curLang.greeting;
+    setTaTyp(null);
+    setTaKunde(null);
     setMsgs([{role:"assistant", text: greeting}]);
     setOrder([]);
     setStarted(true);
@@ -12170,6 +12360,30 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
         if (rp.register && rp.register.phone) registerCustomer(rp.register.name, rp.register.phone);
       } catch(e) {}
     }
+    // v337: TYP (Lieferung oder Abholung)
+    var tm = raw.match(/\{"typ":\s*"(abholung|lieferung)"\}/i);
+    if (tm) setTaTyp(tm[1].toLowerCase());
+    // v337: KUNDE (Name, Handy, Adresse aus dem Gespraech)
+    var km = raw.match(/\{"kunde":\s*\{[\s\S]*?\}\s*\}/);
+    if (km) {
+      try {
+        var kp = JSON.parse(km[0]).kunde || {};
+        setTaKunde(function(prev){ return Object.assign({}, prev || {}, kp); });
+        /* Nur mit Handynummer wird daraus ein Kunde - ohne Nummer gibt es
+           keine Kundennummer, und ein Datensatz ohne Nummer waere spaeter
+           nicht wiederzufinden. */
+        if (kp.phone) registerCustomer(kp.name, kp.phone, kp);
+      } catch(e) { console.warn("Kundendaten aus dem Gespraech:", e); }
+    }
+    // v338: RESERVIERUNG
+    var resm = raw.match(/\{"reservierung":\s*\{[\s\S]*?\}\s*\}/);
+    if (resm) {
+      try {
+        var rr = JSON.parse(resm[0]).reservierung || {};
+        var meldung = belksReservierungAnlegen(rr);
+        if (meldung) setMsgs(function(p){ return [...p, {role:"assistant", text: meldung}]; });
+      } catch(e) { console.warn("Reservierung aus dem Gespraech:", e); }
+    }
     // REMOVE (Artikel aus Bestellung entfernen)
     var rem = raw.match(/\{"remove":\s*"([^"]+)"\}/);
     if (rem) {
@@ -12179,7 +12393,7 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
     // CONFIRM (Gast hat bestätigt → an Küche/Bar senden + Bon drucken)
     var cm = raw.match(/\{"confirm":\s*true\}/);
     if (cm) {
-      setTimeout(function(){ sendToTable(); }, 300);
+      setTimeout(function(){ if (modus === "takeaway") sendToTakeaway(); else sendToTable(); }, 300);
     }
     // Alle versteckten Blöcke aus dem Text entfernen
     text = text
@@ -12187,6 +12401,9 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
       .replace(/\{"lookup":\s*"[^"]*"\}/g,"")
       .replace(/\{"register":\s*\{[\s\S]*?\}\s*\}/g,"")
       .replace(/\{"remove":\s*"[^"]*"\}/g,"")
+      .replace(/\{"typ":\s*"[^"]*"\}/gi,"")
+      .replace(/\{"kunde":\s*\{[\s\S]*?\}\s*\}/g,"")
+      .replace(/\{"reservierung":\s*\{[\s\S]*?\}\s*\}/g,"")
       .replace(/\{"confirm":\s*true\}/g,"")
       .trim();
     return text;
@@ -12304,10 +12521,72 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
     setOrder([]);
   };
 
+  /* ═══ v337: BESTELLUNG ALS TAKEAWAY IN DIE KASSE ═══
+     Legt eine echte Takeaway-Bestellung an - dieselbe Form, die auch der
+     Kellner von Hand erzeugt. Damit taucht sie im Takeaway-Bereich, in der
+     Kueche und beim Fahrer auf, ohne Sonderweg. */
+  const sendToTakeaway = () => {
+    if (order.length === 0) return;
+    if (typeof onTakeawayAnlegen !== "function") {
+      setMsgs(p=>[...p,{role:"assistant",text:"\u26A0\uFE0F Diese Ansicht kann keine Takeaway-Bestellung anlegen (alte Version?)."}]);
+      return;
+    }
+    const posItems = order.map((o,i) => {
+      const menuItem = Object.values(menuData||MENU).flat().find(m=>m.name===o.name) || {id:9000+i,nr:"AI",name:o.name,price:o.price||0};
+      return {...menuItem, qty:o.qty, finalPrice:o.price||menuItem.price, _key:`ai_ta_${menuItem.id}_${i}_${Date.now()}`, note:"AI Bestellung", kitchenNote:""};
+    });
+    const k = taKundeRef.current || {};
+    const istLieferung = taTypRef.current === "lieferung";
+    /* Bei Lieferung ohne Adresse waere die Bestellung fuer den Fahrer
+       wertlos - dann lieber nachfragen als etwas Halbes anlegen. */
+    if (istLieferung && !(k.street || (aiCustomer && aiCustomer.street))) {
+      const nachfrage = "Mir fehlt noch die Lieferadresse. Wie lautet Stra\u00dfe und Hausnummer?";
+      setMsgs(p=>[...p,{role:"assistant",text:nachfrage}]);
+      speak(nachfrage);
+      return;
+    }
+    const daten = {
+      items: posItems,
+      lieferung: istLieferung,
+      name:   k.name   || (aiCustomer && aiCustomer.name)   || null,
+      phone:  k.phone  || (aiCustomer && aiCustomer.phone)  || null,
+      street: istLieferung ? (k.street || (aiCustomer && aiCustomer.street) || null) : null,
+      plz:    istLieferung ? (k.plz    || (aiCustomer && aiCustomer.plz)    || null) : null,
+      city:   istLieferung ? (k.city   || (aiCustomer && aiCustomer.city)   || null) : null
+    };
+    let taId = null;
+    try { taId = onTakeawayAnlegen(daten); }
+    catch(e) {
+      console.warn("Takeaway aus dem Gespraech:", e);
+      setMsgs(p=>[...p,{role:"assistant",text:"\u26A0\uFE0F Die Bestellung konnte nicht angelegt werden: " + (e && e.message ? e.message : e)}]);
+      return;
+    }
+    _printPriyaBons(posItems);
+    if (aiCustomer && typeof setCustomers === "function") {
+      var names = order.map(function(o){ return o.qty+"x "+o.name; });
+      setCustomers(function(prev){ return (prev||[]).map(function(c){
+        return (c.kundenNr===aiCustomer.kundenNr||c.phone===aiCustomer.phone) ? {...c, lastItems:names} : c;
+      }); });
+    }
+    const art = istLieferung ? "Lieferung" : "Abholung";
+    setMsgs(p=>[...p,{role:"assistant",text:`\u2705 ${art} #${taId} an K\u00fcche gesendet und in der Kasse angelegt.`}]);
+    speak(istLieferung
+      ? "Perfekt, Ihre Bestellung geht raus. Der Fahrer kommt zu Ihnen. Vielen Dank!"
+      : "Perfekt, Ihre Bestellung geht in die K\u00fcche. Sie k\u00f6nnen sie gleich abholen. Vielen Dank!");
+    setOrder([]);
+    setTaTyp(null);
+    setTaKunde(null);
+  };
+
   if (!started) return /*#__PURE__*/React.createElement("div", { style:{ height:"100vh", background:"linear-gradient(135deg,#1b5e20,#2e7d32)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24 } },
     /*#__PURE__*/React.createElement("div", { style:{ fontSize:80, marginBottom:8 } }, "👩🍳"),
     /*#__PURE__*/React.createElement("div", { style:{ fontWeight:900, fontSize:28, color:"#fff", marginBottom:4 } }, "Priya"),
     /*#__PURE__*/React.createElement("div", { style:{ color:"#a5d6a7", fontSize:14, marginBottom:24 } }, "KI-Kellnerin · eatDeSi"),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => { try { alert(belksSprachPruefung()); } catch(e) { alert("Pr\u00fcfung fehlgeschlagen: " + e); } },
+      style:{ background:"rgba(255,255,255,0.15)", border:"1.5px dashed rgba(255,255,255,.5)", color:"#fff",
+              borderRadius:10, padding:"8px 14px", marginBottom:14, cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:700 }
+    }, "\uD83D\uDD0E Mikrofon & Plugins pr\u00fcfen"),
     !geminiKey && /*#__PURE__*/React.createElement("div", { style:{ background:"#ffebee", borderRadius:10, padding:"10px 16px", marginBottom:20, fontSize:13, color:"#c62828", textAlign:"center" } },
       "⚠️ API Key fehlt — Drucker Einstellungen"
     ),
@@ -12323,8 +12602,21 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
         ))
       )
     ),
+    // v337: Betriebsmodus
+    /*#__PURE__*/React.createElement("div", { style:{ background:"rgba(255,255,255,0.15)", borderRadius:14, padding:14, width:"100%", maxWidth:380, marginBottom:14 } },
+      /*#__PURE__*/React.createElement("div", { style:{ color:"#fff", fontSize:12, fontWeight:700, marginBottom:10, textAlign:"center" } }, "Wof\u00fcr nimmt Priya auf?"),
+      /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 } },
+        [["tisch","\uD83E\uDE91 Tisch"],["takeaway","\uD83E\uDD61 Takeaway"]].map(([m,l]) =>
+          /*#__PURE__*/React.createElement("button", { key:m, onClick:()=>setModus(m),
+            style:{ padding:"12px 6px", borderRadius:10, border:`2px solid ${modus===m?"#fff":"transparent"}`,
+                    background: modus===m?"rgba(255,255,255,0.32)":"rgba(255,255,255,0.12)",
+                    color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 } }, l))
+      ),
+      modus === "takeaway" && /*#__PURE__*/React.createElement("div", { style:{ color:"#c8e6c9", fontSize:11, marginTop:8, lineHeight:1.45, textAlign:"center" } },
+        "Priya fragt zuerst Lieferung oder Abholung. Bei Lieferung nimmt sie Name, Handynummer und Adresse auf und legt den Gast als Kunden an.")
+    ),
     // Table selector
-    /*#__PURE__*/React.createElement("div", { style:{ background:"rgba(255,255,255,0.15)", borderRadius:14, padding:14, width:"100%", maxWidth:380, marginBottom:24 } },
+    modus === "tisch" && /*#__PURE__*/React.createElement("div", { style:{ background:"rgba(255,255,255,0.15)", borderRadius:14, padding:14, width:"100%", maxWidth:380, marginBottom:24 } },
       /*#__PURE__*/React.createElement("div", { style:{ color:"#fff", fontSize:12, fontWeight:700, marginBottom:10, textAlign:"center" } }, "🪑 Tisch wählen"),
       /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:6 } },
         (floorTables.length>0?floorTables:allTables).slice(0,18).map(t => /*#__PURE__*/React.createElement("button", { key:t, onClick:()=>setSelTable(t),
@@ -14620,6 +14912,17 @@ function DayEndView({
   });
   const filtered = belksUmsatzBuchungen(imZeitraum);
   const gutList  = belksGutscheinBuchungen(imZeitraum);
+  /* ═══ v336: STORNIERTE BELEGE GEHOEREN IN DEN ABSCHLUSS ═══
+     imZeitraum wirft sie oben heraus (richtig - sie sind kein Umsatz), im
+     Bericht fehlten sie danach vollstaendig. Fuer das Finanzamt ist gerade
+     die Stornierung der interessante Vorgang: sie muss belegt sein. */
+  const stornos = completedOrders.filter(o => {
+    if (!o || !o.storniert) return false;
+    if (isPendingOnline(o)) return false;
+    const d = new Date(o.time);
+    return d >= from && d <= to;
+  });
+  const stornoSumme = Math.round(stornos.reduce((s, o) => s + (Number(o.total) || 0), 0) * 100) / 100;
   const gutVerk  = belksSummeGutschein(imZeitraum);
   const gutEin   = belksSummeGutscheinEingeloest(filtered);   // v328
   const filteredExp = expenses.filter(e => {
@@ -14648,6 +14951,43 @@ function DayEndView({
   });
   const activeChannels = CHANNEL_ORDER.filter(ch => channelStats[ch] && channelStats[ch].count > 0);
   const PERIODS = [["heute", "Heute"], ["gestern", "Gestern"], ["woche", "Woche"], ["monat", "Monat"], ["letztermonat", "Letzter Monat"], ["quartal", "Quartal"], ["jahr", "Jahr"], ["custom", "Benutzerdefiniert"]];
+  /* v336: Tagesabschluss auf dem Thermodrucker - gleiche Klassen und
+     derselbe Weg wie jeder andere Beleg (Bluetooth / WLAN / Browser). */
+  const druckeBerichtBon = () => {
+    try {
+      let L = "";
+      const zeile = (l, v) => { L += '<div class="row"><span>' + l + '</span><span>' + v + '</span></div>'; };
+      L += '<div class="center">' + label + '</div>';
+      L += '<div class="line"></div>';
+      zeile("Bestellungen", String(filtered.length));
+      zeile("Umsatz Brutto", fmt(rev));
+      zeile("Umsatz Netto", fmt(netto));
+      if (tax7 > 0)  zeile("MwSt. 7%", fmt(tax7));
+      if (tax19 > 0) zeile("MwSt. 19%", fmt(tax19));
+      L += '<div class="line"></div>';
+      zeile("Bar", fmt(bar));
+      zeile("Karte", fmt(karte));
+      if (trinkgeldTotal > 0) zeile("Trinkgeld", fmt(trinkgeldTotal));
+      if (gutVerk > 0) zeile("Gutschein-Verkauf", fmt(gutVerk));
+      if (gutEin > 0)  zeile("Mit Gutschein bez.", fmt(gutEin));
+      if (exp > 0)     zeile("Ausgaben", "-" + fmt(exp));
+      if (stornos.length > 0) {
+        L += '<div class="line"></div>';
+        L += '<div class="center bold">STORNIERTE BELEGE</div>';
+        stornos.forEach(o => {
+          zeile((o.bonNr || "?") + " " + fmtT(new Date(o.time)), fmt(o.total || 0));
+        });
+        zeile("Summe Storno (" + stornos.length + ")", fmt(stornoSumme));
+      }
+      L += '<div class="line"></div>';
+      L += '<div class="row bold"><span>Einnahmen \u2212 Ausgaben</span><span>' + fmt(rev - exp) + '</span></div>';
+      printBon("TAGESABSCHLUSS", L, label, "-", new Date(), null, printerSettings, null, 'kunde');
+    } catch (e) {
+      console.warn("Bericht-Bondruck:", e);
+      alert("\u26A0\uFE0F Bericht konnte nicht gedruckt werden: " + (e && e.message ? e.message : e));
+    }
+  };
+
   const printBericht = (a4 = false) => {
     const rName = printerSettings?.name || "eatDeSi";
     const rAddr = printerSettings?.address || "";
@@ -14713,7 +15053,12 @@ function DayEndView({
   <div class="kpi"><div class="kpi-val" style="color:#c62828">-${fmt(exp)}</div><div class="kpi-lbl">💸 Ausgaben</div></div>
   ${gutVerk > 0 ? `<div class="kpi" style="border:2px solid #D4A017;background:#fffdf2"><div class="kpi-val" style="color:#8a6d00">${fmt(gutVerk)}</div><div class="kpi-lbl">🎟️ Gutschein-Verkauf</div></div>` : ""}
   ${gutEin > 0 ? `<div class="kpi" style="border:2px solid #D4A017;background:#fffdf2"><div class="kpi-val" style="color:#8a6d00">${fmt(gutEin)}</div><div class="kpi-lbl">🎟️ Mit Gutschein bezahlt</div></div>` : ""}
+  ${stornos.length > 0 ? `<div class="kpi" style="border:2px solid #ef5350;background:#fff5f5"><div class="kpi-val" style="color:#c62828">${fmt(stornoSumme)}</div><div class="kpi-lbl">🚫 Storniert (${stornos.length})</div></div>` : ""}
 </div>
+${stornos.length > 0 ? `<h2>🚫 Stornierte Belege</h2>
+<table><tr><th>Zeit</th><th>Bon-Nr</th><th>Tisch</th><th>Von</th><th style="text-align:right">Betrag</th></tr>
+${stornos.map(o => `<tr><td>${fmtT(new Date(o.time))}</td><td>${o.bonNr || "—"}</td><td>${o.tableId ? ("Tisch " + o.tableId) : (o.gutscheinVerkauf ? "Gutschein" : "Takeaway")}</td><td>${o.stornoVon || "—"}</td><td style="text-align:right">${fmt(o.total || 0)}</td></tr>`).join("")}
+<tr class="total-row"><td colspan="4">Summe (${stornos.length} Belege, nicht im Umsatz)</td><td style="text-align:right">${fmt(stornoSumme)}</td></tr></table>` : ""}
 ${gutVerk > 0 ? `<div class="warn">🎟️ Gutschein-Verkauf ${fmt(gutVerk)} (${gutList.length} St\u00fcck) ist im Kassenbestand enthalten, aber KEIN Umsatz und ohne Umsatzsteuer. Mehrzweckgutscheine werden erst bei der Einl\u00f6sung versteuert (\u00a7 3 Abs. 15 UStG).</div>` : ""}
 
 <div class="highlight">
@@ -14783,7 +15128,22 @@ ${filtered.map((o, i) => {
   Dieser Bericht ist für LexOffice und das Finanzamt geeignet. Alle Angaben ohne Gewähr.
 </div>
 </body></html>`;
-    printHtml(html);
+    /* ═══ v336: DER KNOPF MUSS AUCH IN DER APP ETWAS TUN ═══
+       printHtml() ruft window.print() in einem iframe - im Browser oeffnet
+       das den Druckdialog, in der Android-App passiert nichts. Deshalb:
+       in der App wird der Bericht als Datei abgelegt (derselbe Weg wie der
+       Tagesexport), im Browser bleibt es beim Druckdialog. */
+    if (belksDateiWeg() === 'browser') { printHtml(html); return; }
+    const dateiName = "Bericht_" + new Date().toISOString().slice(0,10) + ".html";
+    const weg = belksDateiSpeichern(dateiName, html, function(fehlerText, pfad){
+      if (fehlerText) { alert(fehlerText); return; }
+      alert("\u2705 Bericht gespeichert:\n" + (pfad || dateiName)
+          + "\n\nZum Drucken die Datei \u00f6ffnen (Dateien-App) und dort \u00fcber das Men\u00fc drucken oder teilen.");
+    });
+    if (weg === 'app_ohne_plugin') {
+      alert("\u26A0\uFE0F Diese App kann keine Datei ablegen und keinen Druckdialog \u00f6ffnen.\n\n"
+          + "Bitte den Bericht \u00fcber \uD83D\uDDA8\uFE0F Bon-Drucker ausgeben oder die Kasse in Chrome \u00f6ffnen.");
+    }
 };
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -14933,6 +15293,9 @@ ${filtered.map((o, i) => {
   }, {
     l: "🎟️ Mit Gutschein bezahlt",
     v: fmt(gutEin)
+  }, {
+    l: "🚫 Storniert (" + stornos.length + ")",
+    v: fmt(stornoSumme)
   }].map(s => /*#__PURE__*/React.createElement("div", {
     key: s.l,
     style: {
@@ -15085,7 +15448,9 @@ ${filtered.map((o, i) => {
       marginBottom: 14
     }
   }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => printBericht(false),
+    /* v336: der Bon-Drucker bekommt jetzt echte Bon-Zeilen ueber printBon()
+       statt eines HTML-Druckdialogs, den es in der App nicht gibt. */
+    onClick: () => druckeBerichtBon(),
     style: {
       flex: 1,
       padding: 12,
@@ -22770,7 +23135,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v335"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v338"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -23636,6 +24001,28 @@ function App() {
     setView("order");
     setMenuOpen(false);
   };
+  /* v337: Die KI-Kellnerin legt eine Takeaway-Bestellung an - dieselbe
+     Form wie newTakeaway(), aber MIT Artikeln und ohne die Ansicht zu
+     wechseln (Priya spricht ja gerade mit dem Gast weiter). */
+  const belksKiTakeaway = (daten) => {
+    if (anmeldungTot) throw new Error("Keine Verbindung zur Zentrale \u2013 neue Bestellungen sind gesperrt.");
+    const d = daten || {};
+    const id = taRef.current++;
+    setTakeaway(t => [...t, {
+      id,
+      items: d.items || [],
+      time: new Date(),
+      done: false,
+      customerName:   d.name   || null,
+      customerPhone:  d.phone  || null,
+      customerStreet: d.lieferung ? (d.street || null) : null,
+      customerPlz:    d.lieferung ? (d.plz    || null) : null,
+      customerCity:   d.lieferung ? (d.city   || null) : null,
+      source: "ki"
+    }]);
+    return id;
+  };
+
   const [showTaCustomerSearch, setShowTaCustomerSearch] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const updateOrder = (tid, items) => {
@@ -25347,7 +25734,9 @@ function App() {
     menuData: menuData,
     customers: customers,
     setCustomers: setCustomers,
-    loyaltySettings: loyaltySettings
+    loyaltySettings: loyaltySettings,
+    onTakeawayAnlegen: belksKiTakeaway,
+    onReservierung: r => setReservations(p => [...p, r])
   }), view === "online_orders" && /*#__PURE__*/React.createElement(OnlineOrdersLive, {
     pendingOrders: pendingOnlineOrders,
     onAccept: (order, prepMin) => {
