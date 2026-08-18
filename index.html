@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v342</title>
+<title>eatDeSi POS v345</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9144,6 +9144,34 @@ function htmlToBlocks(html, bonType){
   blocks.push({type:'feed', n:3});
   return blocks;
 }
+/* ═══ v344: BON FUER KUECHE ODER BAR ═══
+   Dieselben Zeilen wie in der Bon-Vorschau, aber von ueberall aufrufbar -
+   der Speichern-Knopf sitzt in der Fussleiste, nicht in der Vorschau.
+   Laeuft ueber printBon(), also ueber den geprueften Weg: Bluetooth,
+   WLAN oder Browser, mit den Einstellungen des Bon-Editors. */
+function belksStationsBon(titel, liste, label, printerCfg){
+  try {
+    if (!liste || !liste.length) return;
+    var nachKat = {};
+    liste.forEach(function(i){
+      var c = (i && i.cat) || "Sonstige";
+      if (!nachKat[c]) nachKat[c] = [];
+      nachKat[c].push(i);
+    });
+    var L = "";
+    Object.keys(nachKat).forEach(function(cat){
+      L += '<div class="center bold">- ' + cat + ' -</div>';
+      nachKat[cat].forEach(function(i){
+        L += '<div class="row bold"><span>' + (i.qty||1) + 'x ' + (i.nr ? i.nr + '. ' : '') + (i.name||'') + '</span><span></span></div>';
+        if (i.note)        L += '<div class="row"><span>  ' + i.note + '</span><span></span></div>';
+        if (i.kitchenNote) L += '<div class="row"><span>  ' + i.kitchenNote + '</span><span></span></div>';
+      });
+      L += '<div class="blank"></div>';
+    });
+    printBon(titel, L, label, "-", new Date(), null, printerCfg, null, 'kueche');
+  } catch (e) { console.warn("Stations-Bon:", e); }
+}
+
 function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse, bonType) {
   // Bon-Editor Konfiguration lesen (kunde/webshop). Fallback: alles an.
   var _bc = { logo:true, phone:true, qr:true, footer:true, mwst:true, width:80, footerText:null };
@@ -12189,6 +12217,20 @@ TISCH RESERVIEREN:
 - Sage danach kurz zur\u00fcck, was du notiert hast (Tag, Uhrzeit, Personen, Name).
 - Einen bestimmten Tisch sagst du NICHT zu \u2013 das entscheidet der Betrieb.
 
+BESTELLUNG MELDEN (die wichtigste Regel):
+- Melde nach JEDER Aenderung die VOLLSTAENDIGE Bestellung, nicht nur das
+  Neue. Der Block ersetzt den Warenkorb der Kasse eins zu eins:
+  {"order":[{"name":"EXAKTER NAME AUS DER KARTE","qty":2,"price":7.90}]}
+- Beispiel: Der Gast hat 1x Avocado Fries und bestellt 1x Cola dazu.
+  Dann meldest du BEIDE:
+  {"order":[{"name":"Avocado Fries","qty":1,"price":7.90},{"name":"Coca-Cola Zero 0,33l","qty":1,"price":3.50}]}
+- Nimmt der Gast etwas zurueck, laesst du es im Block einfach weg.
+- Der Name muss ZEICHENGENAU aus der Karte stammen. Rate nicht - wenn du
+  unsicher bist, frage nach ("Meinen Sie den Tandoori Mix Grill?").
+- Melde einen Artikel ERST, wenn der Gast ihn wirklich will. Ein Vorschlag
+  von dir ist noch keine Bestellung: erst nach einem klaren Ja.
+- Frage IMMER nur EINE Sache auf einmal.
+
 Aktuelle Speisekarte:
 ${menuContext}
 
@@ -12387,16 +12429,28 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
     var om = raw.match(/\{"order":\s*\[[\s\S]*?\]\}/);
     if (om) {
       try {
+        /* ═══ v343: DIE KI MELDET DEN GANZEN WARENKORB, NICHT NUR ZUWACHS ═══
+           Vorher wurden die Mengen addiert. Fasst die KI die Bestellung
+           noch einmal zusammen - was jedes Sprachmodell irgendwann tut -,
+           stand danach die doppelte Menge im Korb: der Gast sagte "einmal
+           Avocado Fries", die Kueche bekam zwei.
+           Jetzt ist die Meldung der KI der Stand: sie ersetzt den Korb.
+           Damit kann der Gast auch etwas zuruecknehmen.
+           Ausserdem wurde vorher mit ex.qty += ... das bisherige
+           Zustandsobjekt veraendert. React darf denselben Schritt
+           wiederholen - dann zaehlte es ein zweites Mal hoch. */
         var parsed = JSON.parse(om[0]);
-        if (parsed.order && parsed.order.length) {
-          setOrder(function(prev){
-            var updated = [...prev];
-            parsed.order.forEach(function(ni){
-              var ex = updated.find(function(x){return x.name===ni.name;});
-              if (ex) ex.qty += ni.qty; else updated.push({...ni});
-            });
-            return updated;
+        if (parsed.order && Array.isArray(parsed.order)) {
+          var neu = [];
+          parsed.order.forEach(function(ni){
+            if (!ni || !ni.name) return;
+            var menge = parseInt(ni.qty, 10);
+            if (!(menge > 0)) menge = 1;
+            var schon = neu.find(function(x){ return x.name === ni.name; });
+            if (schon) schon.qty += menge;                 // KI nennt denselben Artikel zweimal
+            else neu.push({ name: ni.name, qty: menge, price: ni.price });
           });
+          setOrder(neu);
         }
       } catch(e) {}
     }
@@ -12476,9 +12530,14 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
         role: m.role === "assistant" ? "model" : "user",
         parts: [{text: m.text}]
       }));
-      const aiModel = (printerSettings && printerSettings.geminiModel) || 'gemini-2.5-flash-lite';
+      /* v343: Voreingestellt war das KLEINSTE Modell (flash-lite). Es
+         haelt sich bei einem so langen Auftrag - Karte, Takeaway-Ablauf,
+         allgemeine Fragen, Reservierung - schlechter an die Regeln, und
+         genau das sah nach "nicht schlau genug" aus. Voreinstellung ist
+         jetzt gemini-2.5-flash; lite bleibt Ausweichmodell. */
+      const aiModel = (printerSettings && printerSettings.geminiModel) || 'gemini-2.5-flash';
       // v157: robuster KI-Aufruf — 3 Versuche + Modell-Fallback bei Überlastung (429/503/"high demand")
-      const _alt = (aiModel === 'gemini-2.0-flash') ? 'gemini-2.5-flash-lite' : 'gemini-2.0-flash';
+      const _alt = (aiModel === 'gemini-2.5-flash-lite') ? 'gemini-2.0-flash' : 'gemini-2.5-flash-lite';
       const _models = [aiModel, _alt];
       let data = null, _lastErr = "", _waited = false;
       outer:
@@ -12660,7 +12719,7 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
     /*#__PURE__*/React.createElement("button", {
       onClick: async () => {
         if (!geminiKey) { alert("\u26A0\uFE0F Kein Gemini API Key hinterlegt.\n\n\u2630 \u2192 Drucker Einstellungen \u2192 AI Kellnerin.\nKostenlos holen: aistudio.google.com/apikey"); return; }
-        const modell = (printerSettings && printerSettings.geminiModel) || 'gemini-2.5-flash-lite';
+        const modell = (printerSettings && printerSettings.geminiModel) || 'gemini-2.5-flash';   // v343
         try {
           const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modell}:generateContent?key=${geminiKey}`, {
             method:"POST", headers:{"Content-Type":"application/json"},
@@ -13785,6 +13844,7 @@ function OrderView({
   order,
   onUpdate,
   onSave,
+  onBestellen,
   onPay,
   onClear,
   optionGroups,
@@ -13870,6 +13930,8 @@ function OrderView({
       addItem({ ...item, cat: findCat(item, catHint) }, item.price, "");
     }
   };
+  /* v344: Der Kellner muss sehen, was noch nicht abgeschickt ist. */
+  const istEntwurf = i => !!(i && i._entwurf);
   const addItem = (item, finalPrice, note) => {
     // Eindeutiger Schluessel: nr + name + note + Preis.
     // (item.id ist bei manchen Artikeln undefined -> wuerde sonst alle zusammenfassen!)
@@ -13884,7 +13946,15 @@ function OrderView({
       note,
       qty: 1,
       _key: key,
-      kitchenNote: ""
+      kitchenNote: "",
+      /* ═══ v344: NEUER ARTIKEL IST ZUERST NUR EIN ENTWURF ═══
+         Vorher stand er sofort in der Kueche - die Kuechen-Ansicht liest
+         direkt aus tableOrders. Damit begann die Produktion beim ersten
+         Tippen, und "Entwurf" war nur ein Wort.
+         Die Marke faellt beim Speichern weg. Artikel OHNE diese Marke
+         gelten als bestellt: so bleiben laufende Tische, Webshop- und
+         KI-Bestellungen nach dem Update sichtbar. */
+      _entwurf: true
     }];
     onUpdate(tableId, next);
     setOptItem(null);
@@ -14407,10 +14477,13 @@ function OrderView({
       fontSize: 14
     }
   }, "Gesamt: ", fmt(total))),
+  /* v345: fruher ein ✕ - das sah nach "Fenster schliessen" aus, direkt
+     neben Speichern und Zahlen. Die Funktion ist unveraendert. */
   onClear && /*#__PURE__*/React.createElement("button", {
     onClick: () => onClear(tableId),
+    title: "Tisch schließen / Entwurf verwerfen",
     style: { padding: "9px 10px", borderRadius: 10, border: "2px solid rgba(255,100,100,.6)", background: "rgba(255,80,80,.15)", color: "#ffcdd2", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13 }
-  }, "✕"),
+  }, "\u2212"),
   /*#__PURE__*/React.createElement("button", {
     onClick: () => onSave(tableId, lieferFee),
     style: {
@@ -14424,20 +14497,29 @@ function OrderView({
       fontWeight: 700,
       fontSize: 11
     }
-  }, order?.saved ? "✓ BON" : "💾 Bon"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => onPay(tableId, items, total, "split", lieferFee),   // v330
+  }, order?.saved ? "✓ BON" : "💾 Bon"),
+  /* ═══ v344: AUS "SPLIT" WIRD "SPEICHERN" ═══
+     Das ist der Moment, in dem aus einem Entwurf eine Bestellung wird:
+     Kueche und Bar bekommen ihre Bons, und der Vorgang geht in die TSE.
+     Getrennt zahlen ist deshalb nicht verschwunden - es steckt in
+     "Zahlen" unter "Getrennt bezahlen".
+     Der Knopf leuchtet, solange etwas Ungespeichertes offen ist. */
+  /*#__PURE__*/React.createElement("button", {
+    onClick: () => onBestellen(tableId),
+    disabled: !(items||[]).some(i => i._entwurf),
     style: {
       padding: "9px 10px",
       borderRadius: 10,
-      border: "2px solid rgba(255,255,255,.6)",
-      background: "rgba(255,255,255,.15)",
+      border: `2px solid ${(items||[]).some(i => i._entwurf) ? "#fff" : "rgba(255,255,255,.35)"}`,
+      background: (items||[]).some(i => i._entwurf) ? "#ff9800" : "transparent",
       color: "#fff",
-      cursor: "pointer",
+      cursor: (items||[]).some(i => i._entwurf) ? "pointer" : "default",
+      opacity: (items||[]).some(i => i._entwurf) ? 1 : 0.5,
       fontFamily: "inherit",
-      fontWeight: 700,
+      fontWeight: 800,
       fontSize: 11
     }
-  }, "\uD83D\uDC65 Split"), /*#__PURE__*/React.createElement("button", {
+  }, (items||[]).some(i => i._entwurf) ? "\uD83D\uDCBE Speichern" : "\u2713 Gesendet"), /*#__PURE__*/React.createElement("button", {
     onClick: () => onPay(tableId, items, total, false, lieferFee),   // v330
     style: {
       padding: "9px 14px",
@@ -14463,13 +14545,14 @@ function KitchenView({
   const all = [...Object.entries(orders).filter(([, o]) => o?.items?.length > 0).map(([id, o]) => ({
     oid: id,
     label: `Tisch ${id}`,
-    items: o.items.filter(i => isFood(i) && !i._kitchenSent),
+    /* v344: Entwuerfe gehoeren nicht in die Kueche - erst nach Speichern. */
+    items: o.items.filter(i => isFood(i) && !i._kitchenSent && !i._entwurf),
     time: o.time || new Date(),
     kitchenDone: o.kitchenDone
   })), ...takeaway.filter(t => t.items?.length > 0 && !t.done).map(t => ({
     oid: `ta_${t.id}`,
     label: belksTaLabel(t),
-    items: t.items.filter(i => isFood(i) && !i._kitchenSent),
+    items: t.items.filter(i => isFood(i) && !i._kitchenSent && !i._entwurf),
     time: t.time,
     kitchenDone: t.kitchenDone
   })), ...(webshop || []).map(o => ({
@@ -14615,13 +14698,14 @@ function BarView({
   const all = [...Object.entries(orders).filter(([, o]) => o?.items?.length > 0).map(([id, o]) => ({
     oid: id,
     label: `Tisch ${id}`,
-    items: o.items.filter(i => istBar(i) && !i._barSent),
+    /* v344: siehe Kueche - Entwuerfe bleiben beim Kellner. */
+    items: o.items.filter(i => istBar(i) && !i._barSent && !i._entwurf),
     time: o.time || new Date(),
     barDone: o.barDone
   })), ...takeaway.filter(t => t.items?.length > 0 && !t.done).map(t => ({
     oid: `ta_${t.id}`,
     label: belksTaLabel(t),
-    items: t.items.filter(i => istBar(i) && !i._barSent),
+    items: t.items.filter(i => istBar(i) && !i._barSent && !i._entwurf),
     time: t.time,
     barDone: t.barDone
   })), ...(webshop || []).map(o => ({
@@ -23275,7 +23359,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v342"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v345"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24204,6 +24288,61 @@ function App() {
       };
     });
   };
+  /* ═══ v344: AUS DEM ENTWURF WIRD EINE BESTELLUNG ═══
+     Genau hier beginnt der Vorgang im Sinne der KassenSichV: ab jetzt
+     wird produziert. Deshalb passiert dreierlei auf einmal - Bons an
+     Kueche und Bar, Entwurfs-Marke weg, Eintrag in die TSE. Faellt eines
+     davon aus, darf der Rest trotzdem durchlaufen: eine Bestellung, die
+     die Kueche nie erreicht, waere der groessere Schaden. */
+  const belksBestellen = async (tid) => {
+    const istTa = String(tid).startsWith("ta_");
+    const taId = istTa ? parseInt(String(tid).replace("ta_", "")) : null;
+    const quelle = istTa ? (takeaway.find(t => t.id === taId) || { items: [] })
+                         : (tableOrders[tid] || { items: [] });
+    const neue = (quelle.items || []).filter(i => i._entwurf);
+    if (!neue.length) return;
+
+    const label = istTa ? belksTaLabel(quelle) : ("Tisch " + tid);
+
+    // 1. Bons an Kueche und Bar - nur die neuen Artikel
+    try {
+      const speisen   = neue.filter(i => !istBar(i));
+      const getraenke = neue.filter(i => istBar(i));
+      if (speisen.length)   belksStationsBon("\uD83C\uDF73 K\u00dcCHE \u2014 SPEISEN", speisen, label, printerSettings);
+      if (getraenke.length) belksStationsBon("\uD83C\uDF7A BAR \u2014 GETR\u00c4NKE", getraenke, label, printerSettings);
+    } catch (e) { console.warn("Bestell-Bons:", e); }
+
+    // 2. TSE - der Vorgang beginnt jetzt, nicht erst bei der Zahlung
+    let _tse = null;
+    try {
+      const summe = neue.reduce((s, i) => s + (i.finalPrice || 0) * (i.qty || 0), 0);
+      _tse = await window.TSE.signOrder({
+        bonNr: "B-" + genNr(), total: Math.round(summe * 100) / 100,
+        payMethod: "Bestellung", items: neue, tableId: istTa ? null : tid
+      });
+    } catch (e) { console.warn("TSE (Bestellung):", e); }
+
+    // 3. Entwurfs-Marke entfernen - ab jetzt sieht die Kueche die Artikel
+    const entmarken = liste => (liste || []).map(i => {
+      if (!i._entwurf) return i;
+      const k = Object.assign({}, i);
+      delete k._entwurf;
+      return k;
+    });
+    if (istTa) setTakeaway(t => t.map(x => x.id === taId ? Object.assign({}, x, {
+      items: entmarken(x.items),
+      tseBestellung: _tse || x.tseBestellung || null
+    }) : x));
+    else setTableOrders(p => {
+      const alt = p[tid];
+      if (!alt) return p;
+      return Object.assign({}, p, { [tid]: Object.assign({}, alt, {
+        items: entmarken(alt.items),
+        tseBestellung: _tse || alt.tseBestellung || null
+      })});
+    });
+  };
+
   const saveOrder = (tid, lieferFee=0) => {
     const bonNr = genNr();
     if (String(tid).startsWith("ta_")) {
@@ -24609,8 +24748,8 @@ function App() {
   };
   /* v295: Der Webshop zaehlt jetzt mit. Eine Zahl am Reiter, die den Webshop
      verschweigt, ist schlimmer als gar keine - der Koch verlaesst sich darauf. */
-  const pendingKitchen = Object.values(tableOrders).filter(o => o?.items?.some(i => !isDrink(i) && !i._kitchenSent)).length + takeaway.filter(t => t.items?.some(i => !isDrink(i) && !i._kitchenSent) && !t.done).length + belksWebshopOffen(completedOrders, "kueche").filter(o => (o.items||[]).some(i => !isDrink(i))).length;
-  const pendingBar = Object.values(tableOrders).filter(o => o?.items?.some(i => isDrink(i) && !i._barSent)).length + takeaway.filter(t => t.items?.some(i => isDrink(i) && !i._barSent) && !t.done).length + belksWebshopOffen(completedOrders, "bar").filter(o => (o.items||[]).some(i => isDrink(i))).length;
+  const pendingKitchen = Object.values(tableOrders).filter(o => o?.items?.some(i => !isDrink(i) && !i._kitchenSent && !i._entwurf)).length + takeaway.filter(t => t.items?.some(i => !isDrink(i) && !i._kitchenSent) && !t.done).length + belksWebshopOffen(completedOrders, "kueche").filter(o => (o.items||[]).some(i => !isDrink(i))).length;
+  const pendingBar = Object.values(tableOrders).filter(o => o?.items?.some(i => isDrink(i) && !i._barSent && !i._entwurf)).length + takeaway.filter(t => t.items?.some(i => isDrink(i) && !i._barSent) && !t.done).length + belksWebshopOffen(completedOrders, "bar").filter(o => (o.items||[]).some(i => isDrink(i))).length;
   const active = Object.values(tableOrders).filter(o => o?.items?.length > 0).length + takeaway.filter(t => t.items?.length > 0 && !t.done).length;
   const MENU_ITEMS = [{
     id: "dashboard",
@@ -25703,6 +25842,7 @@ function App() {
     order: getCurrentOrder(),
     onUpdate: updateOrder,
     onSave: saveOrder,
+    onBestellen: belksBestellen,   // v344
     onPay: startPay,
     onClear: clearTable,
     optionGroups: optionGroups,
