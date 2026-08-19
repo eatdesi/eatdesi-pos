@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v345</title>
+<title>eatDeSi POS v346</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -10240,6 +10240,17 @@ function SplitPersonPay({
    (gesetzt beim Hinzufuegen). Der Rueckfall ist dieselbe Regel, die auch
    beim Zusammenfassen der Bon-Zeilen benutzt wird - so passen beide Wege
    zusammen, falls eine alte Zeile ohne _key im Tisch liegt. */
+/* ═══ v346: IST DIESER TISCH SCHON AN DIE KUECHE GEGANGEN? ═══
+   Ein Tisch gilt als gesendet, sobald es eine TSE-Signatur der Bestellung
+   gibt ODER mindestens ein Artikel keine Entwurfs-Marke mehr traegt.
+   Die zweite Bedingung faengt Tische ab, die vor v344 angelegt wurden -
+   dort gibt es keine Marke, und die Kueche hat sie laengst bekommen. */
+function belksTischGesendet(o){
+  if (!o) return false;
+  if (o.tseBestellung) return true;
+  return (o.items || []).some(function(i){ return i && !i._entwurf; });
+}
+
 function belksZeilenKey(z){
   if (!z) return "";
   return z._key || ((z.nr||'') + '_' + (z.name||'') + '_' + (z.note||'') + '_' + (z.finalPrice||0));
@@ -15101,6 +15112,7 @@ function getPeriodRange(period, customFrom, customTo) {
   };
 }
 function DayEndView({
+  offeneStornos,   // v346: stornierte offene Tische
   completedOrders,
   expenses,
   printerSettings
@@ -15135,6 +15147,13 @@ function DayEndView({
     return d >= from && d <= to;
   });
   const stornoSumme = Math.round(stornos.reduce((s, o) => s + (Number(o.total) || 0), 0) * 100) / 100;
+  /* v346: Stornierte OFFENE Tische - die tauchen nicht in completedOrders
+     auf, weil sie nie bezahlt wurden. Ohne diese Zeile waeren sie im
+     Bericht wieder unsichtbar. */
+  const tischStornos = (offeneStornos || []).filter(o => {
+    try { const d = new Date(o.zeit); return d >= from && d <= to; } catch(e) { return false; }
+  });
+  const tischStornoSumme = Math.round(tischStornos.reduce((s, o) => s + (Number(o.betrag) || 0), 0) * 100) / 100;
   const gutVerk  = belksSummeGutschein(imZeitraum);
   const gutEin   = belksSummeGutscheinEingeloest(filtered);   // v328
   const filteredExp = expenses.filter(e => {
@@ -15508,6 +15527,9 @@ ${filtered.map((o, i) => {
   }, {
     l: "🚫 Storniert (" + stornos.length + ")",
     v: fmt(stornoSumme)
+  }, {
+    l: "🚫 Stornierte Tische (" + tischStornos.length + ")",
+    v: fmt(tischStornoSumme)
   }].map(s => /*#__PURE__*/React.createElement("div", {
     key: s.l,
     style: {
@@ -23359,7 +23381,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v345"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v346"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -23576,6 +23598,7 @@ function App() {
   const [loginUser, setLoginUser] = useState(null); // im Login-Screen gewaehlter Mitarbeiter
   const [reservations, setReservations] = React.useState(() => LS.get("eatdesi_reservations", []));
   const [clearConfirm, setClearConfirm] = React.useState(null);
+  const [stornoGrund, setStornoGrund] = React.useState(null);   // v346
   const [tableOrders, setTableOrders] = useState(() => LS.get("eatdesi_tableorders", {}));
   const [takeaway, setTakeaway] = useState(() => {
     const saved = LS.get("eatdesi_takeaway", []);
@@ -23659,6 +23682,11 @@ function App() {
     }
   }, [webRequests]);
   const [expenses, setExpenses] = useState(() => LS.get("eatdesi_expenses", []));
+  /* v346: Stornierte Bestellungen. Bewusst eine eigene Liste und NICHT
+     Teil der Tische - sie darf beim Tagesabschluss nicht mitgeloescht
+     werden. Genau das ist ja ihr Zweck. */
+  const [stornos, setStornos] = useState(() => LS.get("eatdesi_stornos", []));
+  useEffect(() => { LS.set("eatdesi_stornos", stornos); }, [stornos]);
   const [gutscheine, setGutscheine] = useState(() => LS.get("eatdesi_gutscheine", []));
   const [customers, setCustomers] = React.useState(() => {
     const saved = LS.get("eatdesi_customers", []);
@@ -25223,27 +25251,84 @@ function App() {
   },
     "📵 Offline-Modus · Daten werden lokal gespeichert · Kein Internet"
   ),
-  clearConfirm !== null && /*#__PURE__*/React.createElement("div", { style:{ position:"fixed", inset:0, background:"#0009", zIndex:9000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 } },
-    /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:16, padding:24, width:"100%", maxWidth:340, boxShadow:"0 8px 32px #0004" } },
-      /*#__PURE__*/React.createElement("div", { style:{ fontSize:36, textAlign:"center", marginBottom:8 } }, "🗑️"),
-      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:16, color:"#c62828", textAlign:"center", marginBottom:8 } }, "Tisch ", clearConfirm, " löschen?"),
-      /*#__PURE__*/React.createElement("div", { style:{ fontSize:13, color:"#666", textAlign:"center", marginBottom:20 } }, "Die Bestellung wird ohne Zahlung gelöscht."),
-      /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:12 } },
-        /*#__PURE__*/React.createElement("button", { onClick:()=>setClearConfirm(null),
-          style:{ flex:1, padding:13, borderRadius:10, border:"2px solid #ddd", background:"#fff", color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
-        }, "Abbrechen"),
-        /*#__PURE__*/React.createElement("button", { onClick:()=>{
-            const tid = clearConfirm;
-            setClearConfirm(null);
-            setTableOrders(p => { const n = {...p}; delete n[tid]; return n; });
-            setView("tables");
-            setActiveTable(null);
-          },
-          style:{ flex:1, padding:13, borderRadius:10, border:"none", background:"#ef5350", color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
-        }, "✕ Löschen")
+  clearConfirm !== null && (function(){
+    /* ═══ v346: ZWEI VERSCHIEDENE FAELLE, ZWEI VERSCHIEDENE FRAGEN ═══
+       Bis v345 war die Frage identisch - egal ob nichts passiert war
+       oder die Kueche schon gekocht hatte. */
+    var _o = tableOrders[clearConfirm] || { items: [] };
+    var _gesendet = belksTischGesendet(_o);
+    var _summe = Math.round((_o.items || []).reduce(function(su,i){ return su + (i.finalPrice||0)*(i.qty||0); }, 0) * 100) / 100;
+    var _gruende = ["Gast abbestellt", "Falsch getippt", "K\u00fcche Fehler", "Testbuchung"];
+
+    var _wegDamit = async function(grund){
+      var tid = clearConfirm;
+      setClearConfirm(null);
+      setStornoGrund(null);
+      if (_gesendet) {
+        var _tse = null;
+        try {
+          _tse = await window.TSE.signOrder({
+            bonNr: "S-" + genNr(), total: _summe, payMethod: "Storno",
+            items: _o.items || [], tableId: tid
+          });
+        } catch (e) { console.warn("TSE (Storno):", e); }
+        setStornos(function(p){ return [...p, {
+          id: Date.now(), zeit: new Date().toISOString(), tisch: String(tid),
+          label: "Tisch " + tid, grund: grund || "ohne Angabe",
+          betrag: _summe, anzahl: (_o.items || []).length,
+          items: (_o.items || []).map(function(i){ return { name:i.name, nr:i.nr, qty:i.qty, preis:i.finalPrice }; }),
+          mitarbeiter: (loggedInUser && loggedInUser.name) || "unbekannt",
+          tse: _tse, bonNrBestellung: (_o.tseBestellung && _o.tseBestellung.bonNr) || null
+        }]; });
+      }
+      setTableOrders(p => { const n = {...p}; delete n[tid]; return n; });
+      setView("tables");
+      setActiveTable(null);
+    };
+
+    return /*#__PURE__*/React.createElement("div", { style:{ position:"fixed", inset:0, background:"#0009", zIndex:9000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 } },
+      /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:16, padding:24, width:"100%", maxWidth:360, boxShadow:"0 8px 32px #0004" } },
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:36, textAlign:"center", marginBottom:8 } }, _gesendet ? "\u26A0\uFE0F" : "\uD83D\uDDD1\uFE0F"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:16, color:"#c62828", textAlign:"center", marginBottom:8 } },
+          "Tisch " + clearConfirm + (_gesendet ? " stornieren?" : " l\u00f6schen?")),
+
+        _gesendet
+          ? /*#__PURE__*/React.createElement("div", null,
+              /*#__PURE__*/React.createElement("div", { style:{ fontSize:12.5, color:"#666", textAlign:"center", marginBottom:14, lineHeight:1.45 } },
+                "Diese Bestellung ist bereits an K\u00fcche und Bar gegangen (" + fmt(_summe) + ")." ,
+                /*#__PURE__*/React.createElement("br", null),
+                "Sie wird als Storno festgehalten \u2013 bitte Grund w\u00e4hlen."),
+              /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 } },
+                _gruende.map(function(g){
+                  return /*#__PURE__*/React.createElement("button", { key:g, onClick:function(){ setStornoGrund(g); },
+                    style:{ padding:"11px 6px", borderRadius:10,
+                            border:"2px solid " + (stornoGrund===g ? "#c62828" : "#ddd"),
+                            background: stornoGrund===g ? "#ffebee" : "#fff",
+                            color: stornoGrund===g ? "#c62828" : "#555",
+                            cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 } }, g);
+                })
+              )
+            )
+          : /*#__PURE__*/React.createElement("div", { style:{ fontSize:13, color:"#666", textAlign:"center", marginBottom:20 } },
+              "Nichts wurde an die K\u00fcche gesendet. Der Entwurf wird einfach verworfen."),
+
+        /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:12 } },
+          /*#__PURE__*/React.createElement("button", { onClick:function(){ setClearConfirm(null); setStornoGrund(null); },
+            style:{ flex:1, padding:13, borderRadius:10, border:"2px solid #ddd", background:"#fff", color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
+          }, "Abbrechen"),
+          /* Ohne Grund kein Storno - sonst waere die Auswahl nur Zierde. */
+          /*#__PURE__*/React.createElement("button", {
+            onClick: function(){ if (_gesendet && !stornoGrund) return; _wegDamit(stornoGrund); },
+            disabled: _gesendet && !stornoGrund,
+            style:{ flex:1, padding:13, borderRadius:10, border:"none",
+                    background: (_gesendet && !stornoGrund) ? "#ccc" : "#ef5350", color:"#fff",
+                    cursor: (_gesendet && !stornoGrund) ? "default" : "pointer",
+                    fontFamily:"inherit", fontWeight:700, fontSize:14 }
+          }, _gesendet ? "Stornieren" : "\u2212 L\u00f6schen")
+        )
       )
-    )
-  ),
+    );
+  })(),
   // -- Mode Selection Modal --
   showModeModal && /*#__PURE__*/React.createElement("div", {
     style:{ position:"fixed", inset:0, background:"#0008", zIndex:8000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }
@@ -25924,6 +26009,7 @@ function App() {
     expenses: expenses
   }), view === "dayend" && /*#__PURE__*/React.createElement(DayEndView, {
     completedOrders: completedOrders,
+    offeneStornos: stornos,
     expenses: expenses,
     printerSettings: printerSettings
   }), view === "orders" && /*#__PURE__*/React.createElement(OrderListView, {
