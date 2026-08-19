@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v349</title>
+<title>eatDeSi POS v351</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9149,7 +9149,7 @@ function htmlToBlocks(html, bonType){
    der Speichern-Knopf sitzt in der Fussleiste, nicht in der Vorschau.
    Laeuft ueber printBon(), also ueber den geprueften Weg: Bluetooth,
    WLAN oder Browser, mit den Einstellungen des Bon-Editors. */
-function belksStationsBon(titel, liste, label, printerCfg){
+function belksStationsBon(titel, liste, label, printerCfg, bonTyp){
   try {
     if (!liste || !liste.length) return;
     var nachKat = {};
@@ -9168,7 +9168,7 @@ function belksStationsBon(titel, liste, label, printerCfg){
       });
       L += '<div class="blank"></div>';
     });
-    printBon(titel, L, label, "-", new Date(), null, printerCfg, null, 'kueche');
+    printBon(titel, L, label, "-", new Date(), null, printerCfg, null, bonTyp || 'kueche');
   } catch (e) { console.warn("Stations-Bon:", e); }
 }
 
@@ -9216,15 +9216,24 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
      Browser/PDF: einfach eine grosse Schrift). Der Gutschein-Bon nutzt sie
      fuer die Ueberschrift und den Code. */
   const _titelKlasse = (bonType === 'gutschein') ? 'big' : 'center bold';
+  /* ═══ v350: KUECHENZETTEL IST KEIN BELEG ═══
+     Bon-Nummer, Datum und die Spalte "Artikel / EUR" gehoeren auf den
+     Kundenbeleg. Auf dem Zettel fuer Kueche und Bar stand deshalb
+     "Bon-Nr: -" und eine leere EUR-Spalte - beides nur Ballast.
+     Der Koch braucht: welcher Tisch, was, wie viel. */
+  const _istStation = (bonType === 'kueche' || bonType === 'bar');
   const html = `<html><head><meta name="viewport" content="width=device-width"><style>body{font-family:monospace;font-size:15px;font-weight:600;width:${_bonW}px;margin:0 auto;padding:8px;line-height:1.35}.row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:800}.line{border-top:1px dashed #999;margin:6px 0}.center{text-align:center}.big{text-align:center;font-size:30px;font-weight:900;letter-spacing:2px;margin:6px 0}</style></head><body${qrOn?` data-qr="${qrLink}"`:""}>
     ${_kopf}
     <div class="${_titelKlasse}" style="font-size:14px;margin:4px 0">${title}</div>
+    ${_istStation ? `
+    <div class="center bold" style="font-size:14px">${label}</div>
+    <div class="line"></div>${lines}` : `
     <div class="row info-row"><span>Bon-Nr:</span><span>${bonNr}</span></div>
     <div class="row info-row"><span>Datum:</span><span>${fmtD(now)} ${fmtT(now)}</span></div>
     <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
     ${deliveryBlock}
     <div class="line"></div>
-    <div class="row eur-note"><span>Artikel</span><span>EUR</span></div>${lines}
+    <div class="row eur-note"><span>Artikel</span><span>EUR</span></div>${lines}`}
     ${tseBlock}
     ${_footerOn?`<div class="center" style="margin-top:8px;font-size:11px">${_footerTxt}</div>`:""}
     ${qrOn?`<div class="center" style="font-size:11px;margin-top:4px">📱 ${qrLink}</div>`:""}
@@ -13920,6 +13929,7 @@ function OrderView({
   onUpdate,
   onSave,
   onBestellen,
+  onWechseln,
   onPay,
   onClear,
   optionGroups,
@@ -14280,7 +14290,20 @@ function OrderView({
       fontWeight: 700,
       fontSize: 14
     }
-  }, "\u270F\uFE0F ", label), /*#__PURE__*/React.createElement("span", {
+  }, "\u270F\uFE0F ", label),
+  /* ═══ v351: TISCHWECHSEL ═══
+     Ohne diesen Knopf blieb nur: alten Tisch loeschen und alles neu
+     tippen - was seit v346 auch noch einen Storno erzeugt, obwohl
+     niemand etwas storniert hat. */
+  !isTakeaway && items.length > 0 && typeof onWechseln === "function" && /*#__PURE__*/React.createElement("button", {
+    onClick: () => onWechseln(tableId),
+    style: {
+      background: "rgba(255,255,255,.18)", border: "1.5px solid rgba(255,255,255,.55)",
+      color: "#fff", borderRadius: 8, padding: "4px 10px", marginLeft: "auto", marginRight: 10,
+      cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 11.5
+    }
+  }, "\uD83D\uDD00 Wechseln"),
+  /*#__PURE__*/React.createElement("span", {
     style: {
       color: "#fff",
       fontWeight: 700,
@@ -23477,7 +23500,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v349"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v351"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -23695,6 +23718,7 @@ function App() {
   const [reservations, setReservations] = React.useState(() => LS.get("eatdesi_reservations", []));
   const [clearConfirm, setClearConfirm] = React.useState(null);
   const [stornoGrund, setStornoGrund] = React.useState(null);   // v346
+  const [wechselVon, setWechselVon] = React.useState(null);     // v351
   const [tableOrders, setTableOrders] = useState(() => LS.get("eatdesi_tableorders", {}));
   const [takeaway, setTakeaway] = useState(() => {
     const saved = LS.get("eatdesi_takeaway", []);
@@ -24432,8 +24456,10 @@ function App() {
     try {
       const speisen   = neue.filter(i => !istBar(i));
       const getraenke = neue.filter(i => istBar(i));
-      if (speisen.length)   belksStationsBon("\uD83C\uDF73 K\u00dcCHE \u2014 SPEISEN", speisen, label, printerSettings);
-      if (getraenke.length) belksStationsBon("\uD83C\uDF7A BAR \u2014 GETR\u00c4NKE", getraenke, label, printerSettings);
+      /* v350: Der Bar-Bon meldet sich jetzt auch als 'bar' - sonst
+         landet er beim Drucker der Kueche, wenn beide getrennt sind. */
+      if (speisen.length)   belksStationsBon("\uD83C\uDF73 K\u00dcCHE \u2014 SPEISEN", speisen, label, printerSettings, 'kueche');
+      if (getraenke.length) belksStationsBon("\uD83C\uDF7A BAR \u2014 GETR\u00c4NKE", getraenke, label, printerSettings, 'bar');
     } catch (e) { console.warn("Bestell-Bons:", e); }
 
     // 2. TSE - der Vorgang beginnt jetzt, nicht erst bei der Zahlung
@@ -24767,6 +24793,46 @@ function App() {
   };
 
   // Tisch l_schen ohne Zahlung
+  /* ═══ v351: BESTELLUNG AUF EINEN ANDEREN TISCH UMZIEHEN ═══
+     Ein Tischwechsel ist kein neuer Geschaeftsvorfall: derselbe Gast,
+     dieselbe Bestellung, nur ein anderer Platz. Deshalb wird KEINE neue
+     TSE-Signatur erzeugt - die vorhandene zieht mit um. Eine zweite
+     wuerde einen zweiten Vorgang vortaeuschen.
+     Ebenso ziehen die Entwurfs-Marken mit: was noch nicht in der Kueche
+     war, ist es nach dem Umzug auch nicht. */
+  const belksTischWechsel = (vonId, nachId) => {
+    if (vonId === undefined || nachId === undefined) return;
+    if (String(vonId) === String(nachId)) return;
+    setTableOrders(p => {
+      const quelle = p[vonId];
+      if (!quelle) return p;
+      const ziel = p[nachId];
+      const n = { ...p };
+      delete n[vonId];
+      if (!ziel) {
+        n[nachId] = Object.assign({}, quelle);
+      } else {
+        /* Zusammenlegen: die Artikel des umziehenden Tisches kommen hinten
+           dran. Die Schluessel muessen neu sein, sonst treffen zwei Zeilen
+           mit demselben _key aufeinander und das Bearbeiten trifft die
+           falsche. */
+        const zusatz = (quelle.items || []).map((i, idx) => Object.assign({}, i, {
+          _key: (i._key || "x") + "_um" + Date.now() + "_" + idx
+        }));
+        n[nachId] = Object.assign({}, ziel, {
+          items: [...(ziel.items || []), ...zusatz],
+          /* Die aeltere Startzeit gewinnt - die Kueche soll die laengere
+             Wartezeit sehen, nicht die kuerzere. */
+          time: (ziel.time && quelle.time && new Date(quelle.time) < new Date(ziel.time)) ? quelle.time : (ziel.time || quelle.time),
+          tseBestellung: ziel.tseBestellung || quelle.tseBestellung || null
+        });
+      }
+      return n;
+    });
+    setWechselVon(null);
+    setActiveTable(nachId);
+  };
+
   const clearTable = tid => {
     setClearConfirm(tid);
   };
@@ -25351,6 +25417,59 @@ function App() {
   },
     "📵 Offline-Modus · Daten werden lokal gespeichert · Kein Internet"
   ),
+  /* v351: Auswahl des Zieltisches. Freie und belegte getrennt, damit
+     niemand aus Versehen zusammenlegt. */
+  wechselVon !== null && (function(){
+    var _alle = [];
+    try {
+      (floors || []).forEach(function(fl){
+        var n = parseInt(fl && fl.tables, 10) || 0;
+        for (var i = 1; i <= n; i++) _alle.push(String(i));
+      });
+    } catch(e) {}
+    if (!_alle.length) for (var i2 = 1; i2 <= 50; i2++) _alle.push(String(i2));
+    _alle = _alle.filter(function(t, i3){ return _alle.indexOf(t) === i3 && String(t) !== String(wechselVon); });
+    var _frei   = _alle.filter(function(t){ return !tableOrders[t]; });
+    var _belegt = _alle.filter(function(t){ return !!tableOrders[t]; });
+    var _summe  = ((tableOrders[wechselVon] || {}).items || []).reduce(function(su,i){ return su + (i.finalPrice||0)*(i.qty||0); }, 0);
+
+    return /*#__PURE__*/React.createElement("div", { style:{ position:"fixed", inset:0, background:"#0009", zIndex:9000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 } },
+      /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:16, padding:18, width:"100%", maxWidth:400, maxHeight:"85vh", overflowY:"auto" } },
+        /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:16, color:C.green, marginBottom:4 } },
+          "\uD83D\uDD00 Tisch " + wechselVon + " umziehen"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:12.5, color:"#666", marginBottom:14 } },
+          fmt(_summe) + " \u00b7 Wohin sollen die G\u00e4ste?"),
+
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, fontWeight:700, color:"#888", marginBottom:6 } }, "FREIE TISCHE"),
+        _frei.length === 0
+          ? /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#bbb", marginBottom:12 } }, "Kein Tisch frei.")
+          : /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:6, marginBottom:16 } },
+              _frei.map(function(t){
+                return /*#__PURE__*/React.createElement("button", { key:"f"+t, onClick:function(){ belksTischWechsel(wechselVon, t); },
+                  style:{ padding:"12px 0", borderRadius:10, border:"2px solid "+C.green, background:"#fff", color:C.green, cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:14 } }, t);
+              })
+            ),
+
+        _belegt.length > 0 && /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, fontWeight:700, color:"#c62828", marginBottom:2 } }, "BELEGTE TISCHE \u2014 ZUSAMMENLEGEN"),
+          /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#999", marginBottom:6, lineHeight:1.4 } },
+            "Die Artikel beider Tische landen auf einer Rechnung. Das l\u00e4sst sich danach nicht mehr trennen."),
+          /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:6, marginBottom:12 } },
+            _belegt.map(function(t){
+              return /*#__PURE__*/React.createElement("button", { key:"b"+t,
+                onClick:function(){ if (window.confirm("Tisch " + wechselVon + " mit Tisch " + t + " zusammenlegen?\n\nDie Artikel kommen auf EINE Rechnung.")) belksTischWechsel(wechselVon, t); },
+                style:{ padding:"12px 0", borderRadius:10, border:"2px dashed #ef9a9a", background:"#fff5f5", color:"#c62828", cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:14 } }, t);
+            })
+          )
+        ),
+
+        /*#__PURE__*/React.createElement("button", { onClick:function(){ setWechselVon(null); },
+          style:{ width:"100%", padding:12, borderRadius:10, border:"2px solid #ddd", background:"#fff", color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
+        }, "Abbrechen")
+      )
+    );
+  })(),
+
   clearConfirm !== null && (function(){
     /* ═══ v346: ZWEI VERSCHIEDENE FAELLE, ZWEI VERSCHIEDENE FRAGEN ═══
        Bis v345 war die Frage identisch - egal ob nichts passiert war
@@ -26028,6 +26147,7 @@ function App() {
     onUpdate: updateOrder,
     onSave: saveOrder,
     onBestellen: belksBestellen,   // v344
+    onWechseln: setWechselVon,     // v351
     onPay: startPay,
     onClear: clearTable,
     optionGroups: optionGroups,
