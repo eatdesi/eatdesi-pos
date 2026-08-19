@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v346</title>
+<title>eatDeSi POS v347</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -10245,6 +10245,10 @@ function SplitPersonPay({
    gibt ODER mindestens ein Artikel keine Entwurfs-Marke mehr traegt.
    Die zweite Bedingung faengt Tische ab, die vor v344 angelegt wurden -
    dort gibt es keine Marke, und die Kueche hat sie laengst bekommen. */
+/* v347: Dieselben Gruende an beiden Storno-Wegen - offener Tisch und
+   bezahlter Beleg. Zwei Listen wuerden mit der Zeit auseinanderlaufen. */
+var BELKS_STORNO_GRUENDE = ["Gast abbestellt", "Falsch getippt", "K\u00fcche Fehler", "Testbuchung"];
+
 function belksTischGesendet(o){
   if (!o) return false;
   if (o.tseBestellung) return true;
@@ -15832,6 +15836,7 @@ function OrderListView({
   const [customTo, setCustomTo] = useState("");
   const [selected, setSelected] = useState(null); // order detail
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [stornoGrund, setStornoGrund] = useState(null);   // v347
   const [mergeTarget, setMergeTarget] = useState(null);
   const {
     from,
@@ -15889,13 +15894,31 @@ function OrderListView({
       color: "#555",
       marginBottom: 6
     }
-  }, "Bestellung #", confirmDelete + 1, " wird storniert. Der Beleg bleibt erhalten, zählt aber nicht mehr zum Umsatz."), /*#__PURE__*/React.createElement("div", {
+  }, "Bestellung #", confirmDelete + 1, " wird storniert. Der Beleg bleibt erhalten, zählt aber nicht mehr zum Umsatz."),
+  /* ═══ v347: WARUM WIRD STORNIERT? ═══
+     Beim offenen Tisch fragt die Kasse seit v346 danach. Hier - beim
+     bereits bezahlten Beleg - fehlte die Frage, obwohl der Vorgang
+     schwerer wiegt. */
+  /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 12, fontWeight: 700, color: "#c62828", marginBottom: 6 }
+  }, "Grund w\u00e4hlen:"),
+  /*#__PURE__*/React.createElement("div", {
+    style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }
+  }, BELKS_STORNO_GRUENDE.map(function(g){
+    return /*#__PURE__*/React.createElement("button", { key: g, onClick: function(){ setStornoGrund(g); },
+      style: { padding: "10px 6px", borderRadius: 10,
+               border: "2px solid " + (stornoGrund === g ? "#c62828" : "#ddd"),
+               background: stornoGrund === g ? "#ffebee" : "#fff",
+               color: stornoGrund === g ? "#c62828" : "#555",
+               cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12 } }, g);
+  })),
+  /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 10
     }
   }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setConfirmDelete(null),
+    onClick: () => { setConfirmDelete(null); setStornoGrund(null); },
     style: {
       flex: 1,
       padding: 12,
@@ -15909,16 +15932,19 @@ function OrderListView({
     }
   }, "Abbrechen"), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
-      onDelete(confirmDelete);
+      if (!stornoGrund) return;   // v347: ohne Grund kein Storno
+      onDelete(confirmDelete, stornoGrund);
       setConfirmDelete(null);
+      setStornoGrund(null);
       setSelected(null);
     },
+    disabled: !stornoGrund,
     style: {
       flex: 1,
       padding: 12,
       borderRadius: 10,
       border: "none",
-      background: C.red,
+      background: stornoGrund ? C.red : "#ccc",
       color: "#fff",
       cursor: "pointer",
       fontFamily: "inherit",
@@ -16360,7 +16386,7 @@ function OrderListView({
       }
     }, o.storniert && /*#__PURE__*/React.createElement("div", {
       style: { background: C.red, color: "#fff", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontWeight: 800, display: "inline-block", marginBottom: 6, letterSpacing: 0.5 }
-    }, "\uD83D\uDEAB STORNIERT" + (o.stornoVon ? " \xB7 " + o.stornoVon : "")), /*#__PURE__*/React.createElement("div", {
+    }, "\uD83D\uDEAB STORNIERT" + (o.stornoVon ? " \xB7 " + o.stornoVon : "") + (o.stornoGrund ? " \xB7 " + o.stornoGrund : "")), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         justifyContent: "space-between",
@@ -23381,7 +23407,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v346"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v347"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24720,7 +24746,7 @@ function App() {
   };
 
   // L_sche Bestellung komplett - aus allen Systemen, Nummern neu vergeben
-  const deleteOrder = idx => {
+  const deleteOrder = (idx, grund) => {
     // STORNIEREN statt loeschen (GoBD/KassenSichV-konform): Beleg bleibt erhalten,
     // wird aber als storniert markiert und faellt aus dem Umsatz heraus.
     if (!isAbschlussAllowed()) {
@@ -24729,11 +24755,15 @@ function App() {
     }
     setCompletedOrders(p => p.map((o, i) => {
       if (i !== idx) return o;
+      /* v347: Der Grund fehlte hier - ausgerechnet beim schwereren Fall.
+         Bei einem bezahlten Beleg war das Geld schon in der Kasse und es
+         gibt eine TSE-Signatur ueber den Umsatz. */
       const stornoOrder = {
         ...o,
         storniert: true,
         stornoZeit: new Date().toISOString(),
-        stornoVon: (loggedInUser && loggedInUser.name) || "?"
+        stornoVon: (loggedInUser && loggedInUser.name) || "?",
+        stornoGrund: grund || "ohne Angabe"
       };
       // Stornierung sofort in der Cloud aktualisieren (alle Geraete bekommen es)
       if (typeof updateOrderInSupabase === "function") {
@@ -25258,7 +25288,7 @@ function App() {
     var _o = tableOrders[clearConfirm] || { items: [] };
     var _gesendet = belksTischGesendet(_o);
     var _summe = Math.round((_o.items || []).reduce(function(su,i){ return su + (i.finalPrice||0)*(i.qty||0); }, 0) * 100) / 100;
-    var _gruende = ["Gast abbestellt", "Falsch getippt", "K\u00fcche Fehler", "Testbuchung"];
+    var _gruende = BELKS_STORNO_GRUENDE;   // v347
 
     var _wegDamit = async function(grund){
       var tid = clearConfirm;
@@ -29522,7 +29552,8 @@ function supaFetch(path, method, body) {
    Zusammenfuehren benutzen dieselbe. Sonst faengt genau hier wieder an,
    dass irgendwo eines fehlt. */
 var BELKS_EXTRA_FELDER = ['trinkgeld','rabatt','gutscheinVerkauf','gutscheinCode',
-                          'gutscheinBetrag','lieferFee','splitDetails','teilzahlung'];
+                          'gutscheinBetrag','lieferFee','splitDetails','teilzahlung',
+                          'stornoGrund'];   // v347
 
 function belksExtraBauen(order){
   if(!order) return null;
