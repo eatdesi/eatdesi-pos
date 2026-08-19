@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v347</title>
+<title>eatDeSi POS v349</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -11908,7 +11908,9 @@ function belksGeminiKeyForm(k){
   var v = String(k == null ? "" : k).trim();
   if (!v) return { ok:false, grund:"leer" };
   if (/\s/.test(v)) return { ok:false, grund:"enth\u00e4lt Leerzeichen oder Zeilenumbruch" };
-  if (v.indexOf("AIza") !== 0) return { ok:false, grund:"beginnt nicht mit AIza" };
+  /* v349: Nicht nur SAGEN, dass es falsch ist - zeigen, WAS dort steht.
+     Sonst kann niemand pruefen, ob die Meldung stimmt. */
+  if (v.indexOf("AIza") !== 0) return { ok:false, grund:"beginnt mit \u201E" + v.slice(0,4) + "\u201C statt AIza (" + v.length + " Zeichen)" };
   if (!/^[A-Za-z0-9_\-]+$/.test(v)) return { ok:false, grund:"enth\u00e4lt ungewohnte Zeichen" };
   if (v.length !== 39) return { ok:false, grund:v.length + " Zeichen statt 39" };
   return { ok:true, grund:"" };
@@ -12245,6 +12247,64 @@ BESTELLUNG MELDEN (die wichtigste Regel):
 - Melde einen Artikel ERST, wenn der Gast ihn wirklich will. Ein Vorschlag
   von dir ist noch keine Bestellung: erst nach einem klaren Ja.
 - Frage IMMER nur EINE Sache auf einmal.
+
+SO SIEHT EIN GUTES GESPRAECH AUS (an diesen Beispielen halte dich):
+
+Beispiel A - Abholung
+  Du:   Moechten Sie abholen oder sollen wir liefern?
+  Gast: Abholen.
+  Du:   Gerne. Auf welchen Namen? {"typ":"abholung"}
+  Gast: Khan.
+  Du:   Danke, Herr Khan. Was darf ich Ihnen aufschreiben? {"kunde":{"name":"Khan"}}
+  Gast: Einmal Pommes.
+  Du:   Einmal Pommes Frites. Sonst noch etwas?
+        {"order":[{"name":"Pommes Frites","qty":1,"price":4.90}]}
+  Gast: Und eine Cola.
+  Du:   Eine Cola dazu. Sonst noch etwas?
+        {"order":[{"name":"Pommes Frites","qty":1,"price":4.90},{"name":"Coca-Cola Zero 0,33l","qty":1,"price":3.50}]}
+  Gast: Das war's.
+  Du:   Ich fasse zusammen: einmal Pommes Frites und eine Cola, zusammen
+        8,40 Euro. Ist das so richtig?
+  Gast: Ja.
+  Du:   Danke, in etwa 20 Minuten koennen Sie abholen. {"confirm":true}
+
+  MERKE an A: Im zweiten order-Block stehen BEIDE Artikel. Die Pommes
+  werden dadurch nicht zwei - der Block ersetzt den Warenkorb.
+
+Beispiel B - Lieferung, neuer Gast
+  Du:   Moechten Sie abholen oder sollen wir liefern?
+  Gast: Liefern bitte.
+  Du:   Sehr gern. Wie ist Ihr Name? {"typ":"lieferung"}
+  Gast: Ram.
+  Du:   Danke. Ihre Handynummer?
+  Gast: 0151 75156664
+  Du:   Ich lese kurz zurueck: null eins fuenf eins, sieben fuenf eins,
+        fuenf sechs sechs sechs vier. Stimmt das?
+  Gast: Ja.
+  Du:   Und die Lieferadresse - Strasse und Hausnummer?
+  Gast: Bahnhofstrasse 10.
+  Du:   Postleitzahl und Ort?
+  Gast: 34587 Gensungen.
+  Du:   Notiert. Ihre Handynummer ist ab jetzt Ihre Kundennummer bei uns.
+        Beim naechsten Mal nennen Sie mir einfach die Nummer, dann geht es
+        sofort los. Was darf ich Ihnen bringen?
+        {"kunde":{"name":"Ram","phone":"015175156664","street":"Bahnhofstrasse 10","plz":"34587","city":"Gensungen"}}
+  Gast: Was koennen Sie empfehlen?
+  Du:   Der Tandoori Mix Grill ist bei uns sehr beliebt. Darf ich Ihnen den
+        einpacken?
+  Gast: Ja, einmal.
+  Du:   Einmal Tandoori Mix Grill. Noch etwas dazu?
+        {"order":[{"name":"Tandoori Mix Grill","qty":1,"price":24.90}]}
+
+  MERKE an B: Nach der Empfehlung kam ERST das Ja, DANN der order-Block.
+  Ein Vorschlag allein wandert nie in den Warenkorb.
+
+Beispiel C - der Gast nimmt etwas zurueck
+  Gast: Die Pommes doch nicht.
+  Du:   Alles klar, die Pommes nehme ich raus. Dann bleibt die Cola.
+        {"order":[{"name":"Coca-Cola Zero 0,33l","qty":1,"price":3.50}]}
+
+  MERKE an C: Was rausfaellt, laesst du im Block einfach weg.
 
 Aktuelle Speisekarte:
 ${menuContext}
@@ -17534,6 +17594,7 @@ function PrinterSettingsView({
   settings,
   onSave
 }) {
+  const [keySichtbar, setKeySichtbar] = useState(false);   // v349
   const [form, setForm] = useState(settings || {
     name: "",
     address: "",
@@ -17734,7 +17795,14 @@ function PrinterSettingsView({
     /* v341: Beim Kopieren aus dem Browser haengt fast immer ein
        Zeilenumbruch oder Leerzeichen am Schluessel. Google lehnt ihn dann
        ab - mit derselben Meldung wie bei einem voellig falschen Key. */
-    /*#__PURE__*/React.createElement("input", { type:"password", value:form.geminiKey||"", placeholder:"AIza...",
+    /* v349: Ohne Sichtbarkeit bleibt jede Meldung ueber den Schluessel
+       eine Behauptung. Der Knopf steht direkt daneben. */
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => setKeySichtbar(v => !v),
+      style:{ float:"right", marginTop:-2, marginBottom:4, background:"none", border:"none", cursor:"pointer", fontSize:16, padding:"0 2px" },
+      title: keySichtbar ? "Schl\u00fcssel verbergen" : "Schl\u00fcssel anzeigen"
+    }, keySichtbar ? "\uD83D\uDE48" : "\uD83D\uDC41\uFE0F"),
+    /*#__PURE__*/React.createElement("input", { type: keySichtbar ? "text" : "password", value:form.geminiKey||"", placeholder:"AIza...",
       onChange:e=>setForm(f=>({...f, geminiKey:String(e.target.value||"").replace(/\s+/g,"")})),
       style:{ width:"100%", padding:"10px 12px", borderRadius:8, border:"2px solid #ce93d8", fontSize:13, fontFamily:"monospace", boxSizing:"border-box", marginBottom:10 }
     }),
@@ -17748,7 +17816,9 @@ function PrinterSettingsView({
     form.geminiKey && !belksGeminiKeyForm(form.geminiKey).ok && /*#__PURE__*/React.createElement("div", { style:{ background:"#ffebee", border:"2px solid #ef9a9a", borderRadius:8, padding:"8px 10px", fontSize:12, color:"#c62828", fontWeight:700 } },
       "\u274C Das sieht nicht wie ein Gemini-Key aus \u2014 " + belksGeminiKeyForm(form.geminiKey).grund,
       /*#__PURE__*/React.createElement("div", { style:{ fontWeight:500, fontSize:11, marginTop:3 } },
-        "Ein g\u00fcltiger Key beginnt mit AIza und hat 39 Zeichen. Kostenlos: aistudio.google.com/apikey")
+        "Ein g\u00fcltiger Key beginnt mit AIza und hat 39 Zeichen. Kostenlos: aistudio.google.com/apikey",
+        /*#__PURE__*/React.createElement("div", { style:{ marginTop:4 } },
+          "Achtung: Der Schl\u00fcssel gilt nur f\u00fcr DIESES Restaurant \u2013 in den anderen H\u00e4usern muss er ebenfalls eingetragen werden."))
     ),
     !form.geminiKey && /*#__PURE__*/React.createElement("div", { style:{ background:"#fff8e1", borderRadius:8, padding:"6px 10px", fontSize:11, color:"#e65100" } },
       "\u26A0\uFE0F Kein Key \u2014 AI Kellnerin nicht verf\xFCgbar"
@@ -17905,7 +17975,7 @@ function PrinterSettingsView({
       gap: 8,
       marginBottom: 14
     }
-  }, [["browser", "🌐", "Browser-Druck", "Standard — kein extra Hardware nötig"], ["rawbt", "🖨️", "RawBT App", "Direkt an Bluetooth-Drucker — empfohlen!"], ["bluetooth", "📲", "Bluetooth", "Epson TM-T20III BT, Star SM-L200 etc."], ["wifi", "📡", "WiFi / Netzwerk", "Epson TM-T88, TM-T20 (IP-Adresse)"]].map(([v, icon, title, sub]) => /*#__PURE__*/React.createElement("button", {
+  }, [["browser", "🌐", "Browser-Druck", "Nur im Browser! In der App passiert nichts"], ["rawbt", "🖨️", "RawBT App", "Fremde App als Umweg — nur wenn Bluetooth nicht geht"], ["bluetooth", "📲", "Bluetooth", "Empfohlen — Epson TM-m30, TM-T20III BT, Star SM-L200"], ["wifi", "📡", "WiFi / Netzwerk", "Empfohlen für MUNBYN & Co. — Epson TM-T88, TM-T20 (IP-Adresse)"]].map(([v, icon, title, sub]) => /*#__PURE__*/React.createElement("button", {
     key: v,
     onClick: () => setForm(f => ({
       ...f,
@@ -23407,7 +23477,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v347"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v349"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
