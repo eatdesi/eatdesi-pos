@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v351</title>
+<title>eatDeSi POS v353</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8777,6 +8777,35 @@ window.callAIVision = async function(prompt, b64jpeg, maxTokens, mimeType) {
 };
 
 
+/* ═══ v352: DIE KASSE AUF NULL SETZEN ═══
+   Loescht die Kassendaten dieses Geraets. Die Cloud und die anderen
+   Geraete werden vom Aufrufer erledigt - hier steht nur der lokale Teil,
+   damit ihn auch das Geraet ausfuehren kann, das die Marke spaeter sieht. */
+function belksKasseLokalLeeren(auchGutscheine){
+  var weg = BELKS_RESET_KASSE.slice();
+  if (auchGutscheine) weg.push('eatdesi_gutscheine');
+  weg.forEach(function(k){
+    try { localStorage.removeItem(k); } catch(e) {}
+    try { localStorage.removeItem('eatdesi_stamp_' + k.replace(/^eatdesi_/, '')); } catch(e) {}
+  });
+  return weg.length;
+}
+
+/* Sicherung, bevor etwas verschwindet. Laeuft still - sie soll niemanden
+   aufhalten, aber es soll auch nichts unwiederbringlich weg sein. */
+function belksResetSicherung(){
+  try {
+    var daten = {};
+    BELKS_RESET_KASSE.concat(['eatdesi_gutscheine']).forEach(function(k){
+      try { var v = localStorage.getItem(k); if (v !== null) daten[k] = v; } catch(e) {}
+    });
+    var name = 'Kasse_vor_Reset_' + (typeof LOCATION_ID !== 'undefined' ? LOCATION_ID : 'pos')
+             + '_' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'-') + '.json';
+    belksDateiSpeichern(name, JSON.stringify(daten, null, 2), function(){});
+    return name;
+  } catch(e) { console.warn('Reset-Sicherung:', e); return null; }
+}
+
 // genNr: fortlaufende Bon-Nummer (behebt fehlende Definition + dient TSE-Zähler)
 function genNr() {
   var n = 0;
@@ -13306,7 +13335,62 @@ function BackupView({ data, onRestore }) {
           } catch (e) { alert("Diagnose fehlgeschlagen: " + (e && e.message ? e.message : e)); }
         },
         style:{ width:"100%", padding:10, borderRadius:9, border:"1.5px dashed #90a4ae", background:"#fff", color:"#546e7a", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5, marginTop:8 }
-      }, "\uD83E\uDDFE Buchungen von heute pr\u00fcfen")
+      }, "\uD83E\uDDFE Buchungen von heute pr\u00fcfen"),
+
+      /* ═══ v352: KASSE ZURUECKSETZEN ═══
+         Fuer den Start eines neuen Betriebs und fuer Testsysteme. Die
+         Sicherheitsabfrage verlangt den Standort-Namen: einen Knopf kann
+         man versehentlich treffen, einen Namen tippt man nicht aus
+         Versehen. */
+      /*#__PURE__*/React.createElement("button", {
+        onClick: async () => {
+          const loc = (typeof LOCATION_ID !== 'undefined') ? LOCATION_ID : '';
+          const eingabe = window.prompt(
+            "\u26A0\uFE0F KASSE ZUR\u00dcCKSETZEN \u2013 " + loc + "\n\n"
+            + "Gel\u00f6scht werden: Buchungen, offene Tische, Takeaway, Storni,\n"
+            + "Archiv, Ausgaben, Bon-Nummern und TSE-Z\u00e4hler.\n"
+            + "ALLE Ger\u00e4te dieses Restaurants setzen sich zur\u00fcck.\n\n"
+            + "ES BLEIBEN: Men\u00fc, Firmendaten, Mitarbeiter, Tischplan,\n"
+            + "Drucker, Optionsgruppen, Inventar und die Kunden.\n\n"
+            + "Zum Best\u00e4tigen den Standort eintippen:\n" + loc);
+          if (eingabe === null) return;
+          if (String(eingabe).trim() !== String(loc)) { alert("Abgebrochen \u2013 der Standort stimmt nicht."); return; }
+          const mitGut = window.confirm("Auch die GUTSCHEINE l\u00f6schen?\n\n"
+            + "OK = ja, l\u00f6schen\nAbbrechen = Gutscheine behalten\n\n"
+            + "Offene Guthaben sind Verbindlichkeiten gegen\u00fcber echten G\u00e4sten.");
+
+          const datei = belksResetSicherung();
+
+          /* Erst die Cloud, dann lokal. Andersherum wuerde dieses Geraet
+             die frisch geleerten Daten sofort wieder herunterladen. */
+          try {
+            await supaFetch('/rest/v1/eatdesi_orders?location_id=eq.' + loc, { method: 'DELETE' });
+          } catch (e) { console.warn("Cloud-Buchungen:", e); }
+
+          const wolkeWeg = BELKS_RESET_KASSE.concat(mitGut ? ['eatdesi_gutscheine'] : [])
+            .map(function(k){ return loc + '_' + k.replace(/^eatdesi_/, ''); });
+          for (const rk of wolkeWeg) {
+            try { await supaFetch('/rest/v1/pos_state?key=eq.' + encodeURIComponent(rk), { method: 'DELETE' }); }
+            catch (e) { console.warn("Cloud " + rk + ":", e); }
+          }
+
+          /* Die Marke, an der die anderen Geraete erkennen, dass sie dran
+             sind. Sie muss NACH dem Loeschen gesetzt werden. */
+          const marke = { id: Date.now(), gutscheine: !!mitGut, von: (loggedInUser && loggedInUser.name) || "?" };
+          try {
+            localStorage.setItem("eatdesi_reset_gesehen", String(marke.id));
+            LS.set("eatdesi_reset_marke", marke);
+          } catch (e) { console.warn("Reset-Marke setzen:", e); }
+
+          belksKasseLokalLeeren(mitGut);
+          alert("\u2705 Kasse zur\u00fcckgesetzt.\n\n"
+              + (datei ? "Sicherung: " + datei + "\n\n" : "")
+              + "Die n\u00e4chste Bestellung bekommt Bon-Nr. 0001.\n"
+              + "Die anderen Ger\u00e4te setzen sich beim n\u00e4chsten Abgleich zur\u00fcck.");
+          location.reload();
+        },
+        style:{ width:"100%", padding:11, borderRadius:9, border:"2px solid #c62828", background:"#fff5f5", color:"#c62828", cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:12.5, marginTop:14 }
+      }, "\uD83E\uDDF9 Kasse zur\u00fccksetzen (alle Ger\u00e4te)")
     ),
 
     /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:12, padding:14, marginBottom:12, border:"2px solid #a5d6a7" } },
@@ -23500,7 +23584,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v351"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v353"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -23665,6 +23749,28 @@ function App() {
      Dieser Helfer horcht auf den Abgleich und setzt den Zustand nach -
      aber nur, wenn sich wirklich etwas geaendert hat, sonst zeichnet die
      Kasse sich im Kreis. */
+  /* ═══ v352: EIN ANDERES GERAET HAT DIE KASSE ZURUECKGESETZT ═══
+     Ohne diesen Teil waere der Reset wertlos: das Geraet, das gerade in
+     der Kueche liegt, wuerde beim naechsten Abgleich seine alten Tische
+     wieder hochladen. Es raeumt sich jetzt selbst auf. */
+  React.useEffect(() => {
+    const pruefen = () => {
+      try {
+        const marke = LS.get("eatdesi_reset_marke", null);
+        if (!marke) return;
+        const gesehen = localStorage.getItem("eatdesi_reset_gesehen");
+        if (String(gesehen) === String(marke.id)) return;
+        localStorage.setItem("eatdesi_reset_gesehen", String(marke.id));
+        belksKasseLokalLeeren(!!marke.gutscheine);
+        alert("\uD83E\uDDF9 Die Kasse wurde an einem anderen Ger\u00e4t zur\u00fcckgesetzt.\n\nDieses Ger\u00e4t wird jetzt neu geladen.");
+        location.reload();
+      } catch (e) { console.warn("Reset-Marke:", e); }
+    };
+    pruefen();
+    window.addEventListener('eatdesi_state_synced', pruefen);
+    return () => window.removeEventListener('eatdesi_state_synced', pruefen);
+  }, []);
+
   const belksZustandVomAbgleich = (lsKey, wert, setzen) => {
     React.useEffect(() => {
       const uebernehmen = (neu) => {
@@ -30855,8 +30961,34 @@ async function syncTableOrders() {
 // === AUTOMATISCHE STATE-SYNCHRONISATION ===
 // Grundsatz: ALLE eatdesi_-Keys werden synchronisiert AUSSER die geraete-lokalen.
 // So muss kein Key einzeln eingetragen werden - neue Features syncen automatisch mit.
+/* ═══ v352: WAS BEIM ZURUECKSETZEN GELOESCHT WIRD ═══
+   Bewusst eine Positivliste statt "alles ausser...". Wer spaeter einen
+   Schluessel hinzufuegt, muss sich entscheiden - und nicht aus Versehen
+   das Menue mitloeschen. */
+var BELKS_RESET_KASSE = [
+  'eatdesi_orders',          // Buchungen
+  'eatdesi_tableorders',     // offene Tische
+  'eatdesi_to_meta',         // Zeitstempel und Loeschmarken der Tische
+  'eatdesi_stornos',         // stornierte offene Tische (v346)
+  'eatdesi_archive',         // Tagesabschluss-Archiv
+  'eatdesi_expenses',        // Ausgaben im Kassenbuch
+  'eatdesi_takeaway',        // offene Takeaway-Bestellungen
+  'eatdesi_bon_counter',     // Bon-Nummern beginnen wieder bei 1
+  'eatdesi_tse_counters',    // TSE-Zaehler
+  'eatdesi_tse_log',         // TSE-Protokoll
+  'eatdesi_pushed_bonNrs',   // lokale Push-Historie
+  'eatdesi_pending_push',    // Warteschlange
+  'eatdesi_last_autoclose',
+  'eatdesi_abschluss_seen',
+  'eatdesi_export_offen'
+];
+/* Diese bleiben IMMER: Menue, Firma, User, Tischplan, Drucker,
+   Optionsgruppen, Inventar, Kunden. Kunden sind echte Gaeste mit
+   Treuepunkten - die haben mit dem Kassenstand nichts zu tun. */
+
 var SYNC_BLACKLIST = [
   'eatdesi_device_id',     // jede Geraete-ID ist eigen
+  'eatdesi_reset_gesehen', // v352: welchen Reset dieses Geraet schon ausgefuehrt hat
   'eatdesi_session',       // Login-Session lokal
   'eatdesi_auth',          // v186: Zugangs-Token NIE synchronisieren!
   'eatdesi_printer',       // Drucker pro Geraet
@@ -31114,6 +31246,40 @@ async function syncOneStateKey(lsKey) {
     var local = raw ? JSON.parse(raw) : null;
     var remote = await pullStateWithTime(remoteKey);
     var localStamp = _localStamp(remoteKey);
+
+    /* ═══ v353: FIRMENDATEN GEHOEREN GENAU EINEM STANDORT ═══
+       Seit v322 tragen sie die Marke _loc, und belksFirmaLesen() verwirft
+       fremde Datensaetze. Nur kannte der ABGLEICH diese Marke nicht: ein
+       Geraet, das vorher in BW war, hat die BW-Daten nach eatdesi-kk_firma
+       geschrieben. Lokal flogen sie raus, in der Cloud blieben sie - und
+       kamen beim naechsten Mal wieder. Genau deshalb standen in KK
+       dauerhaft Steuernummer und USt-ID von BW.
+       Eine fremde Steuernummer auf dem Bon ist gegenueber dem Finanzamt
+       schlimmer als ein leeres Feld. Also: in beide Richtungen pruefen. */
+    if (remoteKey === 'firma') {
+      var _hier = LOCATION_ID;
+      var _fremdLokal  = local  && local._loc  && _hier && local._loc  !== _hier;
+      var _fremdRemote = remote && remote.value && remote.value._loc && _hier && remote.value._loc !== _hier;
+
+      if (_fremdLokal) {
+        console.warn('Firmendaten von ' + local._loc + ' werden NICHT nach ' + _hier + ' hochgeladen');
+        try { localStorage.removeItem(lsKey); } catch(e) {}
+        local = null;
+      }
+      if (_fremdRemote) {
+        console.warn('Firmendaten in der Cloud gehoeren zu ' + remote.value._loc + ', nicht zu ' + _hier);
+        /* Nur verwerfen reicht nicht - dann laedt sie das naechste Geraet
+           wieder herunter. Der falsche Datensatz muss weg. */
+        if (local && local._loc === _hier) {
+          await pushStateToSupabase(remoteKey, local);
+          _setLocalStamp(remoteKey, Date.now());
+        } else {
+          try { await supaFetch('/rest/v1/pos_state?key=eq.' + encodeURIComponent(_hier + '_firma'), { method: 'DELETE' }); }
+          catch(e) { console.warn('Fremde Firmendaten nicht entfernt:', e); }
+        }
+        return;
+      }
+    }
 
     // --- ID-Listen IMMER mergen (Stempel von allen Geraeten zusammenfuehren) ---
     // WICHTIG (Finanzamt): users + zeiterfassung duerfen NIE Daten verlieren.
