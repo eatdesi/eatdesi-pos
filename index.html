@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v357</title>
+<title>eatDeSi POS v359</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -10414,7 +10414,7 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
 
-  const printGastBon = (gitems, gtotal, gtg, method, nr, lbl, firma, grab) => {
+  const printGastBon = (gitems, gtotal, gtg, method, nr, lbl, firma, grab, gBonNr) => {
     const name = firma?.firmaName || "eatDeSi";
     const now = new Date();
     const dateStr = fmtD(now) + ' ' + fmtT(now);
@@ -10435,7 +10435,10 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
         L += `<div class="row bold" style="font-size:16px"><span>GESAMT</span><span>${fmt(gtotal)}</span></div>`;
         if (gtg > 0) L += `<div class="row"><span>Trinkgeld</span><span>${fmt(gtg)}</span></div>`;
         L += `<div class="row bold"><span>Zahlung:</span><span>${method}</span></div>`;
-        printBon("💳 ZAHLUNG — Gast " + nr, L, lbl, genNr(), now, null, printerSettings, null, 'kunde');
+        /* v358: Hier stand genNr() - der AUSDRUCK zog eine Belegnummer.
+           Die Teilzahlung hat ihre Nummer aber schon aus belksTeilzahlung.
+           Ohne eigene Nummer bleibt das Feld leer, statt eine zu erfinden. */
+        printBon("💳 ZAHLUNG — Gast " + nr, L, lbl, (gBonNr || null), now, null, printerSettings, null, 'kunde');
       } catch(e){ console.warn('Gast-Bon (BT) Fehler:', e); }
       return;
     }
@@ -16868,6 +16871,138 @@ function ExpensesView({
     }
   }, "\u2715")))));
 }
+/* ═══ v359: STORNO-ANSICHT ═══
+   Bis v358 waren Storni offener Tische nur in der Cloud zu sehen. Wer
+   keine Datenbank aufmachen kann - also jeder Kunde des SaaS - hatte
+   keine Moeglichkeit, sie zu pruefen oder vorzulegen.
+   Beide Arten gehoeren nebeneinander, weil ein Pruefer beide fragt. */
+function StornoView({ completedOrders, offeneStornos, printerSettings }) {
+  const [range, setRange] = React.useState("heute");
+
+  const grenzen = React.useMemo(() => {
+    const jetzt = new Date();
+    const start = new Date(jetzt); start.setHours(0,0,0,0);
+    if (range === "gestern") { const v = new Date(start); v.setDate(v.getDate()-1); return [v, start]; }
+    if (range === "woche")   { const v = new Date(start); v.setDate(v.getDate()-7); return [v, jetzt]; }
+    if (range === "monat")   { const v = new Date(start); v.setMonth(v.getMonth()-1); return [v, jetzt]; }
+    if (range === "alle")    return [new Date(0), new Date(8640000000000000)];
+    return [start, jetzt];
+  }, [range]);
+
+  const zeilen = React.useMemo(() => {
+    const [von, bis] = grenzen;
+    const raus = [];
+    (completedOrders || []).forEach(o => {
+      if (!o || !o.storniert) return;
+      const d = new Date(o.stornoZeit || o.time);
+      if (!(d >= von && d <= bis)) return;
+      raus.push({
+        art: "nach Zahlung", zeit: d,
+        tisch: o.tableId ? ("Tisch " + o.tableId) : (o.gutscheinVerkauf ? "Gutschein" : "Takeaway"),
+        nr: o.bonNr || "\u2014", bezug: null,
+        betrag: Number(o.total) || 0,
+        grund: o.stornoGrund || "ohne Angabe",
+        wer: o.stornoVon || "\u2014",
+        tse: !!o.tse
+      });
+    });
+    (offeneStornos || []).forEach(x => {
+      if (!x) return;
+      const d = new Date(x.zeit);
+      if (!(d >= von && d <= bis)) return;
+      raus.push({
+        art: "ohne Zahlung", zeit: d,
+        tisch: x.label || "\u2014",
+        nr: x.bonNr || "\u2014", bezug: x.bestellNr || null,
+        betrag: Number(x.betrag) || 0,
+        grund: x.grund || "ohne Angabe",
+        wer: x.mitarbeiter || "\u2014",
+        tse: !!x.tse
+      });
+    });
+    raus.sort((a,b) => b.zeit - a.zeit);
+    return raus;
+  }, [completedOrders, offeneStornos, grenzen]);
+
+  const summe = Math.round(zeilen.reduce((s,z) => s + z.betrag, 0) * 100) / 100;
+  const nachZ = zeilen.filter(z => z.art === "nach Zahlung");
+  const ohneZ = zeilen.filter(z => z.art === "ohne Zahlung");
+
+  /* Ausdruck fuer den Ordner - dasselbe, was auf dem Bildschirm steht. */
+  const drucken = () => {
+    try {
+      let L = '<div class="center bold">STORNO-\u00dcBERSICHT</div>';
+      L += '<div class="center">' + ({heute:"Heute",gestern:"Gestern",woche:"7 Tage",monat:"30 Tage",alle:"Alle"}[range]) + '</div>';
+      L += '<div class="line"></div>';
+      if (!zeilen.length) L += '<div class="center">Keine Stornierungen</div>';
+      zeilen.forEach(z => {
+        L += '<div class="row bold"><span>' + fmtT(z.zeit) + " " + z.tisch + '</span><span>' + fmt(z.betrag) + '</span></div>';
+        L += '<div class="row"><span>  ' + z.art + " \u00b7 " + z.grund + '</span><span></span></div>';
+        L += '<div class="row"><span>  ' + z.nr + (z.bezug ? " \u2190 " + z.bezug : "") + " \u00b7 " + z.wer + '</span><span></span></div>';
+      });
+      L += '<div class="line"></div>';
+      L += '<div class="row"><span>Nach Zahlung (' + nachZ.length + ')</span><span>' + fmt(nachZ.reduce((s,z)=>s+z.betrag,0)) + '</span></div>';
+      L += '<div class="row"><span>Ohne Zahlung (' + ohneZ.length + ')</span><span>' + fmt(ohneZ.reduce((s,z)=>s+z.betrag,0)) + '</span></div>';
+      L += '<div class="row bold"><span>GESAMT (' + zeilen.length + ')</span><span>' + fmt(summe) + '</span></div>';
+      printBon("STORNO-\u00dcBERSICHT", L, "Stornos", "-", new Date(), null, printerSettings, null, 'kueche');
+    } catch (e) { alert("Druck fehlgeschlagen: " + (e && e.message ? e.message : e)); }
+  };
+
+  return /*#__PURE__*/React.createElement("div", { style:{ padding:14, paddingBottom:80 } },
+    /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:18, color:"#c62828", marginBottom:12 } },
+      "\uD83D\uDEAB Stornierungen"),
+
+    /*#__PURE__*/React.createElement("div", { style:{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:14 } },
+      [["heute","Heute"],["gestern","Gestern"],["woche","7 Tage"],["monat","30 Tage"],["alle","Alle"]].map(([k,l]) =>
+        /*#__PURE__*/React.createElement("button", { key:k, onClick:()=>setRange(k),
+          style:{ padding:"7px 14px", borderRadius:20, border:"none",
+                  background: range===k ? C.green : "#eee", color: range===k ? "#fff" : "#555",
+                  cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5 } }, l))
+    ),
+
+    /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:14 } },
+      [["Nach Zahlung", nachZ.length, nachZ.reduce((s,z)=>s+z.betrag,0), "#c62828"],
+       ["Ohne Zahlung", ohneZ.length, ohneZ.reduce((s,z)=>s+z.betrag,0), "#ef6c00"],
+       ["Gesamt", zeilen.length, summe, "#555"]].map(([l,n,b,f2],i) =>
+        /*#__PURE__*/React.createElement("div", { key:i, style:{ background:"#fff", borderRadius:10, padding:"9px 8px", textAlign:"center", border:"1px solid #eee" } },
+          /*#__PURE__*/React.createElement("div", { style:{ fontSize:10.5, color:"#888", marginBottom:2 } }, l),
+          /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:15, color:f2 } }, fmt(b)),
+          /*#__PURE__*/React.createElement("div", { style:{ fontSize:10.5, color:"#aaa" } }, n + "x")))
+    ),
+
+    zeilen.length === 0
+      ? /*#__PURE__*/React.createElement("div", { style:{ textAlign:"center", color:"#bbb", padding:40, fontSize:14 } },
+          "Keine Stornierungen in diesem Zeitraum.")
+      : zeilen.map((z,i) =>
+        /*#__PURE__*/React.createElement("div", { key:i, style:{ background:"#fff", borderRadius:12, padding:12, marginBottom:9,
+            borderLeft:"5px solid " + (z.art==="nach Zahlung" ? "#c62828" : "#ef6c00") } },
+          /*#__PURE__*/React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 } },
+            /*#__PURE__*/React.createElement("span", { style:{ fontWeight:800, fontSize:14.5 } }, z.tisch),
+            /*#__PURE__*/React.createElement("span", { style:{ fontWeight:800, fontSize:14.5, color:"#c62828", textDecoration:"line-through" } }, fmt(z.betrag))),
+          /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, color:"#666", marginBottom:3 } },
+            fmtD(z.zeit) + " " + fmtT(z.zeit) + "  \u00b7  ",
+            /*#__PURE__*/React.createElement("span", { style:{ fontWeight:700, color: z.art==="nach Zahlung" ? "#c62828" : "#ef6c00" } }, z.art)),
+          /*#__PURE__*/React.createElement("div", { style:{ fontSize:12.5, marginBottom:3 } },
+            /*#__PURE__*/React.createElement("b", null, "Grund: "), z.grund,
+            "  \u00b7  ", z.wer),
+          /*#__PURE__*/React.createElement("div", { style:{ fontSize:10.5, color:"#999", fontFamily:"monospace" } },
+            z.nr, z.bezug ? "  \u2190  " + z.bezug : "",
+            z.tse ? "  \u00b7  TSE \u2713" : "  \u00b7  ohne TSE"))),
+
+    zeilen.length > 0 && /*#__PURE__*/React.createElement("button", { onClick:drucken,
+      style:{ width:"100%", padding:13, marginTop:8, borderRadius:11, border:"2px solid " + C.green,
+              background:"#fff", color:C.green, cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:14 } },
+      "\uD83D\uDDA8\uFE0F \u00dcbersicht drucken"),
+
+    /*#__PURE__*/React.createElement("div", { style:{ marginTop:16, fontSize:11, color:"#999", lineHeight:1.5 } },
+      /*#__PURE__*/React.createElement("b", null, "Nach Zahlung"), ": Der Beleg bleibt bestehen und ist weiter nachvollziehbar, z\u00e4hlt aber nicht mehr zum Umsatz.",
+      /*#__PURE__*/React.createElement("br", null),
+      /*#__PURE__*/React.createElement("b", null, "Ohne Zahlung"), ": Der Tisch war schon an K\u00fcche und Bar gesendet, wurde aber nie kassiert. Der Pfeil zeigt die zugeh\u00f6rige Bestellnummer.",
+      /*#__PURE__*/React.createElement("br", null),
+      "Ein Entwurf, der verworfen wurde, erscheint hier nicht \u2013 es wurde nichts produziert und nichts gebucht.")
+  );
+}
+
 function ReportsView({
   completedOrders,
   expenses
@@ -20438,6 +20573,7 @@ var ALL_PERMISSION_VIEWS = [
   { id:"zeiterfassung", l:"Zeiterfassung", i:"⏱️" },
   { id:"orders", l:"Bestellungen", i:"📋" },
   { id:"reports", l:"Berichte", i:"📈" },
+  { id:"stornos", l:"Stornierungen", i:"🚫" },   // v359
   { id:"expenses", l:"Ausgaben", i:"💸" },
   { id:"anfragen", l:"Anfragen", i:"📩" },
   { id:"customers", l:"Kunden", i:"👥" },
@@ -23617,7 +23753,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v357"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v359"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24909,7 +25045,13 @@ function App() {
       setTakeaway(t => t.map(x => {
         if (x.id !== taId) return x;
         if (x.kdsHidden) return null; // Küche bereits fertig -> komplett raus
-        return Object.assign({}, x, { bezahlt:true, bonNr: (x.bonNr||genNr()) });
+        /* ═══ v358: HIER WURDE EINE ZWEITE NUMMER GEZOGEN ═══
+           Die Buchung hat oben schon _bonNr bekommen. Seit v357 steht
+           x.bonNr auf null, also erzeugte genNr() hier eine WEITERE
+           Belegnummer, die zu keinem Beleg gehoert - in test-cafe fehlte
+           dadurch die 0022 nach der Abholung mit 0021.
+           Richtig ist, die Nummer der Buchung zu uebernehmen. */
+        return Object.assign({}, x, { bezahlt:true, bonNr: _bonNr });
       }).filter(Boolean));
     } else {
       const o = tableOrders[tid];
@@ -26425,6 +26567,10 @@ function App() {
   }), view === "reports" && /*#__PURE__*/React.createElement(ReportsView, {
     completedOrders: completedOrders,
     expenses: expenses
+  }), view === "stornos" && /*#__PURE__*/React.createElement(StornoView, {
+    completedOrders: completedOrders,
+    offeneStornos: stornos,
+    printerSettings: printerSettings
   }), view === "expenses" && /*#__PURE__*/React.createElement(ExpensesView, {
     expenses: expenses,
     onAdd: e => setExpenses(p => [...p, e]),
