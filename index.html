@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v360</title>
+<title>eatDeSi POS v361</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -13399,15 +13399,39 @@ function BackupView({ data, onRestore }) {
 
           /* Erst die Cloud, dann lokal. Andersherum wuerde dieses Geraet
              die frisch geleerten Daten sofort wieder herunterladen. */
+          /* ═══ v361: RICHTIG AUFRUFEN UND DAS ERGEBNIS PRUEFEN ═══
+             Hier stand supaFetch(pfad, { method: 'DELETE' }). Der zweite
+             Parameter ist aber die Methode als TEXT - das Objekt landete
+             unveraendert in fetch() und war keine gueltige Methode. Es
+             wurde nie etwas geloescht, und weil niemand die Antwort ansah,
+             kam trotzdem "erfolgreich". */
+          const _fehlgeschlagen = [];
           try {
-            await supaFetch('/rest/v1/eatdesi_orders?location_id=eq.' + loc, { method: 'DELETE' });
-          } catch (e) { console.warn("Cloud-Buchungen:", e); }
+            const r = await supaFetch('/rest/v1/eatdesi_orders?location_id=eq.' + loc, 'DELETE');
+            if (!r.ok) _fehlgeschlagen.push("Buchungen (" + r.status + " " + (await r.text()).slice(0,120) + ")");
+          } catch (e) { _fehlgeschlagen.push("Buchungen (" + (e && e.message ? e.message : e) + ")"); }
 
           const wolkeWeg = BELKS_RESET_KASSE.concat(mitGut ? ['eatdesi_gutscheine'] : [])
             .map(function(k){ return loc + '_' + k.replace(/^eatdesi_/, ''); });
           for (const rk of wolkeWeg) {
-            try { await supaFetch('/rest/v1/pos_state?key=eq.' + encodeURIComponent(rk), { method: 'DELETE' }); }
-            catch (e) { console.warn("Cloud " + rk + ":", e); }
+            try {
+              const r = await supaFetch('/rest/v1/pos_state?key=eq.' + encodeURIComponent(rk), 'DELETE');
+              if (!r.ok) _fehlgeschlagen.push(rk + " (" + r.status + ")");
+            } catch (e) { _fehlgeschlagen.push(rk + " (" + (e && e.message ? e.message : e) + ")"); }
+          }
+
+          /* Ohne leere Cloud ist der Reset wertlos: die Geraete laden alles
+             beim naechsten Abgleich wieder herunter. Dann darf hier auch
+             kein Haken stehen. */
+          if (_fehlgeschlagen.length) {
+            alert("\u274C Die Kasse wurde NICHT zur\u00fcckgesetzt.\n\n"
+                + "Diese Daten konnten in der Cloud nicht gel\u00f6scht werden:\n"
+                + _fehlgeschlagen.slice(0,8).join("\n")
+                + (_fehlgeschlagen.length > 8 ? "\n\u2026 und " + (_fehlgeschlagen.length-8) + " weitere" : "")
+                + "\n\nH\u00e4ufigste Ursache: der Schl\u00fcssel dieser Kasse darf in Supabase nicht "
+                + "l\u00f6schen (fehlende DELETE-Berechtigung).\n\n"
+                + "Lokal wurde nichts ver\u00e4ndert \u2013 die Kasse l\u00e4uft normal weiter.");
+            return;
           }
 
           /* Die Marke, an der die anderen Geraete erkennen, dass sie dran
@@ -13419,10 +13443,11 @@ function BackupView({ data, onRestore }) {
           } catch (e) { console.warn("Reset-Marke setzen:", e); }
 
           belksKasseLokalLeeren(mitGut);
-          alert("\u2705 Kasse zur\u00fcckgesetzt.\n\n"
+          alert("\u2705 Kasse zur\u00fcckgesetzt \u2013 Cloud und dieses Ger\u00e4t.\n\n"
               + (datei ? "Sicherung: " + datei + "\n\n" : "")
-              + "Die n\u00e4chste Bestellung bekommt Bon-Nr. 0001.\n"
-              + "Die anderen Ger\u00e4te setzen sich beim n\u00e4chsten Abgleich zur\u00fcck.");
+              + "Die n\u00e4chste Bestellung bekommt Bon-Nr. 0001.\n\n"
+              + "WICHTIG: Jedes weitere Ger\u00e4t dieses Restaurants einmal \u00f6ffnen, "
+              + "sonst l\u00e4dt es seine alten Tische wieder hoch.");
           location.reload();
         },
         style:{ width:"100%", padding:11, borderRadius:9, border:"2px solid #c62828", background:"#fff5f5", color:"#c62828", cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:12.5, marginTop:14 }
@@ -23753,7 +23778,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v360"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v361"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -31507,8 +31532,12 @@ async function syncOneStateKey(lsKey) {
           await pushStateToSupabase(remoteKey, local);
           _setLocalStamp(remoteKey, Date.now());
         } else {
-          try { await supaFetch('/rest/v1/pos_state?key=eq.' + encodeURIComponent(_hier + '_firma'), { method: 'DELETE' }); }
-          catch(e) { console.warn('Fremde Firmendaten nicht entfernt:', e); }
+          /* v361: derselbe Aufruffehler wie beim Reset - fremde
+             Firmendaten liessen sich dadurch nie entfernen. */
+          try {
+            const _r = await supaFetch('/rest/v1/pos_state?key=eq.' + encodeURIComponent(_hier + '_firma'), 'DELETE');
+            if (!_r.ok) console.warn('Fremde Firmendaten nicht entfernt: HTTP ' + _r.status);
+          } catch(e) { console.warn('Fremde Firmendaten nicht entfernt:', e); }
         }
         return;
       }
