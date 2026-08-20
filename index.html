@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v361</title>
+<title>eatDeSi POS v362</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8781,6 +8781,34 @@ window.callAIVision = async function(prompt, b64jpeg, maxTokens, mimeType) {
    Loescht die Kassendaten dieses Geraets. Die Cloud und die anderen
    Geraete werden vom Aufrufer erledigt - hier steht nur der lokale Teil,
    damit ihn auch das Geraet ausfuehren kann, das die Marke spaeter sieht. */
+/* ═══ v362: WAS EINEN RESET UEBERLEBT ═══
+   Positivliste, kleingeschrieben verglichen. Alles andere unter
+   <standort>_ wird beim Zuruecksetzen geloescht - auch Schluessel, die
+   ich nicht kenne. Das ist der Sinn eines Resets.
+   Wer hier etwas hinzufuegt, entscheidet bewusst, dass es bleibt. */
+var BELKS_RESET_BEHALTEN = [
+  'menu','menu_standard','optiongroups','firma','users','floors',
+  'printer','inventory','customers','tischplan','tablecount',
+  'shortname','loyalty_settings','drivers','reset_marke',
+  'happyhour','bonlayout','zonen','lieferzonen'
+];
+
+/* Bleibt der Schluessel bei einem Reset erhalten? Vergleich ohne
+   Ruecksicht auf Gross- und Kleinschreibung: in der Cloud steht
+   tableOrders mit grossem O, lokal tableorders - genau daran ist der
+   Reset in v361 gescheitert. */
+function belksResetBehalten(kurzName, auchGutscheine){
+  var n = String(kurzName || '').toLowerCase();
+  if (!auchGutscheine && n === 'gutscheine') return true;
+  for (var i = 0; i < BELKS_RESET_BEHALTEN.length; i++) {
+    var b = BELKS_RESET_BEHALTEN[i];
+    if (n === b) return true;
+    if (n.indexOf(b + '_') === 0) return true;   // tischplan_f1786...
+  }
+  if (n.indexOf('heimat') === 0) return true;
+  return false;
+}
+
 function belksKasseLokalLeeren(auchGutscheine){
   var weg = BELKS_RESET_KASSE.slice();
   if (auchGutscheine) weg.push('eatdesi_gutscheine');
@@ -8788,6 +8816,23 @@ function belksKasseLokalLeeren(auchGutscheine){
     try { localStorage.removeItem(k); } catch(e) {}
     try { localStorage.removeItem('eatdesi_stamp_' + k.replace(/^eatdesi_/, '')); } catch(e) {}
   });
+  /* v362: Dieselbe Ueberlegung wie in der Cloud - auch lokal darf kein
+     Schluessel uebrigbleiben, nur weil ich seinen Namen nicht kenne.
+     Alles unter eatdesi_ ausser den Stammdaten und den Identitaets-
+     schluesseln (SYNC_BLACKLIST), sonst meldet sich das Geraet ab. */
+  try {
+    var raus = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (!k || k.indexOf('eatdesi_') !== 0) continue;
+      if (_isLocalOnlyKey(k)) continue;                 // Anmeldung, Geraete-ID
+      if (k.indexOf('eatdesi_stamp_') === 0) { raus.push(k); continue; }
+      if (belksResetBehalten(k.slice(8), auchGutscheine)) continue;
+      raus.push(k);
+    }
+    raus.forEach(function(k){ try { localStorage.removeItem(k); } catch(e) {} });
+    weg = weg.concat(raus);
+  } catch(e) { console.warn('Lokales Leeren:', e); }
   return weg.length;
 }
 
@@ -13411,8 +13456,29 @@ function BackupView({ data, onRestore }) {
             if (!r.ok) _fehlgeschlagen.push("Buchungen (" + r.status + " " + (await r.text()).slice(0,120) + ")");
           } catch (e) { _fehlgeschlagen.push("Buchungen (" + (e && e.message ? e.message : e) + ")"); }
 
-          const wolkeWeg = BELKS_RESET_KASSE.concat(mitGut ? ['eatdesi_gutscheine'] : [])
-            .map(function(k){ return loc + '_' + k.replace(/^eatdesi_/, ''); });
+          /* ═══ v362: NICHT RATEN, SONDERN FRAGEN ═══
+             Bis v361 habe ich die Cloud-Schluessel aus den lokalen Namen
+             errechnet. Dabei entstand test-cafe_tableorders, waehrend in
+             der Cloud test-cafe_tableOrders stand - ein grosses O, und das
+             DELETE traf nichts. tableordersmeta heisst lokal sogar ganz
+             anders (to_meta) und war gar nicht herleitbar.
+             Also: die Cloud liefert die Namen, wir entscheiden nur noch,
+             was davon bleiben darf. */
+          let wolkeWeg = [];
+          try {
+            const rl = await supaFetch('/rest/v1/pos_state?key=like.' + encodeURIComponent(loc + '\\_%') + '&select=key');
+            if (!rl.ok) throw new Error('HTTP ' + rl.status);
+            const liste = await rl.json();
+            wolkeWeg = (liste || [])
+              .map(function(z){ return z && z.key; })
+              .filter(Boolean)
+              .filter(function(k){
+                var kurz = String(k).slice(loc.length + 1);
+                return !belksResetBehalten(kurz, mitGut);
+              });
+          } catch (e) {
+            _fehlgeschlagen.push("Schl\u00fcsselliste konnte nicht gelesen werden (" + (e && e.message ? e.message : e) + ")");
+          }
           for (const rk of wolkeWeg) {
             try {
               const r = await supaFetch('/rest/v1/pos_state?key=eq.' + encodeURIComponent(rk), 'DELETE');
@@ -13444,7 +13510,8 @@ function BackupView({ data, onRestore }) {
 
           belksKasseLokalLeeren(mitGut);
           alert("\u2705 Kasse zur\u00fcckgesetzt \u2013 Cloud und dieses Ger\u00e4t.\n\n"
-              + (datei ? "Sicherung: " + datei + "\n\n" : "")
+              + wolkeWeg.length + " Schl\u00fcssel in der Cloud gel\u00f6scht.\n"
+              + (datei ? "Sicherung: " + datei + "\n\n" : "\n")
               + "Die n\u00e4chste Bestellung bekommt Bon-Nr. 0001.\n\n"
               + "WICHTIG: Jedes weitere Ger\u00e4t dieses Restaurants einmal \u00f6ffnen, "
               + "sonst l\u00e4dt es seine alten Tische wieder hoch.");
@@ -23778,7 +23845,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v361"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v362"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
