@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v355</title>
+<title>eatDeSi POS v356</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9278,9 +9278,9 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     ${_istStation ? `
     <div class="center bold" style="font-size:14px">${label}</div>
     <div class="line"></div>${lines}` : `
-    ${bonNr && bonNr !== '-' ? `<div class="row info-row"><span>Bon-Nr:</span><span>${bonNr}</span></div>`
-      /* v355: Ohne Zahlung gibt es keine Belegnummer. Statt einer
-         erfundenen Nummer steht hier, was der Zettel wirklich ist. */
+    ${bonNr && bonNr !== '-' ? `<div class="row info-row"><span>${String(bonNr).indexOf('B-')===0 ? 'Bestell-Nr:' : 'Bon-Nr:'}</span><span>${bonNr}</span></div>`
+      /* v356: B- ist eine Bestellung, ohne Praefix ein bezahlter Beleg,
+         nichts davon ein reiner Entwurf. Drei Zustaende, drei Woerter. */
       : `<div class="row info-row"><span>Beleg:</span><span>Zwischenrechnung</span></div>`}
     <div class="row info-row"><span>Datum:</span><span>${fmtD(now)} ${fmtT(now)}</span></div>
     <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
@@ -9848,7 +9848,7 @@ function BonModal({
       display: "flex",
       justifyContent: "space-between"
     }
-  }, /*#__PURE__*/React.createElement("span", null, bonNr ? "Bon-Nr:" : "Beleg:"), /*#__PURE__*/React.createElement("span", null, bonNr || "Zwischenrechnung")), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, !bonNr ? "Beleg:" : (String(bonNr).indexOf("B-") === 0 ? "Bestell-Nr:" : "Bon-Nr:")), /*#__PURE__*/React.createElement("span", null, bonNr || "Zwischenrechnung")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between"
@@ -23617,7 +23617,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v355"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v356"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24602,11 +24602,15 @@ function App() {
     } catch (e) { console.warn("Bestell-Bons:", e); }
 
     // 2. TSE - der Vorgang beginnt jetzt, nicht erst bei der Zahlung
+    /* v356: Die Nummer wurde bisher nur an die TSE gereicht und danach
+       vergessen. Sie gehoert auf den Tisch - sonst ist der Vorgang zwar
+       nummeriert, aber niemand kann die Nummer sehen oder zuordnen. */
+    const _bestellNr = genBestellNr();
     let _tse = null;
     try {
       const summe = neue.reduce((s, i) => s + (i.finalPrice || 0) * (i.qty || 0), 0);
       _tse = await window.TSE.signOrder({
-        bonNr: genBestellNr(), total: Math.round(summe * 100) / 100,   // v354: eigener Kreis
+        bonNr: _bestellNr, total: Math.round(summe * 100) / 100,
         payMethod: "Bestellung", items: neue, tableId: istTa ? null : tid
       });
     } catch (e) { console.warn("TSE (Bestellung):", e); }
@@ -24620,6 +24624,9 @@ function App() {
     });
     if (istTa) setTakeaway(t => t.map(x => x.id === taId ? Object.assign({}, x, {
       items: entmarken(x.items),
+      /* Die ERSTE Bestellnummer bleibt stehen - bestellt der Gast nach,
+         gehoert das zum selben Vorgang und bekommt keine neue. */
+      bestellNr: x.bestellNr || _bestellNr,
       tseBestellung: _tse || x.tseBestellung || null
     }) : x));
     else setTableOrders(p => {
@@ -24627,6 +24634,7 @@ function App() {
       if (!alt) return p;
       return Object.assign({}, p, { [tid]: Object.assign({}, alt, {
         items: entmarken(alt.items),
+        bestellNr: alt.bestellNr || _bestellNr,
         tseBestellung: _tse || alt.tseBestellung || null
       })});
     });
@@ -24641,7 +24649,13 @@ function App() {
        Der Gast sieht hier nur, was bisher aufgelaufen ist. Bezahlt wird
        spaeter - oder gar nicht. Die Belegnummer entsteht deshalb erst in
        completeOrder, bei der Zahlung. */
-    const bonNr = null;
+    /* v356: Ist der Tisch schon gesendet, hat er eine Bestellnummer -
+       die gehoert auf den Zettel. "Zwischenrechnung" bleibt dem reinen
+       Entwurf vorbehalten, wo es zutrifft. */
+    const _q = String(tid).startsWith("ta_")
+      ? (takeaway.find(t => t.id === parseInt(String(tid).replace("ta_",""))) || {})
+      : (tableOrders[tid] || {});
+    const bonNr = _q.bestellNr || null;
     if (String(tid).startsWith("ta_")) {
       const taId = parseInt(String(tid).replace("ta_", ""));
       setTakeaway(t => t.map(x => x.id === taId ? { ...x, saved: true, bonNr, lieferFee } : x));
@@ -25631,10 +25645,14 @@ function App() {
       setClearConfirm(null);
       setStornoGrund(null);
       if (_gesendet) {
+        /* v356: Auch die Storno-Nummer wurde bisher nur an die TSE
+           gereicht. Ohne sie stand in der Uebersicht "—", obwohl der
+           Vorgang sehr wohl nummeriert war. */
+        var _stornoNr = genStornoNr();
         var _tse = null;
         try {
           _tse = await window.TSE.signOrder({
-            bonNr: genStornoNr(), total: _summe, payMethod: "Storno",   // v354: eigener Kreis
+            bonNr: _stornoNr, total: _summe, payMethod: "Storno",
             items: _o.items || [], tableId: tid
           });
         } catch (e) { console.warn("TSE (Storno):", e); }
@@ -25644,7 +25662,13 @@ function App() {
           betrag: _summe, anzahl: (_o.items || []).length,
           items: (_o.items || []).map(function(i){ return { name:i.name, nr:i.nr, qty:i.qty, preis:i.finalPrice }; }),
           mitarbeiter: (loggedInUser && loggedInUser.name) || "unbekannt",
-          tse: _tse, bonNrBestellung: (_o.tseBestellung && _o.tseBestellung.bonNr) || null
+          tse: _tse,
+          /* Beide Nummern: die eigene und die der Bestellung, auf die sich
+             der Storno bezieht. Damit laesst sich der Vorgang von der
+             Kueche bis zur Stornierung zurueckverfolgen. */
+          bonNr: _stornoNr,
+          bestellNr: _o.bestellNr || null,
+          bonNrBestellung: _o.bestellNr || null
         }]; });
       }
       setTableOrders(p => { const n = {...p}; delete n[tid]; return n; });
