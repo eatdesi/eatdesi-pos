@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v354</title>
+<title>eatDeSi POS v355</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9278,7 +9278,10 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     ${_istStation ? `
     <div class="center bold" style="font-size:14px">${label}</div>
     <div class="line"></div>${lines}` : `
-    <div class="row info-row"><span>Bon-Nr:</span><span>${bonNr}</span></div>
+    ${bonNr && bonNr !== '-' ? `<div class="row info-row"><span>Bon-Nr:</span><span>${bonNr}</span></div>`
+      /* v355: Ohne Zahlung gibt es keine Belegnummer. Statt einer
+         erfundenen Nummer steht hier, was der Zettel wirklich ist. */
+      : `<div class="row info-row"><span>Beleg:</span><span>Zwischenrechnung</span></div>`}
     <div class="row info-row"><span>Datum:</span><span>${fmtD(now)} ${fmtT(now)}</span></div>
     <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
     ${deliveryBlock}
@@ -9669,7 +9672,10 @@ function BonModal({
     <div class="center" style="font-size:11px">${printerSettings?.phone || "05621 9449087"}</div>
     <div class="line"></div>
     <div class="center bold" style="margin:3px 0">${title}</div>
-    <div class="row info-row"><span>Bon-Nr:</span><span>${bonNr}</span></div>
+    ${bonNr && bonNr !== '-' ? `<div class="row info-row"><span>Bon-Nr:</span><span>${bonNr}</span></div>`
+      /* v355: Ohne Zahlung gibt es keine Belegnummer. Statt einer
+         erfundenen Nummer steht hier, was der Zettel wirklich ist. */
+      : `<div class="row info-row"><span>Beleg:</span><span>Zwischenrechnung</span></div>`}
     <div class="row info-row"><span>Datum:</span><span>${fmtD(now)} ${fmtT(now)}</span></div>
     <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
     ${deliveryBlock}
@@ -9842,7 +9848,7 @@ function BonModal({
       display: "flex",
       justifyContent: "space-between"
     }
-  }, /*#__PURE__*/React.createElement("span", null, "Bon-Nr:"), /*#__PURE__*/React.createElement("span", null, bonNr)), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, bonNr ? "Bon-Nr:" : "Beleg:"), /*#__PURE__*/React.createElement("span", null, bonNr || "Zwischenrechnung")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between"
@@ -23611,7 +23617,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v354"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v355"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24627,7 +24633,15 @@ function App() {
   };
 
   const saveOrder = (tid, lieferFee=0) => {
-    const bonNr = genNr();
+    /* ═══ v355: DIE VORSCHAU IST KEIN BELEG ═══
+       Hier stand: const bonNr = genNr();
+       Damit verbrauchte JEDER Blick auf die Zwischenrechnung eine
+       Belegnummer - auch bei einem Entwurf, der danach geloescht wurde.
+       In test-cafe fehlten dadurch die Nummern 0004 bis 0012.
+       Der Gast sieht hier nur, was bisher aufgelaufen ist. Bezahlt wird
+       spaeter - oder gar nicht. Die Belegnummer entsteht deshalb erst in
+       completeOrder, bei der Zahlung. */
+    const bonNr = null;
     if (String(tid).startsWith("ta_")) {
       const taId = parseInt(String(tid).replace("ta_", ""));
       setTakeaway(t => t.map(x => x.id === taId ? { ...x, saved: true, bonNr, lieferFee } : x));
