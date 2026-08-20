@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v353</title>
+<title>eatDeSi POS v354</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8806,18 +8806,39 @@ function belksResetSicherung(){
   } catch(e) { console.warn('Reset-Sicherung:', e); return null; }
 }
 
-// genNr: fortlaufende Bon-Nummer (behebt fehlende Definition + dient TSE-Zähler)
-function genNr() {
+/* ═══ v354: DREI GETRENNTE NUMMERNKREISE ═══
+   Bis v353 zogen Belege, Bestellungen und Storni aus DEMSELBEN Zaehler.
+   Im Belegkreis entstanden dadurch Luecken: in test-cafe stand nach drei
+   Tischen der Zaehler auf 4, obwohl es nur EINEN Beleg gab. Ein Pruefer
+   sieht dort eine fehlende Nummer und muss nachfragen.
+
+   Jetzt zaehlt jeder Kreis fuer sich:
+     Beleg        20260820-0001   (eatdesi_bon_counter)
+     Bestellung   B-20260820-0001 (eatdesi_best_counter)
+     Storno       S-20260820-0001 (eatdesi_storno_counter)
+
+   Der Belegzaehler behaelt seinen alten Schluessel, damit bestehende
+   Belege ihre Nummern behalten. */
+function belksNummer(zaehlerKey, praefix) {
   var n = 0;
-  try { n = parseInt(localStorage.getItem('eatdesi_bon_counter') || '0', 10) || 0; } catch (e) {}
+  try { n = parseInt(localStorage.getItem(zaehlerKey) || '0', 10) || 0; } catch (e) {}
   n += 1;
-  try { localStorage.setItem('eatdesi_bon_counter', String(n)); } catch (e) {}
+  try { localStorage.setItem(zaehlerKey, String(n)); } catch (e) {}
   var d = new Date();
   var ymd = '' + d.getFullYear() +
             String(d.getMonth() + 1).padStart(2, '0') +
             String(d.getDate()).padStart(2, '0');
-  return ymd + '-' + String(n).padStart(4, '0');
+  return (praefix || '') + ymd + '-' + String(n).padStart(4, '0');
 }
+
+// Belegnummer - nur fuer Belege, die eine Zahlung abschliessen
+function genNr() { return belksNummer('eatdesi_bon_counter', ''); }
+
+// Bestellung (Speichern-Knopf, v344) - eigener Kreis
+function genBestellNr() { return belksNummer('eatdesi_best_counter', 'B-'); }
+
+// Stornierung eines gesendeten Tisches (v346) - eigener Kreis
+function genStornoNr() { return belksNummer('eatdesi_storno_counter', 'S-'); }
 function OptionModal({
   item,
   onConfirm,
@@ -13322,6 +13343,12 @@ function BackupView({ data, onRestore }) {
             t += "Mit Gutschein bezahlt: " + sE.toFixed(2) + "\n";
             t += "Trinkgeld: " + sT.toFixed(2) + "\n";
             t += "Liefergebuehr: " + sF.toFixed(2) + "\n";
+            /* v354: die drei Kreise nebeneinander - dann sieht man sofort,
+               ob im Belegkreis wirklich keine Nummer fehlt. */
+            t += "\n\uD83D\uDD22 NUMMERNKREISE\n";
+            t += "  Belege:       " + (localStorage.getItem('eatdesi_bon_counter') || '0') + "\n";
+            t += "  Bestellungen: " + (localStorage.getItem('eatdesi_best_counter') || '0') + "\n";
+            t += "  Storni:       " + (localStorage.getItem('eatdesi_storno_counter') || '0') + "\n";
             const gs = LS.get("eatdesi_gutscheine", []) || [];
             t += "\nGutschein-Liste: " + gs.length + " St\u00fcck\n";
             gs.forEach(g => {
@@ -23584,7 +23611,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v353"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v354"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24573,7 +24600,7 @@ function App() {
     try {
       const summe = neue.reduce((s, i) => s + (i.finalPrice || 0) * (i.qty || 0), 0);
       _tse = await window.TSE.signOrder({
-        bonNr: "B-" + genNr(), total: Math.round(summe * 100) / 100,
+        bonNr: genBestellNr(), total: Math.round(summe * 100) / 100,   // v354: eigener Kreis
         payMethod: "Bestellung", items: neue, tableId: istTa ? null : tid
       });
     } catch (e) { console.warn("TSE (Bestellung):", e); }
@@ -25593,7 +25620,7 @@ function App() {
         var _tse = null;
         try {
           _tse = await window.TSE.signOrder({
-            bonNr: "S-" + genNr(), total: _summe, payMethod: "Storno",
+            bonNr: genStornoNr(), total: _summe, payMethod: "Storno",   // v354: eigener Kreis
             items: _o.items || [], tableId: tid
           });
         } catch (e) { console.warn("TSE (Storno):", e); }
@@ -30973,7 +31000,9 @@ var BELKS_RESET_KASSE = [
   'eatdesi_archive',         // Tagesabschluss-Archiv
   'eatdesi_expenses',        // Ausgaben im Kassenbuch
   'eatdesi_takeaway',        // offene Takeaway-Bestellungen
-  'eatdesi_bon_counter',     // Bon-Nummern beginnen wieder bei 1
+  'eatdesi_bon_counter',     // Belegnummern beginnen wieder bei 1
+  'eatdesi_best_counter',    // v354: Bestellnummern
+  'eatdesi_storno_counter',  // v354: Stornonummern
   'eatdesi_tse_counters',    // TSE-Zaehler
   'eatdesi_tse_log',         // TSE-Protokoll
   'eatdesi_pushed_bonNrs',   // lokale Push-Historie
