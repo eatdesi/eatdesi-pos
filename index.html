@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v367</title>
+<title>eatDeSi POS v368</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -23820,7 +23820,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v367"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v368"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25081,6 +25081,14 @@ function App() {
     if (isTA) {
       const taId = parseInt(String(tid).replace("ta_", ""));
       const ta = takeaway.find(t => t.id === taId);
+      /* ═══ v368: HIER STAND DIE NUMMER IM FALSCHEN BLOCK ═══
+         _bonNr wurde mit const in "if (ta) { ... }" angelegt, aber unten im
+         setTakeaway gebraucht - hinter dem Block. const endet am Blockende,
+         also gab es dort ein "_bonNr is not defined", React raeumte den Baum
+         ab und der Bildschirm wurde weiss. Seit v358, bei JEDER
+         Takeaway-Zahlung mit laufendem Kuechen-Prozess.
+         Jetzt lebt die Nummer so lange wie der ganze Zweig. */
+      let _bonNr = null;
       if (ta) {
         /* ═══ v330: LIEFERGEBUEHR GEHOERT IN DEN GESAMTBETRAG ═══
            Sie kommt entweder aus dem Kassiervorgang (lieferFee) oder, wenn
@@ -25090,7 +25098,7 @@ function App() {
         const _fee = Math.max(0, Number(lieferFee) || Number(ta.lieferFee) || 0);
         const orderTotal = ta.items.reduce((s, i) => s + i.finalPrice * i.qty, 0) + _fee - (rabatt||0);
         const _vorhandenTa = ta.bonNr && !/^[BS]-/.test(String(ta.bonNr)) ? ta.bonNr : null;
-        const _bonNr = _vorhandenTa || genNr();   // v357: siehe oben
+        _bonNr = _vorhandenTa || genNr();   // v357: siehe oben - v368: kein const mehr
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: ta.items, tableId: null }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
         try { window.maybeOpenDrawer && window.maybeOpenDrawer(payMethod); } catch (e) {}
@@ -25128,7 +25136,9 @@ function App() {
            Belegnummer, die zu keinem Beleg gehoert - in test-cafe fehlte
            dadurch die 0022 nach der Abholung mit 0021.
            Richtig ist, die Nummer der Buchung zu uebernehmen. */
-        return Object.assign({}, x, { bezahlt:true, bonNr: _bonNr });
+        /* v368: Wurde oben kein Takeaway gefunden, ist _bonNr null - dann
+           darf die vorhandene Nummer nicht ueberschrieben werden. */
+        return Object.assign({}, x, { bezahlt:true, bonNr: _bonNr || x.bonNr || null });
       }).filter(Boolean));
     } else {
       const o = tableOrders[tid];
