@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v366</title>
+<title>eatDeSi POS v367</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -23820,7 +23820,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v366"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v367"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -31340,7 +31340,13 @@ var SYNC_BLACKLIST = [
   'eatdesi_belks_operator',// Betreiber-Modus (nur dieses Geraet)
   'eatdesi_belks_home',
   'eatdesi_master_auto',
-  'eatdesi_tenant_info'    // Name/Adresse kommt aus belks_tenants, nicht aus pos_state
+  'eatdesi_tenant_info',   // Name/Adresse kommt aus belks_tenants, nicht aus pos_state
+  /* v367: Absturzberichte gehoeren dem GERAET. Sie enthalten Bruchstuecke
+     dessen, was gerade auf dem Bildschirm war - das hat in der Cloud nichts
+     zu suchen, und ein Absturz auf einem Handy darf nicht auf allen anderen
+     erscheinen. Ohne diesen Eintrag wuerde der setItem-Haken ihn hochladen,
+     weil er mit eatdesi_ beginnt. */
+  'eatdesi_absturz'
 ];
 // TSE bleibt IMMER lokal (gesetzlich: eigener Zaehler/Schluessel pro Kasse)
 function _isLocalOnlyKey(k) {
@@ -32531,8 +32537,78 @@ window.TENANT_INFO=(function(){ try{ return JSON.parse(localStorage.getItem('eat
 
 if(!belksRecoveryCheck()) belksTenantGuard();
 
+/* ═══ v367: DER WEISSE BILDSCHIRM BEKOMMT EINE STIMME ═══
+   Ohne diese Grenze raeumt React bei einer Ausnahme den ganzen Baum ab und
+   hinterlaesst eine leere Seite. Was schiefging, steht dann nur in der
+   Konsole - unerreichbar in der APK. Hier wird der Fehler abgefangen,
+   angezeigt und aufgeschrieben. */
+class BelksFehlerGrenze extends React.Component {
+  constructor(p){ super(p); this.state = { fehler: null, stapel: "" }; }
+  static getDerivedStateFromError(e){ return { fehler: e }; }
+  componentDidCatch(e, info){
+    var stapel = (info && info.componentStack) || "";
+    this.setState({ stapel: stapel });
+    /* Aufschreiben, damit die Meldung auch nach dem Neuladen noch da ist.
+       Nur die letzten drei - mehr braucht niemand, und der Speicher ist
+       auf dem Kassengeraet knapp. */
+    try {
+      var alt = JSON.parse(localStorage.getItem("eatdesi_absturz") || "[]");
+      alt.unshift({
+        zeit: new Date().toISOString(),
+        version: (document.title || "").replace(/[^v0-9]/g, ""),
+        meldung: (e && e.message) ? e.message : String(e),
+        stapel: String(stapel).slice(0, 1200)
+      });
+      localStorage.setItem("eatdesi_absturz", JSON.stringify(alt.slice(0, 3)));
+    } catch(_e) {}
+    try { console.error("BELKS Absturz:", e, stapel); } catch(_e) {}
+  }
+  render(){
+    if (!this.state.fehler) return this.props.children;
+    var e = this.state.fehler;
+    var text = "BELKS " + (document.title || "") + "\n"
+             + new Date().toLocaleString("de-DE") + "\n\n"
+             + ((e && e.message) ? e.message : String(e)) + "\n\n"
+             + String(this.state.stapel).slice(0, 1200);
+    return React.createElement("div", {
+      style: { padding: 18, fontFamily: "system-ui, sans-serif", background: "#fff", minHeight: "100vh" }
+    },
+      React.createElement("div", { style:{ fontSize:34, marginBottom:6 } }, "\u26A0\uFE0F"),
+      React.createElement("div", { style:{ fontWeight:800, fontSize:18, color:"#c62828", marginBottom:6 } },
+        "Die Kasse ist abgest\u00fcrzt"),
+      React.createElement("div", { style:{ fontSize:13, color:"#555", lineHeight:1.5, marginBottom:14 } },
+        "Gebuchte Bestellungen und offene Tische sind gespeichert \u2013 sie gehen nicht verloren. ",
+        "Bitte den Text unten kopieren und schicken, dann l\u00e4sst sich die Ursache finden."),
+      React.createElement("textarea", {
+        readOnly: true, value: text,
+        onFocus: function(ev){ try { ev.target.select(); } catch(_e){} },
+        style: { width:"100%", height:190, fontFamily:"monospace", fontSize:11, padding:10,
+                 borderRadius:10, border:"2px solid #eee", background:"#fafafa", color:"#333" }
+      }),
+      React.createElement("button", {
+        onClick: function(){
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text);
+              alert("Kopiert");
+              return;
+            }
+          } catch(_e) {}
+          alert("Bitte den Text von Hand markieren und kopieren.");
+        },
+        style: { width:"100%", padding:14, marginTop:10, borderRadius:11, border:"none",
+                 background:"#1565c0", color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }
+      }, "\uD83D\uDCCB Text kopieren"),
+      React.createElement("button", {
+        onClick: function(){ try { location.reload(); } catch(_e){} },
+        style: { width:"100%", padding:14, marginTop:8, borderRadius:11, border:"2px solid #2e7d32",
+                 background:"#fff", color:"#2e7d32", fontWeight:800, fontSize:15, cursor:"pointer" }
+      }, "\uD83D\uDD04 Kasse neu starten"));
+  }
+}
+
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(React.createElement(App));
+root.render(React.createElement(BelksFehlerGrenze, null, React.createElement(App)));
 
 
 })();
