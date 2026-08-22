@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v362</title>
+<title>eatDeSi POS v364</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -13418,107 +13418,37 @@ function BackupView({ data, onRestore }) {
         style:{ width:"100%", padding:10, borderRadius:9, border:"1.5px dashed #90a4ae", background:"#fff", color:"#546e7a", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5, marginTop:8 }
       }, "\uD83E\uDDFE Buchungen von heute pr\u00fcfen"),
 
-      /* ═══ v352: KASSE ZURUECKSETZEN ═══
-         Fuer den Start eines neuen Betriebs und fuer Testsysteme. Die
-         Sicherheitsabfrage verlangt den Standort-Namen: einen Knopf kann
-         man versehentlich treffen, einen Namen tippt man nicht aus
-         Versehen. */
-      /*#__PURE__*/React.createElement("button", {
-        onClick: async () => {
-          const loc = (typeof LOCATION_ID !== 'undefined') ? LOCATION_ID : '';
-          const eingabe = window.prompt(
-            "\u26A0\uFE0F KASSE ZUR\u00dcCKSETZEN \u2013 " + loc + "\n\n"
-            + "Gel\u00f6scht werden: Buchungen, offene Tische, Takeaway, Storni,\n"
-            + "Archiv, Ausgaben, Bon-Nummern und TSE-Z\u00e4hler.\n"
-            + "ALLE Ger\u00e4te dieses Restaurants setzen sich zur\u00fcck.\n\n"
-            + "ES BLEIBEN: Men\u00fc, Firmendaten, Mitarbeiter, Tischplan,\n"
-            + "Drucker, Optionsgruppen, Inventar und die Kunden.\n\n"
-            + "Zum Best\u00e4tigen den Standort eintippen:\n" + loc);
-          if (eingabe === null) return;
-          if (String(eingabe).trim() !== String(loc)) { alert("Abgebrochen \u2013 der Standort stimmt nicht."); return; }
-          const mitGut = window.confirm("Auch die GUTSCHEINE l\u00f6schen?\n\n"
-            + "OK = ja, l\u00f6schen\nAbbrechen = Gutscheine behalten\n\n"
-            + "Offene Guthaben sind Verbindlichkeiten gegen\u00fcber echten G\u00e4sten.");
-
-          const datei = belksResetSicherung();
-
-          /* Erst die Cloud, dann lokal. Andersherum wuerde dieses Geraet
-             die frisch geleerten Daten sofort wieder herunterladen. */
-          /* ═══ v361: RICHTIG AUFRUFEN UND DAS ERGEBNIS PRUEFEN ═══
-             Hier stand supaFetch(pfad, { method: 'DELETE' }). Der zweite
-             Parameter ist aber die Methode als TEXT - das Objekt landete
-             unveraendert in fetch() und war keine gueltige Methode. Es
-             wurde nie etwas geloescht, und weil niemand die Antwort ansah,
-             kam trotzdem "erfolgreich". */
-          const _fehlgeschlagen = [];
-          try {
-            const r = await supaFetch('/rest/v1/eatdesi_orders?location_id=eq.' + loc, 'DELETE');
-            if (!r.ok) _fehlgeschlagen.push("Buchungen (" + r.status + " " + (await r.text()).slice(0,120) + ")");
-          } catch (e) { _fehlgeschlagen.push("Buchungen (" + (e && e.message ? e.message : e) + ")"); }
-
-          /* ═══ v362: NICHT RATEN, SONDERN FRAGEN ═══
-             Bis v361 habe ich die Cloud-Schluessel aus den lokalen Namen
-             errechnet. Dabei entstand test-cafe_tableorders, waehrend in
-             der Cloud test-cafe_tableOrders stand - ein grosses O, und das
-             DELETE traf nichts. tableordersmeta heisst lokal sogar ganz
-             anders (to_meta) und war gar nicht herleitbar.
-             Also: die Cloud liefert die Namen, wir entscheiden nur noch,
-             was davon bleiben darf. */
-          let wolkeWeg = [];
-          try {
-            const rl = await supaFetch('/rest/v1/pos_state?key=like.' + encodeURIComponent(loc + '\\_%') + '&select=key');
-            if (!rl.ok) throw new Error('HTTP ' + rl.status);
-            const liste = await rl.json();
-            wolkeWeg = (liste || [])
-              .map(function(z){ return z && z.key; })
-              .filter(Boolean)
-              .filter(function(k){
-                var kurz = String(k).slice(loc.length + 1);
-                return !belksResetBehalten(kurz, mitGut);
-              });
-          } catch (e) {
-            _fehlgeschlagen.push("Schl\u00fcsselliste konnte nicht gelesen werden (" + (e && e.message ? e.message : e) + ")");
-          }
-          for (const rk of wolkeWeg) {
-            try {
-              const r = await supaFetch('/rest/v1/pos_state?key=eq.' + encodeURIComponent(rk), 'DELETE');
-              if (!r.ok) _fehlgeschlagen.push(rk + " (" + r.status + ")");
-            } catch (e) { _fehlgeschlagen.push(rk + " (" + (e && e.message ? e.message : e) + ")"); }
-          }
-
-          /* Ohne leere Cloud ist der Reset wertlos: die Geraete laden alles
-             beim naechsten Abgleich wieder herunter. Dann darf hier auch
-             kein Haken stehen. */
-          if (_fehlgeschlagen.length) {
-            alert("\u274C Die Kasse wurde NICHT zur\u00fcckgesetzt.\n\n"
-                + "Diese Daten konnten in der Cloud nicht gel\u00f6scht werden:\n"
-                + _fehlgeschlagen.slice(0,8).join("\n")
-                + (_fehlgeschlagen.length > 8 ? "\n\u2026 und " + (_fehlgeschlagen.length-8) + " weitere" : "")
-                + "\n\nH\u00e4ufigste Ursache: der Schl\u00fcssel dieser Kasse darf in Supabase nicht "
-                + "l\u00f6schen (fehlende DELETE-Berechtigung).\n\n"
-                + "Lokal wurde nichts ver\u00e4ndert \u2013 die Kasse l\u00e4uft normal weiter.");
-            return;
-          }
-
-          /* Die Marke, an der die anderen Geraete erkennen, dass sie dran
-             sind. Sie muss NACH dem Loeschen gesetzt werden. */
-          const marke = { id: Date.now(), gutscheine: !!mitGut, von: (loggedInUser && loggedInUser.name) || "?" };
-          try {
-            localStorage.setItem("eatdesi_reset_gesehen", String(marke.id));
-            LS.set("eatdesi_reset_marke", marke);
-          } catch (e) { console.warn("Reset-Marke setzen:", e); }
-
-          belksKasseLokalLeeren(mitGut);
-          alert("\u2705 Kasse zur\u00fcckgesetzt \u2013 Cloud und dieses Ger\u00e4t.\n\n"
-              + wolkeWeg.length + " Schl\u00fcssel in der Cloud gel\u00f6scht.\n"
-              + (datei ? "Sicherung: " + datei + "\n\n" : "\n")
-              + "Die n\u00e4chste Bestellung bekommt Bon-Nr. 0001.\n\n"
-              + "WICHTIG: Jedes weitere Ger\u00e4t dieses Restaurants einmal \u00f6ffnen, "
-              + "sonst l\u00e4dt es seine alten Tische wieder hoch.");
-          location.reload();
-        },
-        style:{ width:"100%", padding:11, borderRadius:9, border:"2px solid #c62828", background:"#fff5f5", color:"#c62828", cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:12.5, marginTop:14 }
-      }, "\uD83E\uDDF9 Kasse zur\u00fccksetzen (alle Ger\u00e4te)")
+      /* ═══ v363: HIER STAND DER KNOPF "KASSE ZURUECKSETZEN" ═══
+         Er wurde in v352 eingebaut und hat nie funktioniert - dreimal
+         repariert (v361 Aufrufform, v362 Schluesselnamen), dreimal blieb
+         die Anzeige gleich. Ein Knopf, der Erfolg meldet und nichts tut,
+         kostet mehr Zeit als er spart.
+         Der Weg, der nachweislich funktioniert, steht jetzt hier als
+         Anleitung. Entscheidend ist Schritt 2: Solange EIN Geraet die
+         alten Daten im Speicher hat, laedt es sie beim naechsten Abgleich
+         wieder hoch - deshalb reicht Loeschen in der Cloud allein nie. */
+      /*#__PURE__*/React.createElement("div", {
+        style:{ marginTop:16, padding:12, borderRadius:10, border:"1.5px solid #ffcc80", background:"#fff8e1" }
+      },
+        /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:13, color:"#e65100", marginBottom:6 } },
+          "\uD83E\uDDF9 Kasse zur\u00fccksetzen"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#5d4037", lineHeight:1.55 } },
+          /*#__PURE__*/React.createElement("b", null, "1. In der Cloud l\u00f6schen"), " \u2013 Supabase \u2192 SQL Editor, ",
+          "nach dem PDF \u201EKasse zur\u00fccksetzen\u201C.",
+          /*#__PURE__*/React.createElement("br", null),
+          /*#__PURE__*/React.createElement("b", null, "2. Auf JEDEM Ger\u00e4t"), " \u2013 Android-Einstellungen \u2192 Apps \u2192 ",
+          "eatdesi POS \u2192 Speicher \u2192 ", /*#__PURE__*/React.createElement("b", null, "Daten l\u00f6schen"),
+          ". Erst danach die App \u00f6ffnen.",
+          /*#__PURE__*/React.createElement("div", { style:{ marginTop:7, paddingTop:7, borderTop:"1px solid #ffe0b2" } },
+            "Schritt 2 ist der entscheidende: Solange ein einziges Ger\u00e4t die alten Daten ",
+            "im Speicher hat, l\u00e4dt es sie beim n\u00e4chsten Abgleich wieder hoch."),
+          /*#__PURE__*/React.createElement("div", { style:{ marginTop:7, color:"#c62828", fontWeight:700 } },
+            "\u26A0\uFE0F Anmeldung, Drucker-Einstellungen und der Gemini-Key sind ger\u00e4telokal ",
+            "und kommen NICHT aus der Cloud zur\u00fcck \u2013 danach neu einrichten."),
+          /*#__PURE__*/React.createElement("div", { style:{ marginTop:7, color:"#2e7d32" } },
+            "Men\u00fc, Firmendaten, Tischplan, Mitarbeiter und Kunden kommen von selbst zur\u00fcck.")
+        )
+      )
     ),
 
     /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:12, padding:14, marginBottom:12, border:"2px solid #a5d6a7" } },
@@ -23845,7 +23775,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v362"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v364"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24428,6 +24358,16 @@ function App() {
      am anderen Geraet ankommen - sonst sagt er dem Gast, der Code sei
      ungueltig. */
   belksZustandVomAbgleich("eatdesi_gutscheine", gutscheine, setGutscheine);
+  /* ═══ v364: DIE STORNO-LISTE HAT SICH SELBST WIEDERHERGESTELLT ═══
+     Sie schrieb in den Speicher, hoerte aber nie zu. Nach einem Loeschen
+     lag sie weiter im React-Zustand, der useEffect schrieb sie sofort
+     zurueck, und der Abgleich lud sie wieder in die Cloud - ein
+     Kreislauf, den kein Loeschen durchbrechen konnte. Die Bestellliste
+     hat diesen Rueckschreib-Effekt nicht, deshalb war sie sauber und die
+     Storni nicht.
+     Derselbe Fehler wie bei den Gutscheinen vor v335; ich habe ihn in
+     v346 wiederholt. */
+  belksZustandVomAbgleich("eatdesi_stornos", stornos, setStornos);
   useEffect(() => {
     LS.set("eatdesi_optiongroups", optionGroups);
   }, [optionGroups]);
