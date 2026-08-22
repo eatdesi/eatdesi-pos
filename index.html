@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v364</title>
+<title>eatDeSi POS v365</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -16652,7 +16652,19 @@ function OrderListView({
         marginBottom: 3
       }
     }, fmtD(new Date(o.time)), " ", fmtT(new Date(o.time)), " \xB7 ", o.payMethod || "—",
-      o.bonNr && /*#__PURE__*/React.createElement("span", { style:{ marginLeft:6, background:"#f5f5f5", borderRadius:4, padding:"1px 6px", fontSize:10, color:"#888", fontWeight:600, fontFamily:"monospace" } }, o.bonNr)
+      o.bonNr && /*#__PURE__*/React.createElement("span", { style:{ marginLeft:6, background:"#f5f5f5", borderRadius:4, padding:"1px 6px", fontSize:10, color:"#888", fontWeight:600, fontFamily:"monospace" } }, o.bonNr),
+      /* ═══ v365: WOHER KOMMT DIESER BELEG? ═══
+         Der Storno zeigt seit v356 beide Nummern. Der bezahlte Beleg zeigte
+         keine - also stand die B-Nummer in der Storno-Liste und nirgends
+         sonst, und dieselbe Zahl tauchte in beiden Listen als scheinbar
+         derselbe Vorgang auf.
+         Fehlt die Bestellnummer, wird das AUSGESCHRIEBEN statt weggelassen:
+         dann wurde getippt und sofort kassiert, ohne "Speichern" - erlaubt
+         (Entwurf -> Bezahlt), zieht aber keine Bestellnummer. Ein verkaufter
+         Gutschein hat nie eine, deshalb dort gar kein Hinweis. */
+      o.bonNr && !o.gutscheinVerkauf && /*#__PURE__*/React.createElement("span",
+        { style:{ marginLeft:6, fontSize:10, color:"#aaa", fontFamily: o.bestellNr ? "monospace" : "inherit" } },
+        o.bestellNr ? ("\u2190 " + o.bestellNr) : "\u2190 direkt kassiert")
     ), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11,
@@ -16921,7 +16933,9 @@ function StornoView({ completedOrders, offeneStornos, printerSettings }) {
       raus.push({
         art: "nach Zahlung", zeit: d,
         tisch: o.tableId ? ("Tisch " + o.tableId) : (o.gutscheinVerkauf ? "Gutschein" : "Takeaway"),
-        nr: o.bonNr || "\u2014", bezug: null,
+        /* v365: Hier stand bezug:null - fest verdrahtet, weil die
+           Bestellnummer den bezahlten Beleg nie erreichte. Jetzt tut sie es. */
+        nr: o.bonNr || "\u2014", bezug: o.bestellNr || null,
         betrag: Number(o.total) || 0,
         grund: o.stornoGrund || "ohne Angabe",
         wer: o.stornoVon || "\u2014",
@@ -23775,7 +23789,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v364"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v365"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -30112,7 +30126,16 @@ function supaFetch(path, method, body) {
    dass irgendwo eines fehlt. */
 var BELKS_EXTRA_FELDER = ['trinkgeld','rabatt','gutscheinVerkauf','gutscheinCode',
                           'gutscheinBetrag','lieferFee','splitDetails','teilzahlung',
-                          'stornoGrund'];   // v347
+                          'stornoGrund',    // v347
+                          /* v365: Die Bestellnummer war bisher nur lokal. Sie entsteht
+                             beim Speichern (B-...), wird beim Kassieren per Spread in die
+                             Buchung uebernommen - und ging beim naechsten Abgleich
+                             verloren, weil die Tabelle keine Spalte dafuer hat und diese
+                             Liste sie nicht kannte. Damit war die Kette
+                             Bestellung -> Beleg genau an der Stelle unterbrochen, an der
+                             eine Kassennachschau sie nachfragt. Der Storno haelt beide
+                             Nummern seit v356, der bezahlte Beleg jetzt auch. */
+                          'bestellNr'];
 
 function belksExtraBauen(order){
   if(!order) return null;
