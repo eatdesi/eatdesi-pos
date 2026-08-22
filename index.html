@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v365</title>
+<title>eatDeSi POS v366</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -16051,6 +16051,10 @@ ${filtered.map((o, i) => {
 function OrderListView({
   completedOrders,
   tableOrders,
+  /* v366: Bisher kannte diese Ansicht nur bezahlte Belege. Die Storni vor der
+     Zahlung lagen in einer eigenen Ansicht - und damit in einer zweiten Liste
+     mit eigenen Zahlen, die neben der ersten nur Verwirrung stiftete. */
+  stornos,
   onReactivate,
   onDelete,
   onMergeToTable,
@@ -16063,6 +16067,8 @@ function OrderListView({
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [stornoGrund, setStornoGrund] = useState(null);   // v347
   const [mergeTarget, setMergeTarget] = useState(null);
+  const [art, setArt] = useState("alle");            // v366: Filter nach Vorgangsart
+  const [stornoDetail, setStornoDetail] = useState(null);   // v366
   const {
     from,
     to,
@@ -16075,13 +16081,96 @@ function OrderListView({
     const d = new Date(o.time);
     return d >= from && d <= to;
   }).slice().reverse();
+
+  /* ═══ v366: EINE LISTE AUS ZWEI QUELLEN ═══
+     Bezahlte Belege stehen in completedOrders, Storni vor der Zahlung in einer
+     eigenen Liste (eatdesi_stornos) - sie haben keinen Beleg, weil nie
+     kassiert wurde. Hier werden beide chronologisch zusammengefuehrt.
+     Die NUMMERN bleiben getrennt: der Storno behaelt seine S-Nummer und den
+     Verweis auf die Bestellung. Wuerde er eine Belegnummer bekommen, gaebe es
+     einen Beleg ueber Geld, das nie geflossen ist. */
+  const stornosImZeitraum = (stornos || []).filter(x => {
+    if (!x || !x.zeit) return false;
+    const d = new Date(x.zeit);
+    return d >= from && d <= to;
+  });
+
+  const zeilenAlle = [].concat(
+    filtered.map(o => ({
+      typ: o.storniert ? "storno_nach" : "bezahlt",
+      zeit: new Date(o.time), o: o
+    })),
+    stornosImZeitraum.map(x => ({ typ: "storno_vor", zeit: new Date(x.zeit), s: x }))
+  ).sort((a, b) => b.zeit - a.zeit);
+
+  const ARTEN = [["alle","Alle"],["bezahlt","Bezahlt"],
+                 ["storno_nach","Storno n. Zahlung"],["storno_vor","Storno v. Zahlung"]];
+  const zeilen = art === "alle" ? zeilenAlle : zeilenAlle.filter(z => z.typ === art);
+
+  const stornoAnzahl = zeilenAlle.filter(z => z.typ !== "bezahlt").length;
+  const stornoSumme = Math.round(zeilenAlle.filter(z => z.typ !== "bezahlt")
+    .reduce((su, z) => su + (z.typ === "storno_vor" ? (Number(z.s.betrag)||0) : (Number(z.o.total)||0)), 0) * 100) / 100;
+
   return /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 14,
       overflowY: "auto",
       height: "calc(100vh - 90px)"
     }
-  }, confirmDelete !== null && /*#__PURE__*/React.createElement("div", {
+  },
+  /* v366: Detail eines Stornos vor der Zahlung. Es gibt keinen Beleg dazu -
+     also auch keine Aktionen (kein Nachdruck, keine Reaktivierung). Nur die
+     Auskunft: was war drin, warum weg, wer, welche Nummern, TSE. */
+  stornoDetail && /*#__PURE__*/React.createElement("div", {
+    style: { position:"fixed", inset:0, background:"#0009", zIndex:3200, display:"flex",
+             alignItems:"center", justifyContent:"center", padding:16 },
+    onClick: () => setStornoDetail(null)
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: { background:"#fff", borderRadius:14, padding:18, width:"100%", maxWidth:380,
+             maxHeight:"80vh", overflowY:"auto", boxShadow:"0 8px 32px #0004" }
+  },
+    /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:16, color:"#ef6c00", marginBottom:2 } },
+      "\uD83D\uDEAB Storno vor Zahlung"),
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:12.5, color:"#666", marginBottom:12 } },
+      (stornoDetail.label || ("Tisch " + stornoDetail.tisch)) + " \u00b7 " +
+      fmtD(new Date(stornoDetail.zeit)) + " " + fmtT(new Date(stornoDetail.zeit))),
+
+    /*#__PURE__*/React.createElement("div", { style:{ background:"#fff8f0", borderRadius:10, padding:10, marginBottom:12 } },
+      (stornoDetail.items || []).length === 0
+        ? /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#999" } }, "Keine Artikel gespeichert")
+        : (stornoDetail.items || []).map((i, k) => /*#__PURE__*/React.createElement("div", {
+            key: k, style:{ display:"flex", justifyContent:"space-between", fontSize:12.5, marginBottom:3 }
+          },
+          /*#__PURE__*/React.createElement("span", null, (i.qty || 1) + "\u00d7 " + (i.name || "\u2014")),
+          /*#__PURE__*/React.createElement("span", null, fmt((Number(i.preis)||0) * (Number(i.qty)||1))))),
+      /*#__PURE__*/React.createElement("div", {
+        style:{ display:"flex", justifyContent:"space-between", fontWeight:800, fontSize:14,
+                borderTop:"1px solid #f0d9c0", marginTop:6, paddingTop:6, color:"#c62828" }
+      },
+        /*#__PURE__*/React.createElement("span", null, "Storniert"),
+        /*#__PURE__*/React.createElement("span", { style:{ textDecoration:"line-through" } }, fmt(Number(stornoDetail.betrag)||0)))),
+
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:13, marginBottom:6 } },
+      /*#__PURE__*/React.createElement("b", null, "Grund: "), stornoDetail.grund || "ohne Angabe"),
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:13, marginBottom:10 } },
+      /*#__PURE__*/React.createElement("b", null, "Mitarbeiter: "), stornoDetail.mitarbeiter || "\u2014"),
+
+    /*#__PURE__*/React.createElement("div", {
+      style:{ fontSize:11, color:"#777", fontFamily:"monospace", background:"#f7f7f7",
+              borderRadius:8, padding:"8px 10px", lineHeight:1.6, marginBottom:14 }
+    },
+      /*#__PURE__*/React.createElement("div", null, "Storno-Nr: " + (stornoDetail.bonNr || "\u2014")),
+      /*#__PURE__*/React.createElement("div", null, "Bestellung: " + (stornoDetail.bestellNr || "\u2014")),
+      /*#__PURE__*/React.createElement("div", null, "Beleg: keiner (nicht kassiert)"),
+      /*#__PURE__*/React.createElement("div", null, "TSE: " + (stornoDetail.tse ? "signiert \u2713" : "ohne Signatur"))),
+
+    /*#__PURE__*/React.createElement("button", { onClick: () => setStornoDetail(null),
+      style:{ width:"100%", padding:12, borderRadius:10, border:"2px solid #ddd", background:"#fff",
+              color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 } },
+      "Schlie\u00dfen"))),
+
+  confirmDelete !== null && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
       inset: 0,
@@ -16540,7 +16629,26 @@ function OrderListView({
       fontWeight: 600,
       fontSize: 11
     }
-  }, "\uD83D\uDCC5 Benutzerdefiniert")), period === "custom" && /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCC5 Benutzerdefiniert")),
+  /* v366: Zweite Reihe - nach Vorgangsart. Bewusst unter dem Zeitraum:
+     erst WANN, dann WAS. */
+  /*#__PURE__*/React.createElement("div", {
+    style: { display:"flex", flexWrap:"wrap", gap:6, marginBottom:12 }
+  }, ARTEN.map(([v, l]) => /*#__PURE__*/React.createElement("button", {
+    key: v,
+    onClick: () => setArt(v),
+    style: {
+      padding: "6px 12px",
+      borderRadius: 14,
+      border: art === v ? "none" : "1px solid #e0e0e0",
+      background: art === v ? (v === "bezahlt" ? C.green : (v === "alle" ? "#555" : "#ef6c00")) : "#fff",
+      color: art === v ? "#fff" : "#777",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      fontWeight: 600,
+      fontSize: 11
+    }
+  }, l))), period === "custom" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
@@ -16583,7 +16691,15 @@ function OrderListView({
         Zeile. */
      belksSummeGutschein(filtered) > 0 && /*#__PURE__*/React.createElement("div", {
        style: { fontSize: 11, color: "#8a6d00", fontWeight: 700, marginTop: 2 }
-     }, "\uD83C\uDF9F\uFE0F Gutschein-Verkauf " + fmt(belksSummeGutschein(filtered)) + " (kein Umsatz)")), filtered.length === 0 && /*#__PURE__*/React.createElement("div", {
+     }, "\uD83C\uDF9F\uFE0F Gutschein-Verkauf " + fmt(belksSummeGutschein(filtered)) + " (kein Umsatz)"),
+     /* v366: Storni stehen in derselben Liste, aber NICHT im Umsatz - weder
+        die vor der Zahlung (nie kassiert) noch die danach (Beleg bleibt
+        bestehen, zaehlt aber nicht mehr). Dieselbe Trennung wie beim
+        Gutschein-Verkauf seit v335. */
+     stornoAnzahl > 0 && /*#__PURE__*/React.createElement("div", {
+       style: { fontSize: 11, color: "#ef6c00", fontWeight: 700, marginTop: 2 }
+     }, "\uD83D\uDEAB " + stornoAnzahl + " Storno \u00b7 " + fmt(stornoSumme) + " (kein Umsatz)")),
+     zeilen.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       color: "#bbb",
@@ -16594,7 +16710,44 @@ function OrderListView({
       fontSize: 36,
       marginBottom: 8
     }
-  }, "\uD83D\uDCC3"), "Keine Bestellungen"), filtered.map((o, filteredIdx) => {
+  }, "\uD83D\uDCC3"), art === "alle" ? "Keine Bestellungen" : "Nichts in dieser Auswahl"),
+  /* v366: Eine Schleife fuer beide Arten. Der Storno vor der Zahlung bekommt
+     eine eigene Karte - orange, durchgestrichen, mit beiden Nummern. Er hat
+     keinen Index in completedOrders, also auch keine der dortigen Aktionen. */
+  zeilen.map((z, zi) => {
+    if (z.typ === "storno_vor") {
+      const x = z.s;
+      return /*#__PURE__*/React.createElement("div", {
+        key: "s" + (x.id || zi),
+        onClick: () => setStornoDetail(x),
+        style: {
+          background: "#fffaf5", borderRadius: 10, padding: "12px 14px", marginBottom: 8,
+          boxShadow: "0 1px 4px #0001", cursor: "pointer", borderLeft: "4px solid #ef6c00"
+        }
+      },
+        /*#__PURE__*/React.createElement("div", {
+          style:{ background:"#ef6c00", color:"#fff", borderRadius:4, padding:"2px 8px", fontSize:10,
+                  fontWeight:800, display:"inline-block", marginBottom:6, letterSpacing:0.5 }
+        }, "\uD83D\uDEAB STORNO VOR ZAHLUNG"),
+        /*#__PURE__*/React.createElement("div", {
+          style:{ display:"flex", justifyContent:"space-between", marginBottom:4 }
+        },
+          /*#__PURE__*/React.createElement("span", { style:{ fontWeight:700, color:"#ef6c00", fontSize:13 } },
+            x.label || ("Tisch " + x.tisch)),
+          /*#__PURE__*/React.createElement("span", {
+            style:{ fontWeight:700, color:"#c62828", fontSize:14, textDecoration:"line-through" }
+          }, fmt(Number(x.betrag) || 0))),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#888", marginBottom:3 } },
+          fmtD(z.zeit), " ", fmtT(z.zeit), " \u00b7 ", (x.grund || "ohne Angabe"), " \u00b7 ", (x.mitarbeiter || "\u2014")),
+        /*#__PURE__*/React.createElement("div", {
+          style:{ fontSize:10, color:"#999", fontFamily:"monospace" }
+        }, (x.bonNr || "\u2014"), x.bestellNr ? (" \u2190 " + x.bestellNr) : "", x.tse ? " \u00b7 TSE \u2713" : " \u00b7 ohne TSE"),
+        /*#__PURE__*/React.createElement("div", {
+          style:{ fontSize:10, color:"#bbb", marginTop:3, textAlign:"right" }
+        }, "Tippen f\xFCr Details \u2192"));
+    }
+    const o = z.o;
+    const filteredIdx = zi;
     const realIdx = completedOrders.indexOf(o);
     return /*#__PURE__*/React.createElement("div", {
       key: realIdx,
@@ -16910,135 +17063,14 @@ function ExpensesView({
    keine Datenbank aufmachen kann - also jeder Kunde des SaaS - hatte
    keine Moeglichkeit, sie zu pruefen oder vorzulegen.
    Beide Arten gehoeren nebeneinander, weil ein Pruefer beide fragt. */
-function StornoView({ completedOrders, offeneStornos, printerSettings }) {
-  const [range, setRange] = React.useState("heute");
-
-  const grenzen = React.useMemo(() => {
-    const jetzt = new Date();
-    const start = new Date(jetzt); start.setHours(0,0,0,0);
-    if (range === "gestern") { const v = new Date(start); v.setDate(v.getDate()-1); return [v, start]; }
-    if (range === "woche")   { const v = new Date(start); v.setDate(v.getDate()-7); return [v, jetzt]; }
-    if (range === "monat")   { const v = new Date(start); v.setMonth(v.getMonth()-1); return [v, jetzt]; }
-    if (range === "alle")    return [new Date(0), new Date(8640000000000000)];
-    return [start, jetzt];
-  }, [range]);
-
-  const zeilen = React.useMemo(() => {
-    const [von, bis] = grenzen;
-    const raus = [];
-    (completedOrders || []).forEach(o => {
-      if (!o || !o.storniert) return;
-      const d = new Date(o.stornoZeit || o.time);
-      if (!(d >= von && d <= bis)) return;
-      raus.push({
-        art: "nach Zahlung", zeit: d,
-        tisch: o.tableId ? ("Tisch " + o.tableId) : (o.gutscheinVerkauf ? "Gutschein" : "Takeaway"),
-        /* v365: Hier stand bezug:null - fest verdrahtet, weil die
-           Bestellnummer den bezahlten Beleg nie erreichte. Jetzt tut sie es. */
-        nr: o.bonNr || "\u2014", bezug: o.bestellNr || null,
-        betrag: Number(o.total) || 0,
-        grund: o.stornoGrund || "ohne Angabe",
-        wer: o.stornoVon || "\u2014",
-        tse: !!o.tse
-      });
-    });
-    (offeneStornos || []).forEach(x => {
-      if (!x) return;
-      const d = new Date(x.zeit);
-      if (!(d >= von && d <= bis)) return;
-      raus.push({
-        art: "ohne Zahlung", zeit: d,
-        tisch: x.label || "\u2014",
-        nr: x.bonNr || "\u2014", bezug: x.bestellNr || null,
-        betrag: Number(x.betrag) || 0,
-        grund: x.grund || "ohne Angabe",
-        wer: x.mitarbeiter || "\u2014",
-        tse: !!x.tse
-      });
-    });
-    raus.sort((a,b) => b.zeit - a.zeit);
-    return raus;
-  }, [completedOrders, offeneStornos, grenzen]);
-
-  const summe = Math.round(zeilen.reduce((s,z) => s + z.betrag, 0) * 100) / 100;
-  const nachZ = zeilen.filter(z => z.art === "nach Zahlung");
-  const ohneZ = zeilen.filter(z => z.art === "ohne Zahlung");
-
-  /* Ausdruck fuer den Ordner - dasselbe, was auf dem Bildschirm steht. */
-  const drucken = () => {
-    try {
-      let L = '<div class="center bold">STORNO-\u00dcBERSICHT</div>';
-      L += '<div class="center">' + ({heute:"Heute",gestern:"Gestern",woche:"7 Tage",monat:"30 Tage",alle:"Alle"}[range]) + '</div>';
-      L += '<div class="line"></div>';
-      if (!zeilen.length) L += '<div class="center">Keine Stornierungen</div>';
-      zeilen.forEach(z => {
-        L += '<div class="row bold"><span>' + fmtT(z.zeit) + " " + z.tisch + '</span><span>' + fmt(z.betrag) + '</span></div>';
-        L += '<div class="row"><span>  ' + z.art + " \u00b7 " + z.grund + '</span><span></span></div>';
-        L += '<div class="row"><span>  ' + z.nr + (z.bezug ? " \u2190 " + z.bezug : "") + " \u00b7 " + z.wer + '</span><span></span></div>';
-      });
-      L += '<div class="line"></div>';
-      L += '<div class="row"><span>Nach Zahlung (' + nachZ.length + ')</span><span>' + fmt(nachZ.reduce((s,z)=>s+z.betrag,0)) + '</span></div>';
-      L += '<div class="row"><span>Ohne Zahlung (' + ohneZ.length + ')</span><span>' + fmt(ohneZ.reduce((s,z)=>s+z.betrag,0)) + '</span></div>';
-      L += '<div class="row bold"><span>GESAMT (' + zeilen.length + ')</span><span>' + fmt(summe) + '</span></div>';
-      printBon("STORNO-\u00dcBERSICHT", L, "Stornos", "-", new Date(), null, printerSettings, null, 'kueche');
-    } catch (e) { alert("Druck fehlgeschlagen: " + (e && e.message ? e.message : e)); }
-  };
-
-  return /*#__PURE__*/React.createElement("div", { style:{ padding:14, paddingBottom:80 } },
-    /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:18, color:"#c62828", marginBottom:12 } },
-      "\uD83D\uDEAB Stornierungen"),
-
-    /*#__PURE__*/React.createElement("div", { style:{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:14 } },
-      [["heute","Heute"],["gestern","Gestern"],["woche","7 Tage"],["monat","30 Tage"],["alle","Alle"]].map(([k,l]) =>
-        /*#__PURE__*/React.createElement("button", { key:k, onClick:()=>setRange(k),
-          style:{ padding:"7px 14px", borderRadius:20, border:"none",
-                  background: range===k ? C.green : "#eee", color: range===k ? "#fff" : "#555",
-                  cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5 } }, l))
-    ),
-
-    /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:14 } },
-      [["Nach Zahlung", nachZ.length, nachZ.reduce((s,z)=>s+z.betrag,0), "#c62828"],
-       ["Ohne Zahlung", ohneZ.length, ohneZ.reduce((s,z)=>s+z.betrag,0), "#ef6c00"],
-       ["Gesamt", zeilen.length, summe, "#555"]].map(([l,n,b,f2],i) =>
-        /*#__PURE__*/React.createElement("div", { key:i, style:{ background:"#fff", borderRadius:10, padding:"9px 8px", textAlign:"center", border:"1px solid #eee" } },
-          /*#__PURE__*/React.createElement("div", { style:{ fontSize:10.5, color:"#888", marginBottom:2 } }, l),
-          /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:15, color:f2 } }, fmt(b)),
-          /*#__PURE__*/React.createElement("div", { style:{ fontSize:10.5, color:"#aaa" } }, n + "x")))
-    ),
-
-    zeilen.length === 0
-      ? /*#__PURE__*/React.createElement("div", { style:{ textAlign:"center", color:"#bbb", padding:40, fontSize:14 } },
-          "Keine Stornierungen in diesem Zeitraum.")
-      : zeilen.map((z,i) =>
-        /*#__PURE__*/React.createElement("div", { key:i, style:{ background:"#fff", borderRadius:12, padding:12, marginBottom:9,
-            borderLeft:"5px solid " + (z.art==="nach Zahlung" ? "#c62828" : "#ef6c00") } },
-          /*#__PURE__*/React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 } },
-            /*#__PURE__*/React.createElement("span", { style:{ fontWeight:800, fontSize:14.5 } }, z.tisch),
-            /*#__PURE__*/React.createElement("span", { style:{ fontWeight:800, fontSize:14.5, color:"#c62828", textDecoration:"line-through" } }, fmt(z.betrag))),
-          /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, color:"#666", marginBottom:3 } },
-            fmtD(z.zeit) + " " + fmtT(z.zeit) + "  \u00b7  ",
-            /*#__PURE__*/React.createElement("span", { style:{ fontWeight:700, color: z.art==="nach Zahlung" ? "#c62828" : "#ef6c00" } }, z.art)),
-          /*#__PURE__*/React.createElement("div", { style:{ fontSize:12.5, marginBottom:3 } },
-            /*#__PURE__*/React.createElement("b", null, "Grund: "), z.grund,
-            "  \u00b7  ", z.wer),
-          /*#__PURE__*/React.createElement("div", { style:{ fontSize:10.5, color:"#999", fontFamily:"monospace" } },
-            z.nr, z.bezug ? "  \u2190  " + z.bezug : "",
-            z.tse ? "  \u00b7  TSE \u2713" : "  \u00b7  ohne TSE"))),
-
-    zeilen.length > 0 && /*#__PURE__*/React.createElement("button", { onClick:drucken,
-      style:{ width:"100%", padding:13, marginTop:8, borderRadius:11, border:"2px solid " + C.green,
-              background:"#fff", color:C.green, cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:14 } },
-      "\uD83D\uDDA8\uFE0F \u00dcbersicht drucken"),
-
-    /*#__PURE__*/React.createElement("div", { style:{ marginTop:16, fontSize:11, color:"#999", lineHeight:1.5 } },
-      /*#__PURE__*/React.createElement("b", null, "Nach Zahlung"), ": Der Beleg bleibt bestehen und ist weiter nachvollziehbar, z\u00e4hlt aber nicht mehr zum Umsatz.",
-      /*#__PURE__*/React.createElement("br", null),
-      /*#__PURE__*/React.createElement("b", null, "Ohne Zahlung"), ": Der Tisch war schon an K\u00fcche und Bar gesendet, wurde aber nie kassiert. Der Pfeil zeigt die zugeh\u00f6rige Bestellnummer.",
-      /*#__PURE__*/React.createElement("br", null),
-      "Ein Entwurf, der verworfen wurde, erscheint hier nicht \u2013 es wurde nichts produziert und nichts gebucht.")
-  );
-}
-
+/* ═══ v366: StornoView wurde entfernt ═══
+   Die Ansicht war seit v359 ein eigener Menuepunkt. Sie hat ihren Zweck
+   erfuellt (Storni ohne Datenbankzugang belegbar), stand aber neben der
+   Order-Liste - mit eigenem Zeitraum, eigenen Summen und Nummern aus einem
+   anderen Kreis. Wer beides nebeneinander legte, sah Luecken, wo keine waren.
+   Ersetzt durch die Filter in OrderListView. Der Knopf "Uebersicht drucken"
+   ist bewusst entfallen: gedruckt wird aus dem Tagesabschluss, dort stehen
+   die Storni seit v336 mit drin. */
 function ReportsView({
   completedOrders,
   expenses
@@ -20609,7 +20641,6 @@ var ALL_PERMISSION_VIEWS = [
   { id:"zeiterfassung", l:"Zeiterfassung", i:"⏱️" },
   { id:"orders", l:"Bestellungen", i:"📋" },
   { id:"reports", l:"Berichte", i:"📈" },
-  { id:"stornos", l:"Stornierungen", i:"🚫" },   // v359
   { id:"expenses", l:"Ausgaben", i:"💸" },
   { id:"anfragen", l:"Anfragen", i:"📩" },
   { id:"customers", l:"Kunden", i:"👥" },
@@ -23789,7 +23820,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v365"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v366"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25335,14 +25366,10 @@ function App() {
     l: "Order List",
     i: "📃"
   }, {
-    /* v360: Hier gehoert der Eintrag hin. In v359 stand er in einer
-       anderen Menue-Liste (mit deutschen Beschriftungen), die im Betrieb
-       nicht erscheint - die Ansicht war da, der Weg dorthin nicht.
-       Direkt unter "Order List", weil man Stornierungen dort sucht. */
-    id: "stornos",
-    l: "Stornierungen",
-    i: "🚫"
-  }, {
+    /* v366: Der Eintrag "Stornierungen" ist entfallen. Zwei Listen mit
+       vierstelligen Nummern desselben Tages sahen nach Luecken und
+       Doppelungen aus, obwohl es drei getrennte Nummernkreise sind.
+       Jetzt: Order List -> Filter "Storno v. Zahlung" / "Storno n. Zahlung". */
     id: "reports",
     l: "Reports & Charts",
     i: "📈"
@@ -26614,6 +26641,8 @@ function App() {
   }), view === "orders" && /*#__PURE__*/React.createElement(OrderListView, {
     completedOrders: completedOrders,
     tableOrders: tableOrders,
+    stornos: stornos,                    // v366
+
     onReactivate: reactivateOrder,
     onDelete: deleteOrder,
     onMergeToTable: mergeOrderToTable,
@@ -26621,10 +26650,8 @@ function App() {
   }), view === "reports" && /*#__PURE__*/React.createElement(ReportsView, {
     completedOrders: completedOrders,
     expenses: expenses
-  }), view === "stornos" && /*#__PURE__*/React.createElement(StornoView, {
-    completedOrders: completedOrders,
-    offeneStornos: stornos,
-    printerSettings: printerSettings
+  /* v366: Die eigene Storno-Ansicht ist entfallen - alles steht jetzt in der
+     Order-Liste unter "Storno v. Zahlung" / "Storno n. Zahlung". */
   }), view === "expenses" && /*#__PURE__*/React.createElement(ExpensesView, {
     expenses: expenses,
     onAdd: e => setExpenses(p => [...p, e]),
