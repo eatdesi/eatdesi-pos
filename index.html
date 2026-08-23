@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v370</title>
+<title>eatDeSi POS v372</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8879,11 +8879,16 @@ function belksNummer(zaehlerKey, praefix) {
 // Belegnummer - nur fuer Belege, die eine Zahlung abschliessen
 function genNr() { return belksNummer('eatdesi_bon_counter', ''); }
 
-// Bestellung (Speichern-Knopf, v344) - eigener Kreis
-function genBestellNr() { return belksNummer('eatdesi_best_counter', 'B-'); }
-
-// Stornierung eines gesendeten Tisches (v346) - eigener Kreis
-function genStornoNr() { return belksNummer('eatdesi_storno_counter', 'S-'); }
+/* ═══ v372: HIER STANDEN ZWEI WEITERE ZAEHLER ═══
+       genBestellNr() -> eatdesi_best_counter, Praefix B-
+       genStornoNr()  -> eatdesi_storno_counter, Praefix S-
+   Drei Kreise nebeneinander, alle mit vierstelligen Zahlen desselben Tages.
+   Das war formal sauber, aber niemand konnte es lesen: B-0008 fehlte
+   scheinbar im Belegkreis, die 0003 schien doppelt vergeben.
+   Jetzt gibt es nur noch genNr(). Ein Vorgang traegt seine Nummer von der
+   Bestellung bis zum Beleg - oder bis zum Storno. Die alten Zaehler bleiben
+   im Speicher stehen (fuer die Nachvollziehbarkeit alter Datensaetze), werden
+   aber nicht mehr gefuellt. */
 function OptionModal({
   item,
   onConfirm,
@@ -16170,9 +16175,14 @@ function OrderListView({
       style:{ fontSize:11, color:"#777", fontFamily:"monospace", background:"#f7f7f7",
               borderRadius:8, padding:"8px 10px", lineHeight:1.6, marginBottom:14 }
     },
-      /*#__PURE__*/React.createElement("div", null, "Storno-Nr: " + (stornoDetail.bonNr || "\u2014")),
-      /*#__PURE__*/React.createElement("div", null, "Bestellung: " + (stornoDetail.bestellNr || "\u2014")),
-      /*#__PURE__*/React.createElement("div", null, "Beleg: keiner (nicht kassiert)"),
+      /* v372: Eine Reihe - deshalb heisst es hier "Beleg-Nr" und nicht mehr
+         "Storno-Nr". Der Vorgang trug diese Nummer schon, bevor er storniert
+         wurde. Dass kein Geld geflossen ist, steht in der Zeile darunter. */
+      /*#__PURE__*/React.createElement("div", null, "Beleg-Nr: " + (stornoDetail.bonNr || "\u2014")),
+      (stornoDetail.bestellNr && String(stornoDetail.bestellNr) !== String(stornoDetail.bonNr))
+        ? /*#__PURE__*/React.createElement("div", null, "fr\u00fchere Bestell-Nr: " + stornoDetail.bestellNr)
+        : null,
+      /*#__PURE__*/React.createElement("div", null, "Zahlung: keine (vor der Zahlung storniert)"),
       /*#__PURE__*/React.createElement("div", null, "TSE: " + (stornoDetail.tse ? "signiert \u2713" : "ohne Signatur"))),
 
     /*#__PURE__*/React.createElement("button", { onClick: () => setStornoDetail(null),
@@ -16751,7 +16761,11 @@ function OrderListView({
           fmtD(z.zeit), " ", fmtT(z.zeit), " \u00b7 ", (x.grund || "ohne Angabe"), " \u00b7 ", (x.mitarbeiter || "\u2014")),
         /*#__PURE__*/React.createElement("div", {
           style:{ fontSize:10, color:"#999", fontFamily:"monospace" }
-        }, (x.bonNr || "\u2014"), x.bestellNr ? (" \u2190 " + x.bestellNr) : "", x.tse ? " \u00b7 TSE \u2713" : " \u00b7 ohne TSE"),
+        /* v372: dieselbe Regel wie oben - ein Verweis auf die eigene
+           Nummer waere nur Rauschen. */
+        }, (x.bonNr || "\u2014"),
+           (x.bestellNr && String(x.bestellNr) !== String(x.bonNr)) ? (" \u2190 " + x.bestellNr) : "",
+           x.tse ? " \u00b7 TSE \u2713" : " \u00b7 ohne TSE"),
         /*#__PURE__*/React.createElement("div", {
           style:{ fontSize:10, color:"#bbb", marginTop:3, textAlign:"right" }
         }, "Tippen f\xFCr Details \u2192"));
@@ -16827,7 +16841,12 @@ function OrderListView({
          Gutschein hat nie eine, deshalb dort gar kein Hinweis. */
       o.bonNr && !o.gutscheinVerkauf && /*#__PURE__*/React.createElement("span",
         { style:{ marginLeft:6, fontSize:10, color:"#aaa", fontFamily: o.bestellNr ? "monospace" : "inherit" } },
-        o.bestellNr ? ("\u2190 " + o.bestellNr) : "\u2190 direkt kassiert")
+        /* v372: Bei einer Reihe ist der Verweis auf sich selbst sinnlos.
+           Angezeigt wird nur noch, WANN die Nummer entstand - und bei
+           Altdatensaetzen die abweichende alte Bestellnummer. */
+        (o.bestellNr && String(o.bestellNr) !== String(o.bonNr))
+          ? ("\u2190 " + o.bestellNr)
+          : (o.bestellNr ? "bei Bestellung vergeben" : "\u2190 direkt kassiert"))
     ), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11,
@@ -23878,7 +23897,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v370"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v372"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24877,8 +24896,27 @@ function App() {
     // 2. TSE - der Vorgang beginnt jetzt, nicht erst bei der Zahlung
     /* v356: Die Nummer wurde bisher nur an die TSE gereicht und danach
        vergessen. Sie gehoert auf den Tisch - sonst ist der Vorgang zwar
-       nummeriert, aber niemand kann die Nummer sehen oder zuordnen. */
-    const _bestellNr = genBestellNr();
+       nummeriert, aber niemand kann die Nummer sehen oder zuordnen.
+
+       ═══ v371: ERST SCHAUEN, DANN ZIEHEN ═══
+       Hier stand: const _bestellNr = genBestellNr();
+       Unbedingt, bei jedem Aufruf. Weiter unten wird aber
+       "alt.bestellNr || _bestellNr" geschrieben - bei einer Nachbestellung
+       gewinnt also die alte Nummer und die frisch gezogene wird verworfen.
+       Der Zaehler lief trotzdem weiter: Luecke im Bestellkreis.
+       Gefunden in kk am 23.08.: S-0004..0006 zeigen auf B-0004..0006,
+       S-0007 auf B-0008 - B-0007 existiert nirgends.
+       Zusaetzlich wurde die TSE mit der weggeworfenen Nummer signiert, also
+       stand im Protokoll ein Vorgang ohne zugehoerige Bestellung.
+       Jetzt zieht nur, wer noch keine Nummer hat. */
+    /* v372: Dies ist jetzt die BELEGnummer, nicht mehr eine eigene
+       Bestellnummer. Sie entsteht hier - beim Speichern beginnt der Vorgang
+       im Sinne der KassenSichV - und bleibt bis zur Zahlung dieselbe.
+       Der alte Bestand kann noch B-Nummern tragen; die werden nicht
+       weiterverwendet, sondern durch eine echte ersetzt. */
+    const _alteNr = quelle.bestellNr && !/^[BS]-/.test(String(quelle.bestellNr))
+                    ? quelle.bestellNr : null;
+    const _bestellNr = _alteNr || genNr();
     let _tse = null;
     try {
       const summe = neue.reduce((s, i) => s + (i.finalPrice || 0) * (i.qty || 0), 0);
@@ -24897,9 +24935,14 @@ function App() {
     });
     if (istTa) setTakeaway(t => t.map(x => x.id === taId ? Object.assign({}, x, {
       items: entmarken(x.items),
-      /* Die ERSTE Bestellnummer bleibt stehen - bestellt der Gast nach,
-         gehoert das zum selben Vorgang und bekommt keine neue. */
-      bestellNr: x.bestellNr || _bestellNr,
+      /* Die ERSTE Nummer bleibt stehen - bestellt der Gast nach, gehoert das
+         zum selben Vorgang und bekommt keine neue.
+         v372: NICHT mehr "x.bestellNr || _bestellNr". Diese Fassung liess eine
+         alte B-Nummer gewinnen, obwohl oben schon eine echte gezogen worden
+         war - die neue Nummer waere verfallen, die alte haette weiter im
+         System gestanden. _bestellNr ist bereits die richtige Antwort:
+         vorhandene echte Nummer, sonst eine frische. */
+      bestellNr: _bestellNr,
       tseBestellung: _tse || x.tseBestellung || null
     }) : x));
     else setTableOrders(p => {
@@ -24907,7 +24950,8 @@ function App() {
       if (!alt) return p;
       return Object.assign({}, p, { [tid]: Object.assign({}, alt, {
         items: entmarken(alt.items),
-        bestellNr: alt.bestellNr || _bestellNr,
+        bestellNr: _bestellNr,          // v372: siehe Begruendung oben
+
         tseBestellung: _tse || alt.tseBestellung || null
       })});
     });
@@ -25157,8 +25201,11 @@ function App() {
            Kasse buchte 7,90. */
         const _fee = Math.max(0, Number(lieferFee) || Number(ta.lieferFee) || 0);
         const orderTotal = ta.items.reduce((s, i) => s + i.finalPrice * i.qty, 0) + _fee - (rabatt||0);
-        const _vorhandenTa = ta.bonNr && !/^[BS]-/.test(String(ta.bonNr)) ? ta.bonNr : null;
-        _bonNr = _vorhandenTa || genNr();   // v357: siehe oben - v368: kein const mehr
+        /* v372: wie beim Tisch - erst die beim Speichern vergebene Nummer,
+           dann eine schon gesetzte Bon-Nummer, erst zuletzt eine neue. */
+        const _echtTa = nr => (nr && !/^[BS]-/.test(String(nr))) ? nr : null;
+        const _vorhandenTa = _echtTa(ta.bestellNr) || _echtTa(ta.bonNr);
+        _bonNr = _vorhandenTa || genNr();   // v357/v368/v372: siehe oben
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: ta.items, tableId: null }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
         try { window.maybeOpenDrawer && window.maybeOpenDrawer(payMethod); } catch (e) {}
@@ -25204,9 +25251,12 @@ function App() {
       const o = tableOrders[tid];
       if (o) {
         const orderTotal = o.items.reduce((s, i) => s + i.finalPrice * i.qty, 0) - (rabatt||0);
-        /* v357: Wache. Sollte je wieder eine Bestell- oder Storno-Nummer
-           auf dem Tisch landen, darf sie NICHT zur Belegnummer werden. */
-        const _vorhanden = o.bonNr && !/^[BS]-/.test(String(o.bonNr)) ? o.bonNr : null;
+        /* v357: Wache gegen alte B-/S-Nummern aus dem Bestand.
+           v372: Die beim Speichern vergebene Nummer IST die Belegnummer -
+           sie wird uebernommen, nicht ersetzt. Nur wenn nie gespeichert
+           wurde (direkt kassiert), entsteht hier eine neue. */
+        const _echt = nr => (nr && !/^[BS]-/.test(String(nr))) ? nr : null;
+        const _vorhanden = _echt(o.bestellNr) || _echt(o.bonNr);
         const _bonNr = _vorhanden || genNr();
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: o.items, tableId: tid }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
@@ -25952,8 +26002,16 @@ function App() {
       if (_gesendet) {
         /* v356: Auch die Storno-Nummer wurde bisher nur an die TSE
            gereicht. Ohne sie stand in der Uebersicht "—", obwohl der
-           Vorgang sehr wohl nummeriert war. */
-        var _stornoNr = genStornoNr();
+           Vorgang sehr wohl nummeriert war.
+           ═══ v372: KEINE EIGENE STORNO-NUMMER MEHR ═══
+           Hier stand genStornoNr() - eine zweite Nummer fuer denselben
+           Vorgang. Der Storno behaelt jetzt die Nummer, die der Tisch beim
+           Speichern bekommen hat. Damit hat jede Nummer genau einen Ausgang:
+           bezahlt oder storniert. Nur falls gar keine da ist (alter Bestand
+           mit B-Nummer), wird eine gezogen - sonst stuende der Vorgang
+           unnummeriert in den Buechern. */
+        var _echtSt = function(nr){ return (nr && !/^[BS]-/.test(String(nr))) ? nr : null; };
+        var _stornoNr = _echtSt(_o.bestellNr) || _echtSt(_o.bonNr) || genNr();
         var _tse = null;
         try {
           _tse = await window.TSE.signOrder({
@@ -25968,12 +26026,12 @@ function App() {
           items: (_o.items || []).map(function(i){ return { name:i.name, nr:i.nr, qty:i.qty, preis:i.finalPrice }; }),
           mitarbeiter: (loggedInUser && loggedInUser.name) || "unbekannt",
           tse: _tse,
-          /* Beide Nummern: die eigene und die der Bestellung, auf die sich
-             der Storno bezieht. Damit laesst sich der Vorgang von der
-             Kueche bis zur Stornierung zurueckverfolgen. */
+          /* v372: Eine Nummer, ein Vorgang. bestellNr bleibt als Feld
+             erhalten - fuer Altdatensaetze, in denen sich beide noch
+             unterscheiden. Bei neuen Storni ist sie dieselbe. */
           bonNr: _stornoNr,
-          bestellNr: _o.bestellNr || null,
-          bonNrBestellung: _o.bestellNr || null
+          bestellNr: _o.bestellNr || _stornoNr,
+          bonNrBestellung: _o.bestellNr || _stornoNr
         }]; });
       }
       setTableOrders(p => { const n = {...p}; delete n[tid]; return n; });
