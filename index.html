@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v369</title>
+<title>eatDeSi POS v370</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -19646,7 +19646,8 @@ function KundenHub(p) {
     }, l))),
     tab === "liste" && /*#__PURE__*/React.createElement(CustomersView, {
       completedOrders: p.completedOrders, customers: p.customers,
-      onAdd: p.onAdd, onUpdate: p.onUpdate, onDelete: p.onDelete
+      onAdd: p.onAdd, onUpdate: p.onUpdate, onDelete: p.onDelete,
+      onDeleteAll: p.onDeleteAll        // v370
     }),
     tab === "treue" && /*#__PURE__*/React.createElement(LoyaltyView, {
       customers: p.customers, onUpdate: p.onLoyaltyUpdate,
@@ -19742,6 +19743,7 @@ function CustomersView({
   completedOrders,
   onAdd,
   onDelete,
+  onDeleteAll,        // v370
   onUpdate
 }) {
   const [subview, setSubview] = useState("list"); // list | report | best | form | detail
@@ -19757,6 +19759,8 @@ function CustomersView({
   const [editIdx, setEditIdx] = useState(null);
   const [detailIdx, setDetailIdx] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
+  const [alleWeg, setAlleWeg] = useState(false);   // v370: Sicherheitsabfrage
+  const [alleWort, setAlleWort] = useState("");    // v370: muss getippt werden
   // Rueckmeldung zum Passwort-Zuruecksetzen, an den Kunden gebunden:
   // sonst sieht man bei Kunde B noch die Meldung von Kunde A.
   const [pwMsg, setPwMsg] = useState({ idx: null, text: "" });
@@ -20360,7 +20364,51 @@ function CustomersView({
       color: "#888",
       marginBottom: 12
     }
-  }, customers.length, " Kunden gesamt"), customers.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, customers.length, " Kunden gesamt"),
+  /* ═══ v370: GANZE KARTEI LEEREN ═══
+     Bewusst unbequem: das Wort muss getippt werden. Einzelne Kunden loescht
+     man ueber die Karte, das hier ist fuer den Neuanfang einer Testkartei. */
+  customers.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ marginBottom:12 } },
+    !alleWeg
+      ? /*#__PURE__*/React.createElement("button", {
+          onClick: () => { setAlleWeg(true); setAlleWort(""); },
+          style:{ padding:"7px 12px", borderRadius:9, border:"1px solid #ffcdd2", background:"#fff5f5",
+                  color:"#c62828", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:11 }
+        }, "\uD83D\uDDD1 Alle Kunden l\u00f6schen")
+      : /*#__PURE__*/React.createElement("div", {
+          style:{ background:"#fff5f5", border:"2px solid #ffcdd2", borderRadius:11, padding:12 }
+        },
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:12.5, color:"#c62828", fontWeight:700, marginBottom:4 } },
+          "Alle " + customers.length + " Kunden l\u00f6schen?"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, color:"#666", lineHeight:1.5, marginBottom:8 } },
+          "Namen, Telefonnummern, Treuepunkte und die Punkte-Historie sind danach weg \u2013 auf allen Ger\u00e4ten. ",
+          "Bereits gebuchte Belege bleiben unber\u00fchrt. Zum Best\u00e4tigen ",
+          /*#__PURE__*/React.createElement("b", null, "LOESCHEN"), " tippen."),
+        /*#__PURE__*/React.createElement("input", {
+          value: alleWort, onChange: e => setAlleWort(e.target.value),
+          placeholder: "LOESCHEN",
+          style:{ width:"100%", padding:9, borderRadius:8, border:"2px solid #eee", fontFamily:"inherit",
+                  fontSize:13, marginBottom:8, boxSizing:"border-box" }
+        }),
+        /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8 } },
+          /*#__PURE__*/React.createElement("button", {
+            onClick: () => { setAlleWeg(false); setAlleWort(""); },
+            style:{ flex:1, padding:10, borderRadius:9, border:"2px solid #ddd", background:"#fff",
+                    color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12.5 }
+          }, "Abbrechen"),
+          /*#__PURE__*/React.createElement("button", {
+            disabled: alleWort.trim().toUpperCase() !== "LOESCHEN",
+            onClick: () => {
+              if (alleWort.trim().toUpperCase() !== "LOESCHEN") return;
+              if (typeof onDeleteAll === "function") onDeleteAll();
+              setAlleWeg(false); setAlleWort("");
+            },
+            style:{ flex:1, padding:10, borderRadius:9, border:"none",
+                    background: alleWort.trim().toUpperCase() === "LOESCHEN" ? C.red : "#e0e0e0",
+                    color:"#fff", cursor: alleWort.trim().toUpperCase() === "LOESCHEN" ? "pointer" : "default",
+                    fontFamily:"inherit", fontWeight:800, fontSize:12.5 }
+          }, "\uD83D\uDDD1 Endg\u00fcltig l\u00f6schen")))),
+  customers.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       color: "#bbb",
@@ -23830,7 +23878,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v369"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v370"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24161,7 +24209,9 @@ function App() {
   useEffect(() => { LS.set("eatdesi_stornos", stornos); }, [stornos]);
   const [gutscheine, setGutscheine] = useState(() => LS.get("eatdesi_gutscheine", []));
   const [customers, setCustomers] = React.useState(() => {
-    const saved = LS.get("eatdesi_customers", []);
+    /* v370: auch beim Start filtern - sonst blitzen geloeschte Kunden nach
+       jedem Neustart kurz auf, bis der erste Abgleich durch ist. */
+    const saved = (LS.get("eatdesi_customers", []) || []).filter(c => c && !c.deleted);
     // Migration: assign kundenNr to existing customers
     return saved.map(c => ({
       ...c,
@@ -26740,7 +26790,23 @@ function App() {
     onPrint: printAnfrageBon,
     onAdd: c => setCustomers(p => [...p, c]),
     onUpdate: (idx, c) => setCustomers(p => p.map((x, i) => i === idx ? {...x,...c} : x)),
-    onDelete: idx => setCustomers(p => p.filter((_, i) => i !== idx)),
+    /* v370: Erst in der Tabelle markieren, dann aus der Anzeige nehmen.
+       Vorher nur das Zweite - deshalb kam der Kunde beim naechsten Abgleich
+       zurueck und es sah aus, als gaebe es kein Loeschen. */
+    onDelete: idx => {
+      const weg = customers[idx];
+      if (weg && window.belksKunde && window.belksKunde.loeschen) {
+        window.belksKunde.loeschen(weg);
+      }
+      setCustomers(p => p.filter((_, i) => i !== idx));
+    },
+    onDeleteAll: async () => {
+      if (window.belksKunde && window.belksKunde.alleLoeschen) {
+        await window.belksKunde.alleLoeschen();
+      }
+      setCustomers([]);
+      try { window.belksHinweis && window.belksHinweis('Kundenkartei geleert', '#c62828'); } catch(e) {}
+    },
     onLoyaltyUpdate: (idx, c) => setCustomers(p => p.map((x, i) => i === idx ? c : x))
   }), view === "users" && /*#__PURE__*/React.createElement(UserManagementView, {
     users: users,
@@ -27969,6 +28035,44 @@ window.belksKunde = {
       var self = this;
       return rows.map(function(z){ return self._ausZeile(z); });
     } catch(e) { this._fehler = (e && e.message) || String(e); return null; }
+  },
+  /* ═══ v370: LOESCHEN ═══
+     Vorher entfernte die App den Kunden nur aus ihrer eigenen Liste. Die
+     Zeile in belks_customers blieb - und der naechste Abgleich holte sie
+     zurueck. Hier wird deleted=true gesetzt: die Zeile bleibt (wichtig, siehe
+     Kommentar oben), die Markierung wandert auf alle Geraete. */
+  loeschen: async function(k){
+    if (!k) return false;
+    try {
+      var wo = k.id ? ('id=eq.' + encodeURIComponent(k.id))
+                    : ('phone=eq.' + encodeURIComponent(k.phone || ''));
+      if (!k.id && !k.phone) return false;      // ohne Kennung nichts anfassen
+      var r = await fetch(this._url() + '/rest/v1/belks_customers?location_id=eq.'
+              + encodeURIComponent(LOCATION_ID) + '&' + wo,
+              { method: 'PATCH', headers: this._kopf(), body: JSON.stringify({ deleted: true }) });
+      if (!r.ok) {
+        var t = ''; try { t = await r.text(); } catch(e2){}
+        console.warn('Kunde loeschen HTTP ' + r.status + ' ' + String(t).slice(0,160));
+        return false;
+      }
+      return true;
+    } catch(e) { console.warn('Kunde loeschen:', e && e.message); return false; }
+  },
+  /* Alle auf einmal - fuer den Fall, dass eine Kartei komplett neu anfangen
+     soll (Probephase, Testdaten). Bewusst eine eigene Funktion, damit sie
+     nicht versehentlich beim Einzel-Loeschen mitlaeuft. */
+  alleLoeschen: async function(){
+    try {
+      var r = await fetch(this._url() + '/rest/v1/belks_customers?location_id=eq.'
+              + encodeURIComponent(LOCATION_ID) + '&deleted=is.false',
+              { method: 'PATCH', headers: this._kopf(), body: JSON.stringify({ deleted: true }) });
+      if (!r.ok) {
+        var t = ''; try { t = await r.text(); } catch(e2){}
+        console.warn('Alle Kunden loeschen HTTP ' + r.status + ' ' + String(t).slice(0,160));
+        return false;
+      }
+      return true;
+    } catch(e) { console.warn('Alle Kunden loeschen:', e && e.message); return false; }
   },
   speichern: async function(k){
     if (!k) return false;
@@ -31514,6 +31618,10 @@ async function syncOneStateKey(lsKey) {
           return [c.id, c.name, c.phone, c.points, c.visits, c.deleted ? 1 : 0].join('|');
         }).sort().join('||');
       };
+      /* v370: Als geloescht markierte Kunden gehen nicht mehr in die App.
+         Die Zeile bleibt in der Tabelle stehen (sonst faengt der Abgleich an,
+         die lokale Liste wieder hochzuladen), aber sichtbar ist sie nirgends. */
+      kTab = kTab.filter(function(c){ return c && !c.deleted; });
       if (kFinger(kTab) !== kFinger(kLokal)) {
         window._syncWriting = true;
         localStorage.setItem(lsKey, JSON.stringify(kTab));
@@ -31522,13 +31630,17 @@ async function syncOneStateKey(lsKey) {
         window.dispatchEvent(new CustomEvent(lsKey + '_synced', { detail: kTab }));
       }
       try { window.__belksGelesen = window.__belksGelesen || {}; window.__belksGelesen['customers'] = true; } catch(e){}
-      /* Einmal pro Start kurz zeigen, wie viele Kunden aus der Tabelle kamen.
-         Ohne diese Rueckmeldung liess sich nicht unterscheiden, ob der
-         Abgleich gar nicht lief oder ob nur die Anzeige nicht nachzog. */
+      /* v370: Hier stand eine gruene Meldung ueber der Bedienung. Sie war als
+         Diagnose gedacht - lief der Abgleich, oder zog nur die Anzeige nicht
+         nach? Im Betrieb stoert sie bei jedem Start. Die Auskunft bleibt, nur
+         in der Konsole statt auf dem Bildschirm. */
       if (!window.__kundeMeldung) {
         window.__kundeMeldung = 1;
-        window.belksHinweis('\uD83D\uDC64 ' + kTab.filter(function(c){return c && !c.deleted;}).length
-          + ' Kunden aus der Tabelle geladen', '#2e7d32');
+        try {
+          console.log('Kunden aus der Tabelle: '
+            + kTab.filter(function(c){return c && !c.deleted;}).length
+            + ' aktiv, ' + kTab.filter(function(c){return c && c.deleted;}).length + ' geloescht');
+        } catch(e) {}
       }
       return;
     }
