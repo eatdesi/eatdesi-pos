@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v368</title>
+<title>eatDeSi POS v369</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -14671,19 +14671,16 @@ function OrderView({
       fontWeight: 700,
       lineHeight: 1
     }
-  }, "\u2191")))))), items.length > 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: C.green,
-      padding: "10px 12px",
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      position: "relative"
-    }
-  },
-  // Liefergeb_hr strip - only for Takeaway
+  }, "\u2191")))))), items.length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null,
+  /* ═══ v369: DER STREIFEN LAG UEBER DER KARTE ═══
+     Hier stand position:absolute mit bottom:100%. Ein absolut gesetztes
+     Element nimmt keinen Platz ein - der Streifen schwebte also ueber den
+     letzten Zeilen der Speisekarte und fing dort die Beruehrungen ab.
+     In kk waren dadurch die Pizzen weder zu sehen noch antippbar.
+     Jetzt steht er im normalen Fluss ueber der Fussleiste: er braucht
+     Platz, die Liste endet darueber, nichts ueberdeckt etwas. */
   isTakeaway && /*#__PURE__*/React.createElement("div", {
-    style: { position:"absolute", left:0, right:0, bottom:"100%", background:"#1b5e20", padding:"5px 10px", display:"flex", alignItems:"center", gap:6 }
+    style: { background:"#1b5e20", padding:"6px 10px", display:"flex", alignItems:"center", gap:6, flexShrink:0 }
   },
     /*#__PURE__*/React.createElement("span", { style:{ color:"rgba(255,255,255,.7)", fontSize:10, fontWeight:700, flexShrink:0 } }, "🛵"),
     [0, 2.90, 3.90, 4.90].map(amt =>
@@ -14699,6 +14696,19 @@ function OrderView({
       }, amt === 0 ? "Kein" : amt.toFixed(2).replace(".",",")+" €")
     )
   ),
+  /* v369: Die Fussleiste ist jetzt ein eigener Block neben dem Streifen,
+     nicht mehr sein Elternteil. position:relative wird nicht mehr gebraucht,
+     weil nichts mehr absolut darin haengt. */
+  /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.green,
+      padding: "10px 12px",
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      flexShrink: 0
+    }
+  },
   /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
@@ -14772,7 +14782,7 @@ function OrderView({
       fontWeight: 700,
       fontSize: 13
     }
-  }, "\uD83D\uDCB3 Zahlen")));
+  }, "\uD83D\uDCB3 Zahlen"))));   /* v369: eine Klammer mehr - Fragment um Streifen + Fussleiste */
 }
 function KitchenView({
   orders,
@@ -23820,7 +23830,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v368"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v369"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
