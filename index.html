@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v372</title>
+<title>eatDeSi POS v373</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -539,7 +539,32 @@ window.BELKS_FIRMA_FELDER = ['name','address','phone','footer','googleLink',
   'firmaName','firmaZusatz','firmaStrasse','firmaPlzOrt','firmaStNr',
   'firmaUst','firmaGericht','firmaEmail','firmaWeb','firmaPhone',
   'stNr','street','city','email','taxId','slogan','oeffnung',
-  'sumupKey','geminiKey'];
+  'sumupKey','geminiKey',
+  /* v373: Liefergebuehren. Bewusst HIER und nicht in printerSettings -
+     der Drucker gehoert dem Geraet, die Gebuehren gehoeren dem Restaurant.
+     So sehen alle Geraete eines Standorts dieselben Betraege, und jede
+     Tochter-App bringt ihre eigenen mit. */
+  'lieferGeb1','lieferGeb2','lieferGeb3'];
+
+/* ═══ v373: DIE LIEFERGEBUEHREN-STUFEN ═══
+   Eine Stelle, die entscheidet, welche Knoepfe beim Kassieren erscheinen.
+   "Kein" ist immer dabei. Leere oder unsinnige Felder werden weggelassen -
+   wer nur eine Gebuehr hat, bekommt auch nur einen Knopf.
+   Ohne Einstellung bleiben die bisherigen Werte, damit sich fuer bestehende
+   Standorte nichts aendert, bevor jemand etwas eintraegt. */
+window.belksLieferStufen = function(){
+  var f = {};
+  try { f = JSON.parse(localStorage.getItem('eatdesi_firma') || 'null') || {}; } catch(e) {}
+  var roh = [f.lieferGeb1, f.lieferGeb2, f.lieferGeb3];
+  var gesetzt = roh.some(function(x){ return String(x == null ? '' : x).trim() !== ''; });
+  if (!gesetzt) return [0, 2.90, 3.90, 4.90];        // Vorgabe wie bisher
+  var stufen = [0];
+  roh.forEach(function(x){
+    var n = parseFloat(String(x == null ? '' : x).replace(',', '.'));
+    if (isFinite(n) && n > 0 && stufen.indexOf(n) < 0) stufen.push(n);
+  });
+  return stufen;
+};
 
 // v215: Fehlende Entsprechungen ergaenzen, damit JEDE Maske dieselben Werte
 // sieht - egal welche Schreibweise sie benutzt.
@@ -14688,7 +14713,9 @@ function OrderView({
     style: { background:"#1b5e20", padding:"6px 10px", display:"flex", alignItems:"center", gap:6, flexShrink:0 }
   },
     /*#__PURE__*/React.createElement("span", { style:{ color:"rgba(255,255,255,.7)", fontSize:10, fontWeight:700, flexShrink:0 } }, "🛵"),
-    [0, 2.90, 3.90, 4.90].map(amt =>
+    /* v373: Hier stand die feste Liste [0, 2.90, 3.90, 4.90]. Jetzt kommen
+       die Stufen aus den Firmendaten - siehe belksLieferStufen(). */
+    window.belksLieferStufen().map(amt =>
       /*#__PURE__*/React.createElement("button", {
         key: amt,
         onClick: () => { setLiefergebührOn(amt > 0); setLiefergebührAmt(String(amt)); },
@@ -21438,6 +21465,34 @@ function DeliveryPersonView({ drivers, takeaway, completedOrders, onSave }) {
   const [subview, setSubview] = React.useState("list");
   const [confirmDel, setConfirmDel] = React.useState(null);
   const [assignModal, setAssignModal] = React.useState(null); // { taId }
+  /* v373: Liefergebuehren. Beim Oeffnen aus den Firmendaten lesen - nicht aus
+     einem eigenen Speicher, sonst gaebe es zwei Wahrheiten. */
+  const [geb, setGeb] = React.useState(function(){
+    var f = {};
+    try { f = JSON.parse(localStorage.getItem('eatdesi_firma') || 'null') || {}; } catch(e) {}
+    return { a: f.lieferGeb1 == null ? "" : String(f.lieferGeb1),
+             b: f.lieferGeb2 == null ? "" : String(f.lieferGeb2),
+             c: f.lieferGeb3 == null ? "" : String(f.lieferGeb3) };
+  });
+  const [gebOk, setGebOk] = React.useState(false);
+  const gebSpeichern = () => {
+    var sauber = function(x){
+      var n = parseFloat(String(x == null ? '' : x).replace(',', '.'));
+      return (isFinite(n) && n > 0) ? Math.round(n * 100) / 100 : "";
+    };
+    var neu = { lieferGeb1: sauber(geb.a), lieferGeb2: sauber(geb.b), lieferGeb3: sauber(geb.c) };
+    try { window.belksFirmaSpeichern(neu); }
+    catch(e) {
+      /* Rueckfall: zusammenfuehren, nie ersetzen - sonst waeren die
+         Firmendaten weg (der Fehler aus v214). */
+      try {
+        var f = JSON.parse(localStorage.getItem('eatdesi_firma') || 'null') || {};
+        LS.set('eatdesi_firma', Object.assign({}, f, neu));
+      } catch(e2) {}
+    }
+    setGebOk(true);
+    setTimeout(function(){ setGebOk(false); }, 2200);
+  };
 
   const inputStyle = { width:"100%", padding:"10px 12px", borderRadius:8, border:"2px solid #ddd", fontSize:14, fontFamily:"inherit", boxSizing:"border-box", marginBottom:10 };
   const cardStyle = { background:"#fff", borderRadius:12, padding:"12px 14px", marginBottom:8, boxShadow:"0 1px 4px #0001" };
@@ -21516,8 +21571,60 @@ function DeliveryPersonView({ drivers, takeaway, completedOrders, onSave }) {
 
     // Tabs
     /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderBottom:"2px solid #e0e0e0", display:"flex", padding:"0 8px" } },
-      [["list","🚴 Fahrer"],["delivery","📦 Aktive Lieferungen"],["form",editIdx!==null?"✏️ Bearbeiten":"➕ Neu"]].map(([v,l])=>
+      [["list","🚴 Fahrer"],["delivery","📦 Aktive Lieferungen"],
+       ["gebuehren","💶 Gebühren"],   /* v373 */
+       ["form",editIdx!==null?"✏️ Bearbeiten":"➕ Neu"]].map(([v,l])=>
         /*#__PURE__*/React.createElement("button",{ key:v, onClick:()=>{ if(v==="form"&&editIdx===null) setForm({name:"",phone:"",note:""}); setSubview(v); }, style:{ padding:"10px 12px", border:"none", background:"transparent", cursor:"pointer", fontFamily:"inherit", fontWeight:600, fontSize:12, color:subview===v?C.green:"#888", borderBottom:subview===v?`2px solid ${C.green}`:"2px solid transparent", marginBottom:"-2px", whiteSpace:"nowrap" } }, l)
+      )
+    ),
+
+    /* ═══ v373: LIEFERGEBUEHREN ═══
+       Drei Stufen, weil die meisten Betriebe nach Entfernung staffeln.
+       Wer nur eine Gebuehr nimmt, laesst die anderen leer - dann erscheint
+       beim Kassieren auch nur ein Knopf. */
+    subview==="gebuehren" && /*#__PURE__*/React.createElement("div", { style:{ flex:1, overflowY:"auto", padding:14 } },
+      /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:12, padding:16, boxShadow:"0 1px 4px #0001", maxWidth:420 } },
+        /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:15, color:C.green, marginBottom:4 } },
+          "\uD83D\uDCB6 Liefergeb\u00fchren"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#777", lineHeight:1.6, marginBottom:14 } },
+          "Diese Betr\u00e4ge erscheinen beim Kassieren einer Lieferung als Knopf. ",
+          "\u201EKein\u201C ist immer dabei. Felder leer lassen, wenn du weniger Stufen brauchst \u2013 ",
+          "dann erscheinen auch weniger Kn\u00f6pfe."),
+
+        [["a","Stufe 1 (z.B. Nahbereich)"],["b","Stufe 2 (z.B. bis 5 km)"],["c","Stufe 3 (z.B. weiter)"]].map(function(fd){
+          return /*#__PURE__*/React.createElement("div", { key:fd[0], style:{ marginBottom:10 } },
+            /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#888", marginBottom:3 } }, fd[1]),
+            /*#__PURE__*/React.createElement("div", { style:{ display:"flex", alignItems:"center", gap:8 } },
+              /*#__PURE__*/React.createElement("input", {
+                type:"text", inputMode:"decimal", value: geb[fd[0]],
+                onChange: function(e){ var v=e.target.value; setGeb(function(g){ return Object.assign({}, g, {[fd[0]]: v}); }); },
+                placeholder:"leer = nicht anzeigen",
+                style:{ flex:1, padding:"10px 12px", borderRadius:8, border:"2px solid #ddd", fontSize:14, fontFamily:"inherit", boxSizing:"border-box" }
+              }),
+              /*#__PURE__*/React.createElement("span", { style:{ fontWeight:700, color:"#888", fontSize:14 } }, "\u20AC")));
+        }),
+
+        /*#__PURE__*/React.createElement("div", {
+          style:{ background:"#f6f9f6", borderRadius:9, padding:"9px 11px", fontSize:12, color:"#555", margin:"4px 0 12px" }
+        }, "Vorschau: ",
+           /*#__PURE__*/React.createElement("b", null,
+             (function(){
+               var sauber = function(x){ var n=parseFloat(String(x||'').replace(',','.')); return (isFinite(n)&&n>0)?n:null; };
+               var l = [sauber(geb.a), sauber(geb.b), sauber(geb.c)].filter(Boolean);
+               if (!l.length) return "Kein \u00b7 2,90 \u20AC \u00b7 3,90 \u20AC \u00b7 4,90 \u20AC (Vorgabe)";
+               return "Kein \u00b7 " + l.map(function(n){ return n.toFixed(2).replace(".", ",") + " \u20AC"; }).join(" \u00b7 ");
+             })())),
+
+        /*#__PURE__*/React.createElement("button", {
+          onClick: gebSpeichern,
+          style:{ width:"100%", padding:13, borderRadius:10, border:"none",
+                  background: gebOk ? "#4caf50" : C.green, color:"#fff", cursor:"pointer",
+                  fontFamily:"inherit", fontWeight:800, fontSize:14 }
+        }, gebOk ? "\u2713 Gespeichert \u2013 gilt auf allen Ger\u00e4ten" : "\uD83D\uDCBE Speichern"),
+
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#999", lineHeight:1.6, marginTop:12 } },
+          "Die Geb\u00fchr wird immer mit 19 % versteuert \u2013 das ist nicht einstellbar. ",
+          "Einzelne Auftr\u00e4ge lassen sich weiterhin in der Takeaway-Liste abweichend \u00e4ndern.")
       )
     ),
 
@@ -23897,7 +24004,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v372"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v373"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
