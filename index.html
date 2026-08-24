@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v389</title>
+<title>eatDeSi POS v390</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -24251,7 +24251,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v389"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v390"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -29592,12 +29592,18 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
       +'Haenge sie an dessen "extras" an, niemals als eigenen Artikel.\n'
       +'- Nummern wie (#54) gehoeren dem Partner. Schreibe sie in "partnerArtikelNr", '
       +'niemals in eine andere Zahl.\n'
-      +'- Preise als Zahl mit Punkt, ohne Waehrung.\n\n'
+      +'- Preise als Zahl mit Punkt, ohne Waehrung.\n'
+      +'- Setze "getraenk":true, wenn die Zeile ein GETRAENK ist (Bier, Wein, Cola, '
+      +'Saft, Schorle, Kaffee, Tee, Cocktail, Longdrink, Wasser, Limonade). '
+      +'Sonst false. Das entscheidet ueber den Steuersatz, also lieber genau hinsehen.\n'
+      +'- Eine Zeile "Liefergebuehr" ist KEIN Artikel: schreibe ihren Betrag in '
+      +'"liefergebuehr".\n'
+      +'- "bestellId" ist die lange Auftragsnummer des Partners (z.B. ID 1236138296).\n\n'
       +'Antworte NUR mit JSON, ohne Markdown, ohne Erklaerung, exakt so:\n'
       +'{"items":[{"qty":1,"name":"Cheesy Burger","preis":8.50,"partnerArtikelNr":"54",'
-      +'"extras":[{"name":"mit Beef-Patty, 150g","preis":2.00}]}],'
-      +'"partnerNr":"","kunde":"","telefon":"","typ":"abholung","adresse":"",'
-      +'"zeit":"","gesamt":0,"zahlung":""}\n'
+      +'"getraenk":false,"extras":[{"name":"mit Beef-Patty, 150g","preis":2.00}]}],'
+      +'"partnerNr":"","bestellId":"","kunde":"","telefon":"","typ":"abholung","adresse":"",'
+      +'"zeit":"","liefergebuehr":0,"gesamt":0,"zahlung":""}\n'
       +'typ ist "lieferung" nur wenn eine Lieferadresse sichtbar ist, sonst "abholung". '
       +'zeit = bestaetigte Uhrzeit falls sichtbar. gesamt = Gesamtbetrag falls sichtbar, sonst 0. '
       +'Felder, die nicht auf dem Foto stehen, bleiben leer.';
@@ -29612,24 +29618,43 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
         var extras = (it.extras||[]).filter(function(e){ return e && e.name; });
         var aufschlag = extras.reduce(function(su,e){ return su + (parseFloat(e.preis)||0); }, 0);
         var basis = parseFloat(it.preis)||0;
+        /* v390: Der Steuersatz kommt jetzt aus der Zeile selbst. Vorher stand
+           ueberall 'food' - eine Cola oder ein Long Island Iced Tea wurde
+           damit mit 7 % statt 19 % gebucht. Das ist kein Anzeigefehler,
+           sondern eine falsche Steuer auf einer echten Buchung.
+           Zusaetzlich ein eigener Blick der Kasse: Wenn die AI ein bekanntes
+           Getraenk nicht als solches meldet, greift die Wortliste. Sicherer
+           zu viel geprueft als zu wenig - falsch kassierte Steuer faellt
+           erst beim Steuerberater auf. */
+        var wort = String(it.name||'').toLowerCase();
+        var trinkWort = /\b(cola|fanta|sprite|spezi|bier|pils|weizen|radler|wein|schorle|saft|limo|limonade|wasser|kaffee|espresso|cappuccino|latte|tee|cocktail|longdrink|iced tea|gin|vodka|whisky|rum|aperol|prosecco|sekt|shot|likoer|lik\u00f6r|diesel|bembel|apfelwein)\b/.test(wort);
+        var istTrink = (it.getraenk === true) || trinkWort;
         return {
           nr: null,                                   // bewusst keine: es ist NICHT unsere Karte
           name: String(it.name||'').trim() + (it.partnerArtikelNr ? ' (#'+it.partnerArtikelNr+')' : ''),
           qty: parseInt(it.qty,10)||1,
           price: Math.round((basis + aufschlag)*100)/100,
-          taxRate: 'food',
+          taxRate: istTrink ? 'drinks' : 'food',
           note: extras.map(function(e){ return e.name; }).join(', ')
         };
       }).filter(function(x){ return x.name; });
 
       if(neu.length) setLines(function(prev){return prev.concat(neu);});
-      if(j.partnerNr) setPnr(String(j.partnerNr));
+      /* v390: Die lange Auftragsnummer des Partners ist die einzige
+         Verbindung zu seinem System - bei einer Reklamation sucht man
+         danach. Sie stand auf dem Foto und ging verloren. */
+      if(j.partnerNr || j.bestellId) setPnr(String(j.bestellId || j.partnerNr));
       if(j.kunde) setKname(String(j.kunde));
       if(j.telefon) setKphone(String(j.telefon));
+      /* v390: Die Liefergebuehr ist kein Artikel, sondern ein eigenes Feld -
+         sonst fehlte sie in der Summe und der Vergleich mit dem Zettel
+         schlug jedes Mal an. */
+      var geb = parseFloat(j.liefergebuehr)||0;
+      if(geb > 0 && typeof setFee === 'function') setFee(String(geb.toFixed(2)));
       if(j.typ==='lieferung'){ setTyp('lieferung'); if(j.adresse) setAddr(String(j.adresse)); }
       else { setTyp('abholung'); }
 
-      var summe = neu.reduce(function(su,x){ return su + x.price*x.qty; }, 0);
+      var summe = neu.reduce(function(su,x){ return su + x.price*x.qty; }, 0) + geb;
       var parts=['\uD83E\uDD16 '+neu.length+' Artikel abgeschrieben \u2013 bitte mit dem Zettel vergleichen!'];
       if(j.zeit) parts.push('Uhrzeit laut Zettel: '+String(j.zeit));
       if(j.gesamt){
