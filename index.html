@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v385</title>
+<title>eatDeSi POS v386</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9838,15 +9838,36 @@ function BonModal({
   // Schlanker Bon NUR fuer Kueche/Bar: nur Tisch/Kunde + Speisen/Getraenke, grosse Schrift
   const kvBonHtml = (title, lines) => {
     var _kbW = (printerSettings?.width || 384); try { var _kc=getBonConfig(); if(_kc && _kc.kueche && _kc.kueche.width===58) _kbW=304; } catch(e){}
-    const kundeInfo = customerName ? `<div class="center bold" style="font-size:20px;margin:2px 0">${customerName}</div>` : "";
+    const kundeInfo = customerName ? `<div class="center bold" style="font-size:14pt;margin:2px 0">${customerName}</div>` : "";
+    /* ═══ v386: KUNDENDATEN AUF DEN GAESTEBON ═══
+       Der Gaestebon zeigte nur den Namen. Telefonnummer und Lieferadresse
+       standen nirgends - der Fahrer bekam sie also nur ueber den
+       Kuechenbon, und der Gast konnte auf seinem Zettel nicht nachsehen,
+       wohin geliefert wird. Bei einer Abholung fehlte selbst die
+       Telefonnummer, ueber die man ihn erreicht.
+       Ueberschrift richtet sich nach der Adresse, wie beim Zahlungsbeleg
+       seit v384. */
+    var _kbLief = !!(customerStreet || customerCity);
+    var _kbHat  = !!(customerName || customerPhone || customerStreet);
+    const kundeBlock = _kbHat ? `
+      <div class="line"></div>
+      <div class="center bold" style="font-size:12pt">${_kbLief ? "\uD83D\uDEB4 Lieferadresse" : "\uD83D\uDCE6 Abholung"}</div>
+      ${customerStreet ? `<div class="center" style="font-size:12pt">${customerStreet}</div>` : ""}
+      ${(customerPlz || customerCity) ? `<div class="center" style="font-size:12pt">${[customerPlz, customerCity].filter(Boolean).join(" ")}</div>` : ""}
+      ${customerPhone ? `<div class="center" style="font-size:12pt">\uD83D\uDCDE ${customerPhone}</div>` : ""}
+    ` : "";
     return `<html><head><meta name="viewport" content="width=device-width"><style>
-    body{font-family:monospace;font-size:18px;font-weight:700;width:${_kbW}px;margin:0 auto;padding:8px;line-height:1.4}
+    /* v386: 12pt statt 18px, durchgehend fett - so gewuenscht und so, wie
+       der Kundenbeleg seit v127 gedruckt wird. Der Bon wird dadurch kuerzer
+       und passt bei langen Bestellungen auf einen Abriss. */
+    body{font-family:monospace;font-size:12pt;font-weight:700;width:${_kbW}px;margin:0 auto;padding:8px;line-height:1.35}
     .row{display:flex;justify-content:space-between;margin:3px 0}.bold{font-weight:800}
     .line{border-top:2px solid #000;margin:6px 0}.center{text-align:center}
   </style></head><body>
-    <div class="center bold" style="font-size:22px;margin:4px 0">${title}</div>
-    <div class="center bold" style="font-size:24px;margin:4px 0">${label}</div>
+    <div class="center bold" style="font-size:14pt;margin:4px 0">${title}</div>
+    <div class="center bold" style="font-size:14pt;margin:4px 0">${label}</div>
     ${kundeInfo}
+    ${kundeBlock}
     <div class="line"></div>${lines}
     <div>&nbsp;</div><div>&nbsp;</div><div>&nbsp;</div>
   </body></html>`;
@@ -9854,7 +9875,8 @@ function BonModal({
   const printGast = () => {
     const lines = items.map(i => `
       <div class="row bold"><span>${i.qty}× ${i.nr}. ${i.name}</span><span>${fmt(i.finalPrice * i.qty)}</span></div>
-      ${i.note ? `<div style="padding-left:10px;font-size:14px;color:green">→ ${i.note}</div>` : ""}
+      ${i.note ? `<div style="padding-left:10px;font-size:11pt">→ ${i.note}</div>` : ""}
+      ${i.kitchenNote ? `<div style="padding-left:10px;font-size:11pt">${i.kitchenNote}</div>` : ""}
     `).join("") + `
       <div class="line"></div>
       <div class="row"><span>Netto</span><span>${fmt(netto)}</span></div>
@@ -9862,9 +9884,9 @@ function BonModal({
       ${tax19 > 0 ? `<div class="row"><span>MwSt. 19% (Getränke)</span><span>${fmt(tax19)}</span></div>` : ""}` : ""}
       ${fee > 0 ? `<div class="row" style="color:#1565c0"><span>Liefergebühr</span><span>${fmt(fee)}</span></div>` : ""}
       <div class="line"></div>
-      <div class="row bold" style="font-size:22px"><span>GESAMT</span><span>${fmt(total)}</span></div>
+      <div class="row bold" style="font-size:14pt"><span>GESAMT</span><span>${fmt(total)}</span></div>
       <div class="line"></div>
-      <div class="center" style="font-size:16px">Zahlung noch offen</div>`;
+      <div class="center bold" style="font-size:12pt">Zahlung noch offen</div>`;
     doPrint(kvBonHtml("🧾 GÄSTEBON", lines), 0x00);
     setPrinted(p => ({
       ...p,
@@ -24193,7 +24215,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v385"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v386"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
