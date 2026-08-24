@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v387</title>
+<title>eatDeSi POS v388</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8787,11 +8787,35 @@ window.TSE = TSE;
 // ====== Zentrale AI-Funktion (aktuell Google Gemini, spaeter leicht austauschbar) ======
 // Liest den API-Key aus den Drucker-Einstellungen (printerSettings.geminiKey).
 // Rueckgabe: Antworttext (String). Bei Fehler: wirft Error.
+/* ═══ v388: DER SCHLUESSEL LIEGT AN ZWEI ORTEN ═══
+   Eingetragen wird er in den Drucker-Einstellungen, gespeichert aber in den
+   FIRMENdaten - geminiKey steht in BELKS_FIRMA_FELDER, damit er ueber den
+   Abgleich auf alle Geraete des Restaurants kommt. Die Maske zeigte ihn
+   deshalb gruen an, waehrend callAI ihn in eatdesi_printer suchte und nicht
+   fand: "Kein Gemini API-Key", obwohl er da war.
+   Wieder zwei Orte fuer dieselbe Sache. Diese Funktion schaut jetzt an
+   beiden - erst dort, wo er eingetippt wurde, dann dort, wo er liegt. */
+window.belksAiSchluessel = function(){
+  var k = '';
+  try {
+    var pr = JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer")) || '{}') || {};
+    k = pr.geminiKey || '';
+  } catch(e) {}
+  if (!k) {
+    try {
+      var f = window.belksFirmaLesen ? window.belksFirmaLesen()
+            : JSON.parse(localStorage.getItem('eatdesi_firma') || 'null');
+      k = (f && f.geminiKey) || '';
+    } catch(e) {}
+  }
+  return String(k || '').trim();
+};
+
 window.callAI = async function(prompt, maxTokens) {
   var cfg = {};
   try { cfg = JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer")) || '{}') || {}; } catch(e) {}
   var provider = cfg.aiProvider || 'gemini';
-  var key = cfg.geminiKey || '';
+  var key = window.belksAiSchluessel();
   if (!key) throw new Error('Kein Gemini API-Key. Bitte in Drucker-Einstellungen eingeben.');
 
   if (provider === 'gemini') {
@@ -8825,7 +8849,7 @@ window.callAI = async function(prompt, maxTokens) {
 window.callAIVision = async function(prompt, b64jpeg, maxTokens, mimeType) {
   var cfg = {};
   try { cfg = JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer")) || '{}') || {}; } catch(e) {}
-  var key = cfg.geminiKey || '';
+  var key = window.belksAiSchluessel();      // v388: beide Orte, siehe oben
   if (!key) throw new Error('Kein Gemini API-Key. Bitte in Drucker-Einstellungen eingeben.');
   var model = cfg.geminiModel || 'gemini-2.5-flash-lite';
   var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
@@ -24227,7 +24251,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v387"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v388"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
