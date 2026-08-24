@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v376</title>
+<title>eatDeSi POS v377</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8452,6 +8452,43 @@ function bonZiel(item){
   return isDrink(item) ? 'bar' : 'kueche';
 }
 function istBar(item){ return bonZiel(item) === 'bar'; }
+
+/* ═══ v377: WAS IST FUER DIESE STATION OFFEN? ═══
+   Eine Funktion fuer den Zaehler am Reiter UND die Ansicht dahinter. Vorher
+   rechneten beide getrennt und kamen zu verschiedenen Ergebnissen: der
+   Reiter meldete "Kueche 1", die Ansicht sagte "Alles erledigt".
+   Zwei Ursachen, beide hier beseitigt:
+   - Entwuerfe zaehlen NICHT. Sie sind noch nicht bestellt, die Kueche sieht
+     sie nicht, also darf auch keine Zahl darauf hinweisen.
+   - Die Zuordnung laeuft ueber istBar() (das eingestellte Bon-Ziel), nicht
+     ueber isDrink() (die MwSt-Einstellung). Sonst landet eine Schorle auf
+     "7% Speisen" im Kuechen-Zaehler und auf dem Barbildschirm. */
+function belksStationOffen(station, tableOrders, takeaway, completedOrders){
+  var istZiel = function(i){ return station === 'bar' ? istBar(i) : !istBar(i); };
+  var marke   = station === 'bar' ? '_barSent' : '_kitchenSent';
+  var hatOffenes = function(items){
+    return (items || []).some(function(i){
+      return i && istZiel(i) && !i[marke] && !i._entwurf;
+    });
+  };
+  var n = 0;
+  try {
+    Object.keys(tableOrders || {}).forEach(function(k){
+      var o = (tableOrders || {})[k];
+      if (o && hatOffenes(o.items)) n++;
+    });
+    (takeaway || []).forEach(function(t){
+      if (t && !t.done && hatOffenes(t.items)) n++;
+    });
+    /* Webshop-Bestellungen sind bereits gebucht - dort gibt es weder
+       Entwuerfe noch Sende-Marken, nur die Frage, ob etwas fuer diese
+       Station dabei ist. */
+    (belksWebshopOffen(completedOrders, station) || []).forEach(function(o){
+      if ((o.items || []).some(istZiel)) n++;
+    });
+  } catch(e) {}
+  return n;
+}
 
 // MwSt-Betrag (herausgerechnet aus Brutto) für 7%-Speisen
 function calcTax7(items){
@@ -24058,7 +24095,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v376"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v377"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25662,8 +25699,11 @@ function App() {
   };
   /* v295: Der Webshop zaehlt jetzt mit. Eine Zahl am Reiter, die den Webshop
      verschweigt, ist schlimmer als gar keine - der Koch verlaesst sich darauf. */
-  const pendingKitchen = Object.values(tableOrders).filter(o => o?.items?.some(i => !isDrink(i) && !i._kitchenSent && !i._entwurf)).length + takeaway.filter(t => t.items?.some(i => !isDrink(i) && !i._kitchenSent) && !t.done).length + belksWebshopOffen(completedOrders, "kueche").filter(o => (o.items||[]).some(i => !isDrink(i))).length;
-  const pendingBar = Object.values(tableOrders).filter(o => o?.items?.some(i => isDrink(i) && !i._barSent && !i._entwurf)).length + takeaway.filter(t => t.items?.some(i => isDrink(i) && !i._barSent) && !t.done).length + belksWebshopOffen(completedOrders, "bar").filter(o => (o.items||[]).some(i => isDrink(i))).length;
+  /* v377: Beide Zahlen kommen jetzt aus derselben Funktion wie die Ansicht.
+     Vorher stand hier eine eigene Rechnung - sie vergass bei Takeaway die
+     Entwurfspruefung und benutzte isDrink() statt istBar(). */
+  const pendingKitchen = belksStationOffen("kueche", tableOrders, takeaway, completedOrders);
+  const pendingBar     = belksStationOffen("bar",    tableOrders, takeaway, completedOrders);
   const active = Object.values(tableOrders).filter(o => o?.items?.length > 0).length + takeaway.filter(t => t.items?.length > 0 && !t.done).length;
   const MENU_ITEMS = [{
     id: "dashboard",
@@ -25792,7 +25832,10 @@ function App() {
   }, {
     id: "qr_karten", l: "QR-Tischkarten", i: "🔳"
   }, {
-    id: "channels", l: "Lieferando/UberEats", i: "🛵"
+    /* v377: Hiess "Lieferando/UberEats". Seit v375 steckt dort der
+       Foto-Scan fuer JEDE Bestellung - Zettel vom Telefon, Tischnotiz,
+       Partner-Ausdruck. Unter dem alten Namen hat ihn niemand gesucht. */
+    id: "channels", l: "Bestellung scannen", i: "📷"
   }, {
     id: "belks", l: "MUTTER-EBENE (Belks)", i: "🏢"
   }, {
