@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v383</title>
+<title>eatDeSi POS v385</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9325,7 +9325,7 @@ function htmlToBlocks(html, bonType){
    der Speichern-Knopf sitzt in der Fussleiste, nicht in der Vorschau.
    Laeuft ueber printBon(), also ueber den geprueften Weg: Bluetooth,
    WLAN oder Browser, mit den Einstellungen des Bon-Editors. */
-function belksStationsBon(titel, liste, label, printerCfg, bonTyp){
+function belksStationsBon(titel, liste, label, printerCfg, bonTyp, notiz){
   try {
     if (!liste || !liste.length) return;
     var nachKat = {};
@@ -9335,6 +9335,15 @@ function belksStationsBon(titel, liste, label, printerCfg, bonTyp){
       nachKat[c].push(i);
     });
     var L = "";
+    /* ═══ v385: TISCHNOTIZ GANZ OBEN ═══
+       "Erst um 19:30", "Gast wartet auf Begleitung", "Allergie Nuss" - solche
+       Angaben muessen die Kueche VOR den Artikeln erreichen, sonst wird
+       losgekocht, bevor jemand sie liest. Deshalb vor die Kategorien und
+       fett, nicht als Fussnote. */
+    if (notiz && String(notiz).trim()) {
+      L += '<div class="row bold"><span>** ' + String(notiz).trim() + ' **</span><span></span></div>';
+      L += '<div class="blank"></div>';
+    }
     Object.keys(nachKat).forEach(function(cat){
       L += '<div class="center bold">- ' + cat + ' -</div>';
       nachKat[cat].forEach(function(i){
@@ -9362,13 +9371,26 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
       <div>Zeit: ${tse.timeEnd||tse.timeStart||""}</div>
       <div style="word-break:break-all">Sig: ${(tse.signature||"").slice(0,64)}</div>
     </div>` : "";
-  const deliveryBlock = deliveryInfo ? `
+  /* ═══ v384: KUNDENDATEN AUCH OHNE NAMEN, UND RICHTIG BESCHRIFTET ═══
+     Vorher hiess der Block IMMER "Lieferadresse" - auch bei einer Abholung,
+     wo es gar keine Adresse gibt. Und er entstand nur, wenn ein Name da war:
+     Ein Gast, der nur seine Telefonnummer hinterlaesst (der Normalfall am
+     Telefon), stand mit gar nichts auf dem Bon.
+     Jetzt entscheidet die Adresse ueber die Ueberschrift, und jede
+     vorhandene Angabe wird gedruckt - auch die Kundennummer, damit der Gast
+     sie beim naechsten Anruf nennen kann. */
+  const _hatKunde = deliveryInfo && (deliveryInfo.name || deliveryInfo.phone ||
+                                     deliveryInfo.street || deliveryInfo.kundenNr);
+  const _istLieferung = !!(deliveryInfo && deliveryInfo.street);
+  const deliveryBlock = _hatKunde ? `
     <div class="line"></div>
-    <div class="bold" style="font-size:12px;margin-bottom:3px">🚴 Lieferadresse</div>
+    <div class="bold" style="font-size:12px;margin-bottom:3px">${_istLieferung ? "🚴 Lieferadresse" : "📦 Abholung — Kunde"}</div>
     ${deliveryInfo.name ? `<div>${deliveryInfo.name}</div>` : ""}
     ${deliveryInfo.street ? `<div>${deliveryInfo.street}</div>` : ""}
     ${(deliveryInfo.plz || deliveryInfo.city) ? `<div>${[deliveryInfo.plz, deliveryInfo.city].filter(Boolean).join(" ")}</div>` : ""}
     ${deliveryInfo.phone ? `<div>📞 ${deliveryInfo.phone}</div>` : ""}
+    ${deliveryInfo.kundenNr ? `<div style="font-size:11px">Kunden-Nr: ${deliveryInfo.kundenNr}</div>` : ""}
+    ${deliveryInfo.note ? `<div style="font-size:11px">${deliveryInfo.note}</div>` : ""}
   ` : "";
   // AUDIT-FIX v156: Fallbacks nur fuer eatdesi-bw — fremde Toechter drucken NIE BW-Daten
   const _isBWbon = (typeof LOCATION_ID!=='undefined' && LOCATION_ID==='eatdesi-bw');
@@ -14165,6 +14187,8 @@ function OrderView({
   onSave,
   onBestellen,
   onWechseln,
+  onNotiz,          // v385
+  tischNotiz,       // v385
   onPay,
   onClear,
   optionGroups,
@@ -14177,6 +14201,9 @@ function OrderView({
   const [optItem, setOptItem] = useState(null);
   const [noteTarget, setNoteTarget] = useState(null);
   const [noteText, setNoteText] = useState("");
+  /* v385: Notiz fuer den GANZEN Tisch - nicht fuer eine Zeile. */
+  const [tnOffen, setTnOffen] = useState(false);
+  const [tnText, setTnText] = useState("");
   /* ═══ v312: ZEILE BEARBEITEN ═══
      Bisher konnte der Stift nur eine Kuechennotiz. Preis und Rabatt gingen
      erst an der Kasse - beim Aufnehmen der Bestellung ging das nicht.
@@ -14520,12 +14547,71 @@ function OrderView({
       alignItems: "center"
     }
   }, /*#__PURE__*/React.createElement("span", {
+    /* v385: Der Griff gehoert AUSSEN hin. Beim ersten Anlauf sass er am
+       inneren Element - ein Tippen auf den Rand der Leiste tat dann nichts,
+       weil Ereignisse nach oben laufen und nicht nach innen. */
+    onClick: () => { setTnText(tischNotiz || ""); setTnOffen(true); },
     style: {
       color: "#fff",
       fontWeight: 700,
-      fontSize: 14
+      fontSize: 14,
+      cursor: "pointer",
+      flex: 1,
+      minWidth: 0
     }
-  }, "\u270F\uFE0F ", label),
+  },
+    /* ═══ v385: DIE LEISTE KANN JETZT ETWAS ═══
+       Sie zeigte nur den Tischnamen an. Ein Tippen darauf oeffnet die
+       Notiz zum ganzen Vorgang - Uhrzeit, Hinweis zum Gast, Allergie.
+       Steht eine Notiz da, ist sie hier zu lesen, ohne dass man sie
+       oeffnen muss. */
+    /*#__PURE__*/React.createElement("span", { style:{ display:"block" } },
+      "\u270F\uFE0F ", label,
+      tischNotiz
+        ? /*#__PURE__*/React.createElement("span", {
+            style:{ display:"block", fontSize:11.5, fontWeight:600, opacity:.95, marginTop:2,
+                    whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }
+          }, "\uD83D\uDCDD ", tischNotiz)
+        : /*#__PURE__*/React.createElement("span", {
+            style:{ display:"block", fontSize:10.5, fontWeight:600, opacity:.6, marginTop:2 }
+          }, "Tippen f\u00fcr Notiz (Uhrzeit, Gast, Allergie \u2026)")),
+
+    tnOffen && /*#__PURE__*/React.createElement("div", {
+      style:{ position:"fixed", inset:0, background:"#0009", zIndex:3400, display:"flex",
+              alignItems:"center", justifyContent:"center", padding:16 },
+      onClick: () => setTnOffen(false)
+    }, /*#__PURE__*/React.createElement("div", {
+      onClick: e => e.stopPropagation(),
+      style:{ background:"#fff", borderRadius:14, padding:18, width:"100%", maxWidth:380 }
+    },
+      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:15, marginBottom:3 } },
+        "\uD83D\uDCDD Notiz \u2013 ", label),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, color:"#777", marginBottom:10, lineHeight:1.5 } },
+        "Gilt f\u00fcr den ganzen Vorgang und steht auf dem K\u00fcchen- und Barbon \u2013 ",
+        "z.B. \u201Eerst um 19:30\u201C, \u201EAllergie Nuss\u201C, \u201EGast wartet auf Begleitung\u201C."),
+      /*#__PURE__*/React.createElement("textarea", {
+        value: tnText, autoFocus: true,
+        onChange: e => setTnText(e.target.value),
+        placeholder: "z.B. erst um 19:30 servieren",
+        style:{ width:"100%", height:90, padding:10, borderRadius:10, border:"2px solid #eee",
+                fontFamily:"inherit", fontSize:14, boxSizing:"border-box", marginBottom:10 }
+      }),
+      /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8 } },
+        tischNotiz ? /*#__PURE__*/React.createElement("button", {
+          onClick: () => { if (typeof onNotiz === "function") onNotiz(tableId, ""); setTnOffen(false); },
+          style:{ padding:"12px 14px", borderRadius:10, border:"2px solid #ffcdd2", background:"#fff5f5",
+                  color:"#c62828", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13 }
+        }, "\uD83D\uDDD1") : null,
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => setTnOffen(false),
+          style:{ flex:1, padding:12, borderRadius:10, border:"2px solid #ddd", background:"#fff",
+                  color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13.5 }
+        }, "Abbrechen"),
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => { if (typeof onNotiz === "function") onNotiz(tableId, tnText); setTnOffen(false); },
+          style:{ flex:1, padding:12, borderRadius:10, border:"none", background:C.green,
+                  color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:13.5 }
+        }, "\u2713 Speichern"))))),   /* v385: schliesst auch die Leisten-Spalte */
   /* ═══ v351: TISCHWECHSEL ═══
      Ohne diesen Knopf blieb nur: alten Tisch loeschen und alles neu
      tippen - was seit v346 auch noch einen Storno erzeugt, obwohl
@@ -24107,7 +24193,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v383"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v385"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25092,6 +25178,25 @@ function App() {
 
   const [showTaCustomerSearch, setShowTaCustomerSearch] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  /* ═══ v385: NOTIZ AM GANZEN TISCH ═══
+     Bisher liess sich nur an einzelnen ARTIKELN etwas vermerken. Angaben,
+     die den ganzen Vorgang betreffen - "erst um 19:30", "Gast wartet auf
+     Begleitung", eine Allergie, ein Kundenhinweis - hatten keinen Platz.
+     Sie liegt am Tisch selbst, wandert damit ueber den Abgleich auf alle
+     Geraete und steht auf den Kuechen- und Barbons. */
+  const setTischNotiz = (tid, text) => {
+    const t = String(text || '').trim();
+    if (String(tid).startsWith('ta_')) {
+      const taId = parseInt(String(tid).replace('ta_', ''));
+      setTakeaway(p => (p || []).map(x => x.id === taId ? Object.assign({}, x, { tischNote: t }) : x));
+      return;
+    }
+    setTableOrders(p => {
+      const alt = p[tid] || { items: [] };
+      return Object.assign({}, p, { [tid]: Object.assign({}, alt, { tischNote: t, time: alt.time || new Date() }) });
+    });
+  };
+
   const updateOrder = (tid, items) => {
     if (String(tid).startsWith("ta_")) {
       const taId = parseInt(String(tid).replace("ta_", ""));
@@ -25146,8 +25251,9 @@ function App() {
       const getraenke = neue.filter(i => istBar(i));
       /* v350: Der Bar-Bon meldet sich jetzt auch als 'bar' - sonst
          landet er beim Drucker der Kueche, wenn beide getrennt sind. */
-      if (speisen.length)   belksStationsBon("\uD83C\uDF73 K\u00dcCHE \u2014 SPEISEN", speisen, label, printerSettings, 'kueche');
-      if (getraenke.length) belksStationsBon("\uD83C\uDF7A BAR \u2014 GETR\u00c4NKE", getraenke, label, printerSettings, 'bar');
+      var _notiz = (quelle && quelle.tischNote) || null;   // v385
+      if (speisen.length)   belksStationsBon("\uD83C\uDF73 K\u00dcCHE \u2014 SPEISEN", speisen, label, printerSettings, 'kueche', _notiz);
+      if (getraenke.length) belksStationsBon("\uD83C\uDF7A BAR \u2014 GETR\u00c4NKE", getraenke, label, printerSettings, 'bar', _notiz);
     } catch (e) { console.warn("Bestell-Bons:", e); }
 
     // 2. TSE - der Vorgang beginnt jetzt, nicht erst bei der Zahlung
@@ -25321,9 +25427,18 @@ function App() {
     let L = (bitems||[]).map(i => {
       const head = `${i.qty}× ${i.nr?i.nr+'. ':''}${i.name}`;
       const price = fmt(i.finalPrice*i.qty);
-      // Option/Note auf eigene Zeile, damit Preis immer in einer Reihe mit dem Namen bleibt
-      const noteLine = i.note ? `<div style="font-size:12px;padding-left:14px">(${i.note})</div>` : "";
-      return `<div class="row"><span>${head}</span><span>${price}</span></div>${noteLine}`;
+      /* ═══ v384: DER GAST SIEHT DASSELBE WIE DIE KUECHE ═══
+         Hier stand nur i.note - also die gewaehlten Zutaten und Extras.
+         Die handschriftliche Anmerkung des Kellners (kitchenNote, z.B.
+         "ohne Zwiebeln", "extra scharf") stand auf dem Kuechenbon, aber
+         NICHT auf dem Kundenbeleg. Wer nachlesen wollte, was er bestellt
+         hat, fand es dort nicht - und bei einer Reklamation liess sich
+         nicht belegen, was vereinbart war.
+         Option/Notiz bleiben auf eigenen Zeilen, damit der Preis immer in
+         einer Reihe mit dem Namen steht. */
+      const noteLine  = i.note ? `<div style="font-size:12px;padding-left:14px">(${i.note})</div>` : "";
+      const knoteLine = i.kitchenNote ? `<div style="font-size:12px;padding-left:14px">${i.kitchenNote}</div>` : "";
+      return `<div class="row"><span>${head}</span><span>${price}</span></div>${noteLine}${knoteLine}`;
     }).join("");
     if(_fee>0) L += `<div class="row"><span>Liefergebühr</span><span>${fmt(_fee)}</span></div>`;
     L += `<div class="line"></div>`;
@@ -25472,7 +25587,14 @@ function App() {
         if (payMethod !== "Getrennt") {
           try {
             const bonLines = buildZahlungLines(ta.items||[], orderTotal, trinkgeld, payMethod, _fee);   // v330
-            const delivery = ta.customerName ? {name:ta.customerName,phone:ta.customerPhone,street:ta.customerStreet,city:ta.customerCity} : null;
+            /* v384: Vorher nur, wenn ein NAME da war - eine reine Telefon-
+               bestellung stand dann ohne jede Kundenangabe auf dem Bon. */
+            const delivery = (ta.customerName || ta.customerPhone || ta.customerStreet)
+              ? { name: ta.customerName, phone: ta.customerPhone,
+                  street: ta.customerStreet, city: ta.customerCity,
+                  plz: ta.customerPlz, kundenNr: ta.customerNr || ta.kundenNr,
+                  note: ta.customerNote || ta.lieferNote }
+              : null;
             /* v296: "Takeaway" allein sagt dem Fahrer und dem Gast nichts.
                Auf dem Bon muss stehen, ob abgeholt oder geliefert wird. */
             const _taTyp = ta.customerStreet ? "Lieferung" : "Abholung";
@@ -26971,6 +27093,8 @@ function App() {
     onSave: saveOrder,
     onBestellen: belksBestellen,   // v344
     onWechseln: setWechselVon,     // v351
+    onNotiz: setTischNotiz,        // v385
+    tischNotiz: (getCurrentOrder() || {}).tischNote || "",
     onPay: startPay,
     onClear: clearTable,
     optionGroups: optionGroups,
