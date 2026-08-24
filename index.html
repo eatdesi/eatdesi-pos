@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v388</title>
+<title>eatDeSi POS v389</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -24251,7 +24251,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v388"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v389"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -29566,36 +29566,80 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
   }
   function processScanB64(b64, mime){
     setScanning(true); setMsg('\uD83D\uDCF7 Foto wird von der AI gelesen\u2026');
-    // Kompakte Nr-Liste f\u00fcrs Prompt (Nr|Name)
-    /* v375: Die Karte wird einmal gebaut und gemerkt. Vorher entstand sie
-       bei JEDEM Foto neu - bei mehreren hundert Artikeln kostet das spuerbar
-       Zeit. Beschreibungen bleiben draussen: fuer die Zuordnung zaehlen nur
-       Nummer und Name, alles andere macht den Auftrag nur laenger und die
-       Antwort langsamer. */
-    var menuList = window.__belksKartenListe;
-    if (!menuList) {
-      menuList = [];
-      Object.keys(menuData||{}).forEach(function(cat){(menuData[cat]||[]).forEach(function(it){ if(it&&it.nr!=null) menuList.push(it.nr+'|'+it.name); });});
-      window.__belksKartenListe = menuList;
-    }
-    var prompt='Du siehst ein Foto einer Restaurant-Bestellung (z.B. Lieferando/Uber-Eats-Tablet oder Bon). '
-      +'Lies die bestellten Artikel heraus und ordne sie dieser Speisekarte zu (Format Nr|Name):\n'
-      +menuList.join('\n')
-      +'\n\nAntworte NUR mit JSON, ohne Markdown, ohne Erkl\u00e4rung, exakt so: '
-      +'{"items":[{"nr":"31","name":"Butter Curry","qty":2}],"partnerNr":"","kunde":"","typ":"abholung","adresse":"","gesamt":0} '
-      +'typ ist "lieferung" nur wenn eine Lieferadresse sichtbar ist, sonst "abholung". gesamt = Gesamtbetrag falls sichtbar, sonst 0. '
-      +'Wenn ein Artikel nicht auf der Speisekarte steht, trotzdem mit qty und name auff\u00fchren aber nr leer lassen.';
+    /* ═══ v389: ABSCHREIBEN STATT ZUORDNEN ═══
+       Bis v388 bekam die AI die ganze Speisekarte mit und sollte die
+       Zeilen vom Partner-Zettel darauf abbilden. Das ging schief, und zwar
+       still: Auf einem Lieferando-Bon steht "(#54)" - das ist LIEFERANDOS
+       Artikelnummer, nicht unsere. Die AI hielt sie fuer eine Nummer aus
+       unserer Liste und griff daneben. Die Zeilen "+ mit Beef-Patty" sind
+       Optionen zum Burger darueber, wurden aber als eigene Gerichte
+       gesucht - zweimal landete "Tandoori Mix Grill 22,90" im Warenkorb.
+       Aus 28,20 EUR wurden 67,60 EUR, ohne dass etwas rot wurde.
+
+       Jetzt macht die AI nur noch das, was sie zuverlaessig kann:
+       ABSCHREIBEN. Name und Preis stehen auf dem Zettel, Optionen gehoeren
+       an ihren Artikel, die Nummer des Partners bleibt Text. Keine
+       Zuordnung, kein Raten, keine Speisekarte im Auftrag - damit faellt
+       auch die Ursache weg.
+       Das passt zur Sache: Partner-Bestellungen sind online bezahlt. Die
+       Kasse braucht den Vorgang, nicht die Verknuepfung mit unserer Karte. */
+    var prompt='Du siehst das Foto einer Restaurant-Bestellung (Lieferando, Uber Eats oder ein Bon). '
+      +'Schreibe ab, was dort steht. Ordne NICHTS zu, suche NICHTS, erfinde NICHTS. '
+      +'Steht ein Wort nur halb lesbar da, schreibe es so, wie du es liest.\n\n'
+      +'Regeln:\n'
+      +'- Jede Artikelzeile mit Menge, Name und Preis genau wie gedruckt.\n'
+      +'- Zeilen, die mit + oder "mit" beginnen, sind OPTIONEN zum Artikel darueber. '
+      +'Haenge sie an dessen "extras" an, niemals als eigenen Artikel.\n'
+      +'- Nummern wie (#54) gehoeren dem Partner. Schreibe sie in "partnerArtikelNr", '
+      +'niemals in eine andere Zahl.\n'
+      +'- Preise als Zahl mit Punkt, ohne Waehrung.\n\n'
+      +'Antworte NUR mit JSON, ohne Markdown, ohne Erklaerung, exakt so:\n'
+      +'{"items":[{"qty":1,"name":"Cheesy Burger","preis":8.50,"partnerArtikelNr":"54",'
+      +'"extras":[{"name":"mit Beef-Patty, 150g","preis":2.00}]}],'
+      +'"partnerNr":"","kunde":"","telefon":"","typ":"abholung","adresse":"",'
+      +'"zeit":"","gesamt":0,"zahlung":""}\n'
+      +'typ ist "lieferung" nur wenn eine Lieferadresse sichtbar ist, sonst "abholung". '
+      +'zeit = bestaetigte Uhrzeit falls sichtbar. gesamt = Gesamtbetrag falls sichtbar, sonst 0. '
+      +'Felder, die nicht auf dem Foto stehen, bleiben leer.';
     window.callAIVision(prompt,b64,900,mime||'image/jpeg').then(function(text){
       var clean=String(text).replace(/```json|```/g,'').trim();
       var j=JSON.parse(clean);
-      var r=matchAILines(j.items,menuData);
-      if(r.lines.length) setLines(function(prev){return prev.concat(r.lines);});
+      /* v389: Die Zeilen kommen so in den Warenkorb, wie sie auf dem Zettel
+         stehen. Optionen werden an den Namen gehaengt und ihr Preis
+         aufgeschlagen - so stimmt die Summe mit dem Zettel ueberein, und
+         die Kueche liest dieselben Worte wie der Gast bestellt hat. */
+      var neu = (j.items||[]).map(function(it){
+        var extras = (it.extras||[]).filter(function(e){ return e && e.name; });
+        var aufschlag = extras.reduce(function(su,e){ return su + (parseFloat(e.preis)||0); }, 0);
+        var basis = parseFloat(it.preis)||0;
+        return {
+          nr: null,                                   // bewusst keine: es ist NICHT unsere Karte
+          name: String(it.name||'').trim() + (it.partnerArtikelNr ? ' (#'+it.partnerArtikelNr+')' : ''),
+          qty: parseInt(it.qty,10)||1,
+          price: Math.round((basis + aufschlag)*100)/100,
+          taxRate: 'food',
+          note: extras.map(function(e){ return e.name; }).join(', ')
+        };
+      }).filter(function(x){ return x.name; });
+
+      if(neu.length) setLines(function(prev){return prev.concat(neu);});
       if(j.partnerNr) setPnr(String(j.partnerNr));
       if(j.kunde) setKname(String(j.kunde));
+      if(j.telefon) setKphone(String(j.telefon));
       if(j.typ==='lieferung'){ setTyp('lieferung'); if(j.adresse) setAddr(String(j.adresse)); }
-      var parts=['\uD83E\uDD16 AI hat '+r.lines.length+' Artikel erkannt \u2013 bitte pr\u00fcfen!'];
-      if(r.unknown.length) parts.push('\u26A0\uFE0F Nicht zugeordnet: '+r.unknown.join(', '));
-      if(j.gesamt) parts.push('AI-Gesamt laut Foto: '+parseFloat(j.gesamt).toFixed(2)+'\u20AC (mit Summe unten vergleichen \u2013 Differenz ggf. als Aufschlag eintragen)');
+      else { setTyp('abholung'); }
+
+      var summe = neu.reduce(function(su,x){ return su + x.price*x.qty; }, 0);
+      var parts=['\uD83E\uDD16 '+neu.length+' Artikel abgeschrieben \u2013 bitte mit dem Zettel vergleichen!'];
+      if(j.zeit) parts.push('Uhrzeit laut Zettel: '+String(j.zeit));
+      if(j.gesamt){
+        var soll=parseFloat(j.gesamt)||0;
+        var diff=Math.round((summe-soll)*100)/100;
+        parts.push(Math.abs(diff)<0.01
+          ? ('\u2705 Summe stimmt mit dem Zettel \u00fcberein: '+soll.toFixed(2)+'\u20AC')
+          : ('\u26A0\uFE0F Zettel sagt '+soll.toFixed(2)+'\u20AC, abgeschrieben '+summe.toFixed(2)
+             +'\u20AC \u2013 Abweichung '+diff.toFixed(2)+'\u20AC, bitte pr\u00fcfen'));
+      }
       setMsg(parts.join(' \u00b7 '));
       setScanning(false);
     }).catch(function(err){
