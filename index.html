@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v381</title>
+<title>eatDeSi POS v383</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -24107,7 +24107,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v381"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v383"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26747,6 +26747,32 @@ function App() {
               } catch(e){}
               if (typeof toast === 'function') toast(_txt); else window.alert(_txt);
             } catch(e){}
+
+            /* ═══ v382: LIEGT AUF GITHUB EINE NEUERE FASSUNG? ═══
+               Der Aktualisieren-Knopf hat bisher nur DATEN abgeglichen, nie
+               nach einer neuen Programmfassung geschaut. Wer eine neue
+               Version hochgeladen hatte, musste raten, wie sie aufs Geraet
+               kommt - Abdullah kam nur zufaellig darauf, dass
+               "Anzeigename speichern" die Seite neu laedt.
+               Jetzt wird die Seite ohne Zwischenspeicher geholt und die
+               Version im Titel mit der laufenden verglichen. Neu geladen
+               wird NUR nach Rueckfrage: mitten im Betrieb entscheidet das
+               der Mensch, nicht die Kasse. */
+            try {
+              fetch(location.pathname + '?v=' + Date.now(), { cache: 'no-store' })
+                .then(function(r){ return r.text(); })
+                .then(function(html){
+                  var m = String(html).match(/<title>[^<]*?(v\d+)<\/title>/);
+                  var neu = m ? m[1] : null;
+                  var jetzt = (String(document.title).match(/(v\d+)/) || [])[1] || '?';
+                  if (!neu || neu === jetzt) return;
+                  if (window.confirm('Neue Version ' + neu + ' verf\u00fcgbar (hier l\u00e4uft ' + jetzt + ').\n\n'
+                      + 'Jetzt laden? Offene Tische bleiben erhalten.')) {
+                    location.reload();
+                  }
+                })
+                .catch(function(e){ try{ console.warn('Versionspruefung:', e && e.message); }catch(_e){} });
+            } catch(e){}
           };
           /* v279: Grabsteine beim Aktualisieren wegraeumen.
              ABER nur, wenn gerade KEIN Tisch offen ist. Sonst koennte ein
@@ -27759,18 +27785,15 @@ function GrabsteinCard(){
     try{ if(window.runSync) window.runSync(); }catch(e){}
   }
   return R.createElement('div',{style:{background:'#fff',borderRadius:12,padding:14,border:'1px solid #eee',marginTop:14}},
-    R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:6}},'\uD83E\uDEA6 L\u00f6schmarken'),
-    R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},'Minuten, die eine L\u00f6schmarke lebt (leer = 2)'),
+    /* v383: Heisst jetzt "Grabsteine" - so nennt die Diagnose sie seit
+       jeher, zwei Namen fuer dieselbe Sache stiften nur Verwirrung.
+       Die beiden Erklaerungstexte sind auf Abdullahs Wunsch entfallen; die
+       Begruendung steht weiterhin vollstaendig am Wert selbst
+       (siehe TO_TOMB_MS), wo sie beim Aendern gelesen wird. */
+    R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:6}},'\uD83E\uDEA6 Grabsteine'),
+    R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},'Minuten, die ein Grabstein lebt (leer = 2)'),
     R.createElement('input',{type:'text',inputMode:'decimal',value:w,placeholder:'2',
       onChange:function(e){setW(e.target.value);},style:iS}),
-    R.createElement('div',{style:{fontSize:11,color:'#999',marginBottom:8,lineHeight:1.6}},
-      'Wird ein Tisch gel\u00f6scht oder kassiert, merkt sich die Kasse das kurz \u2013 damit ein Ger\u00e4t, '
-      +'das gerade nicht abgeglichen hat, den Tisch nicht wieder hochl\u00e4dt. '
-      +'Die Marke muss nur so lange leben, wie ein Ger\u00e4t braucht, um einmal abzugleichen.'),
-    R.createElement('div',{style:{fontSize:11,color:'#c62828',marginBottom:8,lineHeight:1.6,background:'#fff5f5',borderRadius:8,padding:'8px 10px'}},
-      '\u26A0\uFE0F Zu kurz eingestellt: Ein Ger\u00e4t im Funkloch oder mit leerem Akku kennt die Marke '
-      +'nicht mehr und schiebt einen bezahlten Tisch zur\u00fcck \u2013 er steht dann wieder offen da. '
-      +'Passiert das, diesen Wert erh\u00f6hen.'),
     msg?R.createElement('div',{style:{color:msg.indexOf('\u26A0')===0?'#c62828':'#2e7d32',fontSize:12,fontWeight:700,marginBottom:8}},msg):null,
     R.createElement('button',{onClick:save,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDCBE Speichern')
   );
