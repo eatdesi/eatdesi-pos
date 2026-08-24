@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v390</title>
+<title>eatDeSi POS v393</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -14247,6 +14247,7 @@ function OrderView({
   onWechseln,
   onNotiz,          // v385
   tischNotiz,       // v385
+  onArtikelStorno,  // v392
   onPay,
   onClear,
   optionGroups,
@@ -14262,6 +14263,9 @@ function OrderView({
   /* v385: Notiz fuer den GANZEN Tisch - nicht fuer eine Zeile. */
   const [tnOffen, setTnOffen] = useState(false);
   const [tnText, setTnText] = useState("");
+  const loeschTipp = React.useRef({ n: 0, zeit: 0 });   // v393: drei Tipper auf die Summe
+  const [azTarget, setAzTarget] = useState(null);   // v392: Artikel-Storno
+  const [azGrund, setAzGrund]   = useState("");
   /* ═══ v312: ZEILE BEARBEITEN ═══
      Bisher konnte der Stift nur eine Kuechennotiz. Preis und Rabatt gingen
      erst an der Kasse - beim Aufnehmen der Bestellung ging das nicht.
@@ -14370,10 +14374,25 @@ function OrderView({
       }
     }, 50);
   };
-  const changeQty = (key, d) => onUpdate(tableId, items.map(i => i._key === key ? {
+  const mengeSetzen = (key, d) => onUpdate(tableId, items.map(i => i._key === key ? {
     ...i,
     qty: i.qty + d
   } : i).filter(i => i.qty > 0));
+
+  /* ═══ v392: EINE GESPEICHERTE ZEILE VERSCHWINDET NICHT SPURLOS ═══
+     Bis v391 nahm das Minus jede Zeile weg - auch eine, die schon an die
+     Kueche gegangen und mit der TSE signiert war. Der GESAMTstorno verlangte
+     einen Grund, die einzelne Zeile nicht. Damit liess sich ein gebuchter
+     Tisch beliebig kleinrechnen, ohne dass etwas in den Buechern stand.
+     Genau diese Tuer sucht eine Kassennachschau zuerst.
+     Entwuerfe bleiben frei loeschbar - dort wurde nichts produziert und
+     nichts gebucht. Erst ab dem Speichern zaehlt es. */
+  const changeQty = (key, d) => {
+    if (d >= 0) return mengeSetzen(key, d);
+    const zeile = items.find(i => i._key === key);
+    if (!zeile || zeile._entwurf || typeof onArtikelStorno !== "function") return mengeSetzen(key, d);
+    setAzTarget(zeile); setAzGrund("");
+  };
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -14634,6 +14653,56 @@ function OrderView({
             style:{ display:"block", fontSize:10.5, fontWeight:600, opacity:.6, marginTop:2 }
           }, "Tippen f\u00fcr Notiz (Uhrzeit, Gast, Allergie \u2026)")),
 
+    /* ═══ v392: GRUND FUER DEN ARTIKEL-STORNO ═══
+       Dieselben vier Gruende wie beim Tischstorno (v346). Ohne Grund bleibt
+       der Knopf grau - das ist Absicht: Wer nichts angeben will, soll die
+       Zeile stehen lassen. */
+    azTarget && /*#__PURE__*/React.createElement("div", {
+      style:{ position:"fixed", inset:0, background:"#0009", zIndex:3500, display:"flex",
+              alignItems:"center", justifyContent:"center", padding:16 },
+      onClick: () => setAzTarget(null)
+    }, /*#__PURE__*/React.createElement("div", {
+      onClick: e => e.stopPropagation(),
+      style:{ background:"#fff", borderRadius:14, padding:18, width:"100%", maxWidth:380 }
+    },
+      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:15, color:"#c62828", marginBottom:3 } },
+        "\uD83D\uDEAB Artikel stornieren"),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:13, marginBottom:3 } },
+        azTarget.qty + "\u00d7 " + (azTarget.nr ? azTarget.nr + ". " : "") + azTarget.name),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, color:"#777", marginBottom:12, lineHeight:1.5 } },
+        "Diese Zeile wurde bereits gespeichert \u2013 die K\u00fcche hat sie gesehen. ",
+        "Sie wird im Storno-Journal festgehalten, nicht gel\u00f6scht. Die Belegnummer des ",
+        "Tisches bleibt unber\u00fchrt."),
+      ["Gast abbestellt","Falsch getippt","K\u00fcche Fehler","Testbuchung"].map(function(g){
+        return /*#__PURE__*/React.createElement("button", {
+          key:g, onClick:function(){ setAzGrund(g); },
+          style:{ display:"block", width:"100%", padding:11, marginBottom:7, borderRadius:9,
+                  border: azGrund===g ? "2px solid "+C.red : "2px solid #eee",
+                  background: azGrund===g ? "#fff5f5" : "#fff",
+                  color: azGrund===g ? C.red : "#555", cursor:"pointer",
+                  fontFamily:"inherit", fontWeight:700, fontSize:13.5, textAlign:"left" }
+        }, g);
+      }),
+      /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8, marginTop:4 } },
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => setAzTarget(null),
+          style:{ flex:1, padding:12, borderRadius:10, border:"2px solid #ddd", background:"#fff",
+                  color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13.5 }
+        }, "Abbrechen"),
+        /*#__PURE__*/React.createElement("button", {
+          disabled: !azGrund,
+          onClick: () => {
+            if (!azGrund) return;
+            onArtikelStorno(tableId, azTarget, azGrund);
+            mengeSetzen(azTarget._key, -1);
+            setAzTarget(null); setAzGrund("");
+          },
+          style:{ flex:1, padding:12, borderRadius:10, border:"none",
+                  background: azGrund ? C.red : "#e0e0e0", color:"#fff",
+                  cursor: azGrund ? "pointer" : "default",
+                  fontFamily:"inherit", fontWeight:800, fontSize:13.5 }
+        }, "\uD83D\uDEAB Stornieren"))))
+    ,
     tnOffen && /*#__PURE__*/React.createElement("div", {
       style:{ position:"fixed", inset:0, background:"#0009", zIndex:3400, display:"flex",
               alignItems:"center", justifyContent:"center", padding:16 },
@@ -14953,6 +15022,16 @@ function OrderView({
       flex: 1,
       color: "#fff"
     }
+  /* ═══ v393: DAS LOESCHEN LIEGT UNTER DER SUMME ═══
+     Der Knopf stand als "−" direkt neben Bon, Speichern und Zahlen - vier
+     Knoepfe nebeneinander, einer davon raeumt den Tisch. In v345 war er
+     schon ein ✕ und wurde umbenannt, weil er wie "Fenster schliessen"
+     aussah. Das Umbenennen hat das eigentliche Problem nicht geloest: Er
+     war da, wo man mit dem Daumen hinkommt.
+     Jetzt ist er unsichtbar und liegt hinter DREI Tippern auf die
+     Gesamtsumme. Wer ihn braucht, kennt ihn; niemand trifft ihn aus
+     Versehen. Die Funktion selbst ist unveraendert - und der Storno mit
+     Grund greift dahinter weiterhin, wenn der Tisch gespeichert war. */
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
@@ -14961,18 +15040,21 @@ function OrderView({
   }, "MwSt: ", fmt(calcTax(items)),
     lieferFee > 0 ? " · 🛵 "+fmt(lieferFee) : ""
   ), /*#__PURE__*/React.createElement("div", {
+    onClick: () => {
+      if (!onClear) return;
+      const jetzt = Date.now();
+      /* Drei Tipper innerhalb von zwei Sekunden. Laenger waere zu leicht
+         versehentlich erreichbar, kuerzer zu hakelig. */
+      const n = (jetzt - (loeschTipp.current.zeit || 0) < 2000) ? loeschTipp.current.n + 1 : 1;
+      loeschTipp.current = { n: n, zeit: jetzt };
+      if (n >= 3) { loeschTipp.current = { n: 0, zeit: 0 }; onClear(tableId); }
+    },
     style: {
       fontWeight: 700,
-      fontSize: 14
+      fontSize: 14,
+      cursor: "pointer"
     }
   }, "Gesamt: ", fmt(total))),
-  /* v345: fruher ein ✕ - das sah nach "Fenster schliessen" aus, direkt
-     neben Speichern und Zahlen. Die Funktion ist unveraendert. */
-  onClear && /*#__PURE__*/React.createElement("button", {
-    onClick: () => onClear(tableId),
-    title: "Tisch schließen / Entwurf verwerfen",
-    style: { padding: "9px 10px", borderRadius: 10, border: "2px solid rgba(255,100,100,.6)", background: "rgba(255,80,80,.15)", color: "#ffcdd2", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13 }
-  }, "\u2212"),
   /*#__PURE__*/React.createElement("button", {
     onClick: () => onSave(tableId, lieferFee),
     style: {
@@ -16343,21 +16425,40 @@ function OrderListView({
     const d = new Date(x.zeit);
     return d >= from && d <= to;
   });
+  /* v392: Artikel-Storni gehoeren NICHT in die Bestellliste - sie wuerden
+     sie unlesbar machen. Sie liegen in derselben Ablage, bekommen aber
+     einen eigenen Filter, so wie es andere Kassen mit ihrem Storno-Journal
+     halten. Die Bestellliste zeigt, was verkauft wurde. */
+  const artikelStorni = stornosImZeitraum.filter(x => x.art === 'artikel');
+  const tischStorni   = stornosImZeitraum.filter(x => x.art !== 'artikel');
 
   const zeilenAlle = [].concat(
     filtered.map(o => ({
       typ: o.storniert ? "storno_nach" : "bezahlt",
       zeit: new Date(o.time), o: o
     })),
-    stornosImZeitraum.map(x => ({ typ: "storno_vor", zeit: new Date(x.zeit), s: x }))
+    tischStorni.map(x => ({ typ: "storno_vor", zeit: new Date(x.zeit), s: x })),
+    artikelStorni.map(x => ({ typ: "storno_artikel", zeit: new Date(x.zeit), s: x }))
   ).sort((a, b) => b.zeit - a.zeit);
 
   const ARTEN = [["alle","Alle"],["bezahlt","Bezahlt"],
-                 ["storno_nach","Storno n. Zahlung"],["storno_vor","Storno v. Zahlung"]];
-  const zeilen = art === "alle" ? zeilenAlle : zeilenAlle.filter(z => z.typ === art);
+                 ["storno_nach","Storno n. Zahlung"],["storno_vor","Storno v. Zahlung"],
+                 ["storno_artikel","Artikel-Storno"]];   // v392
+  /* v392: "Alle" zeigt die Bestellliste - Artikel-Storni nur auf Wunsch. */
+  const zeilen = art === "alle"
+    ? zeilenAlle.filter(z => z.typ !== "storno_artikel")
+    : zeilenAlle.filter(z => z.typ === art);
 
-  const stornoAnzahl = zeilenAlle.filter(z => z.typ !== "bezahlt").length;
-  const stornoSumme = Math.round(zeilenAlle.filter(z => z.typ !== "bezahlt")
+  /* v392: Auswertung je Kellner - die Frage, die eine Nachschau stellt. */
+  const azSumme = Math.round(artikelStorni.reduce((s, x) => s + (Number(x.betrag)||0), 0) * 100) / 100;
+  const azProKellner = (function(){
+    const m = {};
+    artikelStorni.forEach(x => { const k = x.mitarbeiter || "\u2014"; m[k] = (m[k]||0) + 1; });
+    return Object.keys(m).sort((a,b) => m[b]-m[a]).map(k => k + " " + m[k]).join(" \u00b7 ");
+  })();
+
+  const stornoAnzahl = zeilenAlle.filter(z => z.typ !== "bezahlt" && z.typ !== "storno_artikel").length;
+  const stornoSumme = Math.round(zeilenAlle.filter(z => z.typ !== "bezahlt" && z.typ !== "storno_artikel")
     .reduce((su, z) => su + (z.typ === "storno_vor" ? (Number(z.s.betrag)||0) : (Number(z.o.total)||0)), 0) * 100) / 100;
 
   return /*#__PURE__*/React.createElement("div", {
@@ -16952,7 +17053,12 @@ function OrderListView({
         Gutschein-Verkauf seit v335. */
      stornoAnzahl > 0 && /*#__PURE__*/React.createElement("div", {
        style: { fontSize: 11, color: "#ef6c00", fontWeight: 700, marginTop: 2 }
-     }, "\uD83D\uDEAB " + stornoAnzahl + " Storno \u00b7 " + fmt(stornoSumme) + " (kein Umsatz)")),
+     }, "\uD83D\uDEAB " + stornoAnzahl + " Storno \u00b7 " + fmt(stornoSumme) + " (kein Umsatz)"),
+     /* v392: Das Storno-Journal in einer Zeile - Anzahl, Summe, Kellner. */
+     artikelStorni.length > 0 && /*#__PURE__*/React.createElement("div", {
+       style: { fontSize: 11, color: "#c62828", fontWeight: 700, marginTop: 2 }
+     }, "\u2702\uFE0F " + artikelStorni.length + " Artikel-Storno \u00b7 " + fmt(azSumme)
+        + (azProKellner ? " \u00b7 " + azProKellner : ""))),
      zeilen.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
@@ -16969,6 +17075,32 @@ function OrderListView({
      eine eigene Karte - orange, durchgestrichen, mit beiden Nummern. Er hat
      keinen Index in completedOrders, also auch keine der dortigen Aktionen. */
   zeilen.map((z, zi) => {
+    if (z.typ === "storno_artikel") {
+      const x = z.s;
+      return /*#__PURE__*/React.createElement("div", {
+        key: "az" + (x.id || zi),
+        style: { background:"#fff8f8", borderRadius:10, padding:"11px 14px", marginBottom:8,
+                 boxShadow:"0 1px 4px #0001", borderLeft:"4px solid " + C.red }
+      },
+        /*#__PURE__*/React.createElement("div", {
+          style:{ background:C.red, color:"#fff", borderRadius:4, padding:"2px 8px", fontSize:10,
+                  fontWeight:800, display:"inline-block", marginBottom:6, letterSpacing:0.5 }
+        }, "\u2702\uFE0F ARTIKEL-STORNO"),
+        /*#__PURE__*/React.createElement("div", {
+          style:{ display:"flex", justifyContent:"space-between", marginBottom:4 }
+        },
+          /*#__PURE__*/React.createElement("span", { style:{ fontWeight:700, fontSize:13, color:"#c62828" } },
+            (x.menge || 1) + "\u00d7 " + (x.artikel || "\u2014")),
+          /*#__PURE__*/React.createElement("span", {
+            style:{ fontWeight:700, color:"#c62828", fontSize:14, textDecoration:"line-through" }
+          }, fmt(Number(x.betrag) || 0))),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#888" } },
+          fmtD(z.zeit), " ", fmtT(z.zeit), " \u00b7 ", (x.label || "\u2014"),
+          " \u00b7 ", (x.grund || "ohne Angabe"), " \u00b7 ", (x.mitarbeiter || "\u2014")),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:10, color:"#aaa", fontFamily:"monospace", marginTop:2 } },
+          x.bestellNr ? ("zu " + x.bestellNr) : "Vorgang l\u00e4uft weiter",
+          x.tse ? " \u00b7 TSE \u2713" : " \u00b7 ohne TSE"));
+    }
     if (z.typ === "storno_vor") {
       const x = z.s;
       return /*#__PURE__*/React.createElement("div", {
@@ -24251,7 +24383,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v390"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v393"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25242,6 +25374,44 @@ function App() {
      Begleitung", eine Allergie, ein Kundenhinweis - hatten keinen Platz.
      Sie liegt am Tisch selbst, wandert damit ueber den Abgleich auf alle
      Geraete und steht auf den Kuechen- und Barbons. */
+  /* ═══ v392: ARTIKEL-STORNO INS JOURNAL ═══
+     Bewusst OHNE Belegnummer: Der Vorgang laeuft weiter und behaelt seine
+     Nummer. Ein Storno einer einzelnen Zeile ist eine Korrektur INNERHALB
+     des Vorgangs, kein eigener Vorgang - eine zweite Nummer wuerde den
+     Belegkreis wieder aufblaehen, den wir in v372 auf eine Reihe gebracht
+     haben. Festgehalten wird trotzdem alles, was eine Nachschau braucht:
+     Zeit, Tisch, Artikel, Menge, Betrag, Grund, Mitarbeiter, TSE. */
+  const artikelStorno = async (tid, zeile, grund) => {
+    if (!zeile) return;
+    const istTa = String(tid).startsWith('ta_');
+    const quelle = istTa
+      ? (takeaway.find(t => t.id === parseInt(String(tid).replace('ta_',''))) || {})
+      : (tableOrders[tid] || {});
+    const betrag = Math.round((Number(zeile.finalPrice)||0) * (Number(zeile.qty)||1) * 100) / 100;
+    let _tse = null;
+    try {
+      _tse = await window.TSE.signOrder({
+        bonNr: quelle.bestellNr || null, total: betrag,
+        payMethod: 'Artikel-Storno', items: [zeile], tableId: istTa ? null : tid
+      });
+    } catch (e) { console.warn('TSE (Artikel-Storno):', e); }
+    setStornos(p => (p || []).concat([{
+      id: Date.now(),
+      art: 'artikel',                       // v392: unterscheidet vom Tischstorno
+      zeit: new Date().toISOString(),
+      tisch: String(tid),
+      label: istTa ? belksTaLabel(quelle) : ('Tisch ' + tid),
+      artikel: (zeile.nr ? zeile.nr + '. ' : '') + zeile.name,
+      menge: Number(zeile.qty) || 1,
+      betrag: betrag,
+      grund: grund || 'ohne Angabe',
+      mitarbeiter: (loggedInUser && loggedInUser.name) || '—',
+      bonNr: null,                          // absichtlich keine - siehe oben
+      bestellNr: quelle.bestellNr || null,  // zu welchem Vorgang es gehoert
+      tse: _tse
+    }]));
+  };
+
   const setTischNotiz = (tid, text) => {
     const t = String(text || '').trim();
     if (String(tid).startsWith('ta_')) {
@@ -27154,6 +27324,7 @@ function App() {
     onBestellen: belksBestellen,   // v344
     onWechseln: setWechselVon,     // v351
     onNotiz: setTischNotiz,        // v385
+    onArtikelStorno: artikelStorno,   // v392
     tischNotiz: (getCurrentOrder() || {}).tischNote || "",
     onPay: startPay,
     onClear: clearTable,
@@ -29564,7 +29735,7 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
     setQuick('');
     setMsg(r.unknown.length?('\u26A0\uFE0F Unbekannte Nr: '+r.unknown.join(', ')+(r.lines.length?(' \u2013 '+r.lines.length+' Artikel hinzugef\u00fcgt'):'')):('\u2705 '+r.lines.length+' Artikel hinzugef\u00fcgt'));
   }
-  function processScanB64(b64, mime){
+  function processScanB64(b64, mime, danach){
     setScanning(true); setMsg('\uD83D\uDCF7 Foto wird von der AI gelesen\u2026');
     /* ═══ v389: ABSCHREIBEN STATT ZUORDNEN ═══
        Bis v388 bekam die AI die ganze Speisekarte mit und sollte die
@@ -29590,6 +29761,10 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
       +'- Jede Artikelzeile mit Menge, Name und Preis genau wie gedruckt.\n'
       +'- Zeilen, die mit + oder "mit" beginnen, sind OPTIONEN zum Artikel darueber. '
       +'Haenge sie an dessen "extras" an, niemals als eigenen Artikel.\n'
+      +'- WICHTIG: Steht bei einer Option ein PLUS vor dem Betrag (z.B. "+1,90"), '
+      +'ist dieser Betrag im Artikelpreis darueber BEREITS ENTHALTEN. '
+      +'Setze dann "imPreisEnthalten":true. Nur wenn die Option getrennt berechnet '
+      +'wird (eigene Zeile mit eigenem Preis ohne Plus), setze false.\n'
       +'- Nummern wie (#54) gehoeren dem Partner. Schreibe sie in "partnerArtikelNr", '
       +'niemals in eine andere Zahl.\n'
       +'- Preise als Zahl mit Punkt, ohne Waehrung.\n'
@@ -29601,7 +29776,7 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
       +'- "bestellId" ist die lange Auftragsnummer des Partners (z.B. ID 1236138296).\n\n'
       +'Antworte NUR mit JSON, ohne Markdown, ohne Erklaerung, exakt so:\n'
       +'{"items":[{"qty":1,"name":"Cheesy Burger","preis":8.50,"partnerArtikelNr":"54",'
-      +'"getraenk":false,"extras":[{"name":"mit Beef-Patty, 150g","preis":2.00}]}],'
+      +'"getraenk":false,"extras":[{"name":"BEILAGE: POMMES","preis":1.90,"imPreisEnthalten":true}]}],'
       +'"partnerNr":"","bestellId":"","kunde":"","telefon":"","typ":"abholung","adresse":"",'
       +'"zeit":"","liefergebuehr":0,"gesamt":0,"zahlung":""}\n'
       +'typ ist "lieferung" nur wenn eine Lieferadresse sichtbar ist, sonst "abholung". '
@@ -29616,7 +29791,16 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
          die Kueche liest dieselben Worte wie der Gast bestellt hat. */
       var neu = (j.items||[]).map(function(it){
         var extras = (it.extras||[]).filter(function(e){ return e && e.name; });
-        var aufschlag = extras.reduce(function(su,e){ return su + (parseFloat(e.preis)||0); }, 0);
+        /* ═══ v391: EIN PLUS HEISST "SCHON DRIN" ═══
+           Auf Uber-Eats-Zetteln steht der Aufschlag einer Option mit Plus
+           daneben - er ist im Artikelpreis darueber aber BEREITS enthalten.
+           Nachgerechnet am Zettel vom 24.08.: 6,90 + 12,90 + 2,90 + 14,80
+           + 14,80 + 9,90 = 62,20, genau die Zwischensumme. Wer die +1,90
+           und +2,90 nochmal addiert, bucht 4,80 EUR zu viel.
+           Deshalb zaehlt nur, was ausdruecklich NICHT enthalten ist. */
+        var aufschlag = extras.reduce(function(su,e){
+          return su + (e.imPreisEnthalten === true ? 0 : (parseFloat(e.preis)||0));
+        }, 0);
         var basis = parseFloat(it.preis)||0;
         /* v390: Der Steuersatz kommt jetzt aus der Zeile selbst. Vorher stand
            ueberall 'food' - eine Cola oder ein Long Island Iced Tea wurde
@@ -29655,6 +29839,26 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
       else { setTyp('abholung'); }
 
       var summe = neu.reduce(function(su,x){ return su + x.price*x.qty; }, 0) + geb;
+
+      /* ═══ v391: NACHRECHNEN STATT GLAUBEN ═══
+         Falls die AI sich beim Plus-Zeichen vertut, faellt es hier auf: Wir
+         rechnen die Summe auch OHNE Aufschlaege. Passt die zum Gesamtbetrag
+         auf dem Zettel und die andere nicht, waren die Aufschlaege doch
+         schon enthalten - dann werden sie herausgenommen.
+         Der Zettel hat immer recht, nicht unsere Auslegung. */
+      var sollBetrag = parseFloat(j.gesamt)||0;
+      if (sollBetrag > 0 && Math.abs(summe - sollBetrag) > 0.01) {
+        var ohneAufschlag = (j.items||[]).reduce(function(su,it){
+          return su + (parseFloat(it.preis)||0) * (parseInt(it.qty,10)||1);
+        }, 0) + geb;
+        if (Math.abs(ohneAufschlag - sollBetrag) <= 0.01) {
+          neu = neu.map(function(x,k){
+            var roh = parseFloat((j.items[k]||{}).preis)||0;
+            return Object.assign({}, x, { price: Math.round(roh*100)/100 });
+          });
+          summe = ohneAufschlag;
+        }
+      }
       var parts=['\uD83E\uDD16 '+neu.length+' Artikel abgeschrieben \u2013 bitte mit dem Zettel vergleichen!'];
       if(j.zeit) parts.push('Uhrzeit laut Zettel: '+String(j.zeit));
       if(j.gesamt){
@@ -29667,39 +29871,98 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
       }
       setMsg(parts.join(' \u00b7 '));
       setScanning(false);
+      if(typeof danach==='function') danach();
     }).catch(function(err){
       setMsg('\u26A0\uFE0F Foto-Scan fehlgeschlagen: '+((err&&err.message)||err)+' \u2013 bitte Schnelleingabe oder Auswahl nutzen.');
       setScanning(false);
+      /* v391: Ein kaputtes Bild darf die anderen nicht aufhalten. */
+      if(typeof danach==='function') danach();
     });
   }
+  /* ═══ v391: MEHRERE FOTOS ═══
+     Eine Bestellung passt oft nicht auf einen Bildschirm - Artikel oben,
+     Kunde und Summe weiter unten. Bisher ging nur EIN Bild, also musste man
+     zweimal scannen und die Zeilen von Hand zusammensuchen.
+     Die Bilder werden NACHEINANDER gelesen, nicht gleichzeitig: Die Antwort
+     eines Bildes muss da sein, bevor das naechste geht, sonst ueberschreiben
+     sich Kunde und Adresse gegenseitig. */
+  function processScanListe(bilder){
+    if(!bilder || !bilder.length) { setMsg(''); return; }
+    if(bilder.length === 1){ processScanB64(bilder[0].b64, bilder[0].mime); return; }
+    var i = 0;
+    var weiter = function(){
+      if(i >= bilder.length){
+        setMsg(function(alt){ return (alt||'') + ' \u00b7 ' + bilder.length + ' Bilder gelesen'; });
+        return;
+      }
+      var b = bilder[i++];
+      setMsg('\uD83D\uDCF7 Bild ' + i + ' von ' + bilder.length + ' wird gelesen\u2026');
+      processScanB64(b.b64, b.mime, weiter);
+    };
+    weiter();
+  }
+
   // Foto holen: 1) nativ via Capacitor Camera-Plugin (APK), 2) Fallback file-input (Browser)
   function pickScanPhoto(){
     var c=window.Capacitor;
     var Cam=c&&c.Plugins&&c.Plugins.Camera;
-    if(c&&c.isNativePlatform&&c.isNativePlatform()&&Cam&&Cam.getPhoto){
-      setMsg('\uD83D\uDCF7 Kamera/Galerie \u00f6ffnet\u2026');
-      Cam.getPhoto({quality:80,width:1024,resultType:'base64',source:'PROMPT',
-        promptLabelHeader:'Bestellung fotografieren',promptLabelPhoto:'\uD83D\uDDBC\uFE0F Aus Galerie',promptLabelPicture:'\uD83D\uDCF7 Kamera'})
-      .then(function(ph){
-        if(ph&&ph.base64String){ processScanB64(ph.base64String,'image/'+(ph.format||'jpeg')); }
-        else setMsg('');
-      })
-      .catch(function(err){
-        var m=String((err&&err.message)||err).toLowerCase();
-        if(m.indexOf('cancel')>=0){ setMsg(''); return; }
-        // Plugin fehlt/Fehler -> Datei-Picker Fallback (ohne capture, \u00f6ffnet Galerie)
-        var el=document.getElementById('chScanFile'); if(el) el.click();
-      });
-      return;
+    if(c&&c.isNativePlatform&&c.isNativePlatform()&&Cam){
+      /* v391: pickImages erlaubt mehrere aus der Galerie. Gibt es die
+         Funktion nicht (aeltere Plugin-Fassung), bleibt getPhoto - dann
+         eben ein Bild, aber es faellt nichts aus. */
+      if(Cam.pickImages){
+        setMsg('\uD83D\uDDBC\uFE0F Galerie \u00f6ffnet \u2013 mehrere Bilder m\u00f6glich\u2026');
+        Cam.pickImages({quality:80,width:1024,limit:0})
+        .then(function(res){
+          var fotos=(res&&res.photos)||[];
+          if(!fotos.length){ setMsg(''); return; }
+          var offen=fotos.length, fertig=[];
+          fotos.forEach(function(ph,idx){
+            var pfad=ph.webPath||ph.path;
+            if(!pfad){ if(--offen===0) processScanListe(fertig); return; }
+            fetch(pfad).then(function(r){return r.blob();})
+              .then(function(bl){ return fileToJpegBase64(bl,1024); })
+              .then(function(b64){ fertig[idx]={b64:b64,mime:'image/jpeg'}; })
+              .catch(function(){})
+              .then(function(){ if(--offen===0) processScanListe(fertig.filter(Boolean)); });
+          });
+        })
+        .catch(function(err){
+          var m=String((err&&err.message)||err).toLowerCase();
+          if(m.indexOf('cancel')>=0){ setMsg(''); return; }
+          var el=document.getElementById('chScanFile'); if(el) el.click();
+        });
+        return;
+      }
+      if(Cam.getPhoto){
+        setMsg('\uD83D\uDCF7 Kamera/Galerie \u00f6ffnet\u2026');
+        Cam.getPhoto({quality:80,width:1024,resultType:'base64',source:'PROMPT',
+          promptLabelHeader:'Bestellung fotografieren',promptLabelPhoto:'\uD83D\uDDBC\uFE0F Aus Galerie',promptLabelPicture:'\uD83D\uDCF7 Kamera'})
+        .then(function(ph){
+          if(ph&&ph.base64String){ processScanB64(ph.base64String,'image/'+(ph.format||'jpeg')); }
+          else setMsg('');
+        })
+        .catch(function(err){
+          var m=String((err&&err.message)||err).toLowerCase();
+          if(m.indexOf('cancel')>=0){ setMsg(''); return; }
+          var el=document.getElementById('chScanFile'); if(el) el.click();
+        });
+        return;
+      }
     }
     var el=document.getElementById('chScanFile'); if(el) el.click();
   }
   function scanPhoto(e){
-    var file=e.target.files&&e.target.files[0];
+    var files=Array.prototype.slice.call((e.target.files)||[]);
     e.target.value='';
-    if(!file) return;
-    fileToJpegBase64(file,1024).then(function(b64){ processScanB64(b64,'image/jpeg'); })
-      .catch(function(err){ setMsg('\u26A0\uFE0F Foto konnte nicht gelesen werden: '+((err&&err.message)||err)); });
+    if(!files.length) return;
+    /* v391: auch im Browser mehrere Bilder auf einmal. */
+    Promise.all(files.map(function(f){
+      return fileToJpegBase64(f,1024).then(function(b64){ return {b64:b64,mime:'image/jpeg'}; })
+        .catch(function(){ return null; });
+    })).then(function(liste){
+      processScanListe(liste.filter(Boolean));
+    });
   }
   var cats=Object.keys(menuData||{});
   var curItems=(menuData&&menuData[cat])||[];
@@ -29799,7 +30062,7 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
         R.createElement('button',{onClick:addQuick,style:{flex:'0 0 auto',padding:'8px 14px',borderRadius:8,border:'none',background:'#e65100',color:'#fff',fontWeight:800,cursor:'pointer',fontFamily:'inherit',marginBottom:8}},'\u26A1')),
       (function(){
         var btnStyle={display:'block',width:'100%',padding:10,borderRadius:10,border:'2px dashed #7b1fa2',background:scanning?'#eee':'#f7f0fb',color:'#7b1fa2',fontWeight:800,fontSize:13,cursor:'pointer',fontFamily:'inherit',textAlign:'center',boxSizing:'border-box'};
-        var btnText=scanning?'\uD83D\uDCF7 AI liest das Foto\u2026':'\uD83D\uDCF7 Foto vom Partner-Tablet scannen (AI f\u00fcllt automatisch aus)';
+        var btnText=scanning?'\uD83D\uDCF7 AI liest das Foto\u2026':'\uD83D\uDCF7 Foto(s) vom Partner-Tablet scannen \u2013 mehrere m\u00f6glich';
         var c=window.Capacitor;
         var hasNativeCam=!!(c&&c.isNativePlatform&&c.isNativePlatform()&&c.Plugins&&c.Plugins.Camera&&c.Plugins.Camera.getPhoto);
         if(hasNativeCam){
@@ -29809,7 +30072,7 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
         // -> Nutzer tippt das Input selbst an (kein label, kein JS-click; primitivster Pfad)
         return R.createElement('div',{style:{position:'relative',marginBottom:10}},
           R.createElement('div',{style:btnStyle},btnText),
-          R.createElement('input',{type:'file',accept:'image/*',id:'chScanFile',onChange:scanPhoto,disabled:scanning,
+          R.createElement('input',{type:'file',accept:'image/*',multiple:true,id:'chScanFile',onChange:scanPhoto,disabled:scanning,
             title:'Foto w\u00e4hlen',
             style:{position:'absolute',top:0,left:0,width:'100%',height:'100%',opacity:0,cursor:'pointer',zIndex:2}})
         );
