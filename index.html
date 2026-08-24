@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v377</title>
+<title>eatDeSi POS v379</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -539,7 +539,7 @@ window.BELKS_FIRMA_FELDER = ['name','address','phone','footer','googleLink',
   'firmaName','firmaZusatz','firmaStrasse','firmaPlzOrt','firmaStNr',
   'firmaUst','firmaGericht','firmaEmail','firmaWeb','firmaPhone',
   'stNr','street','city','email','taxId','slogan','oeffnung',
-  'sumupKey','geminiKey',
+  'sumupKey','geminiKey','grabsteinMin',
   /* v373: Liefergebuehren. Bewusst HIER und nicht in printerSettings -
      der Drucker gehoert dem Geraet, die Gebuehren gehoeren dem Restaurant.
      So sehen alle Geraete eines Standorts dieselben Betraege, und jede
@@ -16878,16 +16878,15 @@ function OrderListView({
         alignItems: "center",
         gap: 8
       }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        background: C.pink + "22",
-        color: C.pink,
-        borderRadius: 4,
-        padding: "1px 6px",
-        fontSize: 10,
-        fontWeight: 700
-      }
-    }, "#", realIdx + 1), /*#__PURE__*/React.createElement("span", {
+    },
+    /* ═══ v378: HIER STAND "#13" ═══
+       Das war die POSITION in der Liste (realIdx + 1), keine Nummer. Sie
+       verschob sich, sobald etwas geloescht wurde, und Storni vor der
+       Zahlung hatten sie gar nicht - nebeneinander sah das aus wie zwei
+       Nummernkreise. Genau die Verwirrung, die v372 beseitigt hat.
+       Seitdem gibt es EINE Identitaet: die Belegnummer. Sie steht direkt
+       daneben und reicht. */
+    /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 700,
         color: C.pink,
@@ -24095,7 +24094,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v377"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v379"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -31292,7 +31291,33 @@ var TO_META = 'eatdesi_to_meta';           // { ts:{Tisch:ms}, del:{Tisch:ms} }
    naechsten Tag seinen alten Stand mit. War die Loeschmarke bis dahin
    verfallen, galt der alte Tisch wieder als gueltig - ein bezahlter Tisch
    stand wieder offen da. Sieben Tage decken Ruhetage und Urlaub ab. */
-var TO_TOMB_MS = 24*60*60*1000;   // v279: 24 Stunden statt 7 Tage - lange genug, dass kein Geraet einen Tisch zurueckholt, kurz genug, dass nichts liegen bleibt
+/* ═══ v379: WIE LANGE LEBT EINE LOESCHMARKE? ═══
+   Vorher 24 Stunden (v279), davor 7 Tage. Die Marke schuetzt davor, dass
+   ein Geraet, das den geloeschten Tisch noch kennt, ihn wieder hochlaedt.
+   Sie muss also nur so lange leben, wie ein Geraet BRAUCHT, um einmal
+   abzugleichen.
+   Seit dem Vordergrund-Dienst gleichen die Geraete alle 10 Sekunden ab,
+   auch mit ausgeschaltetem Bildschirm. Abdullah wollte deshalb auf 2 Minuten
+   herunter - das sind rund zwoelf Abgleiche Sicherheitsabstand.
+
+   RISIKO, bewusst eingegangen: Ein Geraet, das laenger als 2 Minuten NICHT
+   abgleicht - Funkloch, App beendet, Akku leer -, kennt die Marke nicht mehr
+   und schiebt seinen alten Tisch zurueck in die Cloud. Ein bezahlter Tisch
+   stuende dann wieder offen da.
+   Woran man es merkt: ein Tisch taucht von selbst wieder auf, obwohl er
+   kassiert wurde. Passiert das, ist die Zeit zu kurz - dann diesen Wert
+   erhoehen, nichts anderes.
+
+   Einstellbar in den Firmendaten (grabsteinMin), damit ein Verlaengern kein
+   neues Programm braucht. */
+var TO_TOMB_MS = (function(){
+  try {
+    var f = JSON.parse(localStorage.getItem('eatdesi_firma') || 'null') || {};
+    var m = parseFloat(String(f.grabsteinMin == null ? '' : f.grabsteinMin).replace(',', '.'));
+    if (isFinite(m) && m >= 1) return m * 60 * 1000;
+  } catch(e) {}
+  return 2 * 60 * 1000;      // Vorgabe: 2 Minuten
+})();
 
 /* v290: idel = Loeschmarken einzelner Artikelzeilen, nach Tisch geordnet:
    { "1": { "<Zeilen-Kennung>": Zeitpunkt } } */
