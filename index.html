@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v386</title>
+<title>eatDeSi POS v387</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9663,6 +9663,7 @@ function BonModal({
   customerStreet,
   customerPlz,
   customerCity,
+  tischNotiz,        // v387: Notiz zum ganzen Vorgang (aus v385)
   gutscheine,
   setGutscheine,
   onGedruckt
@@ -9847,6 +9848,13 @@ function BonModal({
        Telefonnummer, ueber die man ihn erreicht.
        Ueberschrift richtet sich nach der Adresse, wie beim Zahlungsbeleg
        seit v384. */
+    /* v387: Die Notiz zum ganzen Vorgang (v385) stand bisher nur auf dem
+       Kuechen- und Barbon. Auf dem Gaestebon fehlte sie - dabei ist sie
+       genau das, was der Gast oder der Fahrer nachlesen soll:
+       "erst um 19:30", "Allergie Nuss". */
+    const notizBlock = (tischNotiz && String(tischNotiz).trim()) ? `
+      <div class="line"></div>
+      <div class="center bold">** ${String(tischNotiz).trim()} **</div>` : "";
     var _kbLief = !!(customerStreet || customerCity);
     var _kbHat  = !!(customerName || customerPhone || customerStreet);
     const kundeBlock = _kbHat ? `
@@ -9868,6 +9876,7 @@ function BonModal({
     <div class="center bold" style="font-size:14pt;margin:4px 0">${label}</div>
     ${kundeInfo}
     ${kundeBlock}
+    ${notizBlock}
     <div class="line"></div>${lines}
     <div>&nbsp;</div><div>&nbsp;</div><div>&nbsp;</div>
   </body></html>`;
@@ -9879,14 +9888,17 @@ function BonModal({
       ${i.kitchenNote ? `<div style="padding-left:10px;font-size:11pt">${i.kitchenNote}</div>` : ""}
     `).join("") + `
       <div class="line"></div>
-      <div class="row"><span>Netto</span><span>${fmt(netto)}</span></div>
-      ${(()=>{var _gm=true;try{var _gc=getBonConfig();if(_gc&&_gc.kunde)_gm=_gc.kunde.mwst!==false;}catch(e){}return _gm;})() ? `${tax7 > 0 ? `<div class="row"><span>MwSt. 7% (Speisen)</span><span>${fmt(tax7)}</span></div>` : ""}
-      ${tax19 > 0 ? `<div class="row"><span>MwSt. 19% (Getränke)</span><span>${fmt(tax19)}</span></div>` : ""}` : ""}
-      ${fee > 0 ? `<div class="row" style="color:#1565c0"><span>Liefergebühr</span><span>${fmt(fee)}</span></div>` : ""}
+      <div class="row bold"><span>Netto</span><span>${fmt(netto)}</span></div>
+      ${(()=>{var _gm=true;try{var _gc=getBonConfig();if(_gc&&_gc.kunde)_gm=_gc.kunde.mwst!==false;}catch(e){}return _gm;})() ? `${tax7 > 0 ? `<div class="row bold"><span>MwSt. 7% (Speisen)</span><span>${fmt(tax7)}</span></div>` : ""}
+      ${tax19 > 0 ? `<div class="row bold"><span>MwSt. 19% (Getränke)</span><span>${fmt(tax19)}</span></div>` : ""}` : ""}
+      ${fee > 0 ? `<div class="row bold"><span>Liefergebühr</span><span>${fmt(fee)}</span></div>` : ""}
       <div class="line"></div>
       <div class="row bold" style="font-size:14pt"><span>GESAMT</span><span>${fmt(total)}</span></div>
-      <div class="line"></div>
-      <div class="center bold" style="font-size:12pt">Zahlung noch offen</div>`;
+      <div class="line"></div>`;
+      /* v387: Hier stand "Zahlung noch offen". Der Zettel heisst GAESTEBON
+         und traegt keine Belegnummer - dass damit nicht bezahlt wurde, ist
+         daran schon erkennbar. Die Zeile hat nur Platz gekostet und Gaeste
+         verunsichert. */
     doPrint(kvBonHtml("🧾 GÄSTEBON", lines), 0x00);
     setPrinted(p => ({
       ...p,
@@ -24215,7 +24227,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v386"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v387"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25384,6 +25396,7 @@ function App() {
         customerStreet: ta.customerStreet || null,
         customerPlz: ta.customerPlz || null,
         customerCity: ta.customerCity || null,
+        tischNotiz: ta.tischNote || null,      // v387
       });
     } else {
     setTableOrders(p => ({
@@ -25403,7 +25416,8 @@ function App() {
       label: `Tisch ${tid}`,
       items: order.items,
       total,
-      bonNr: _zeigeNr   // v357: nur Anzeige
+      bonNr: _zeigeNr,   // v357: nur Anzeige
+      tischNotiz: order.tischNote || null      // v387
     });
     }
   };
