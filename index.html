@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v379</title>
+<title>eatDeSi POS v381</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -12098,16 +12098,28 @@ function MonatsreportView({ completedOrders }) {
    echten Test beim Dienst - aber es faengt genau die Faelle ab, die im
    Betrieb vorkommen: ein Platzhalter, eine halb kopierte Zeile, ein
    angehaengter Zeilenumbruch. */
+/* ═══ v381: DAS FORMAT GEHOERT GOOGLE, NICHT UNS ═══
+   Bis v380 verlangte diese Pruefung "AIza" und genau 39 Zeichen. Im Sommer
+   2026 hat Google auf ein neues Format umgestellt: frisch erzeugte
+   Schluessel beginnen mit "AQ." und sind unterschiedlich lang. Am nativen
+   Gemini-Endpunkt - dem, den wir benutzen - funktionieren sie unveraendert.
+   Unsere Pruefung hat sie trotzdem abgelehnt, und in kk stand rot
+   "Das sieht nicht wie ein Gemini-Key aus", obwohl der Schluessel richtig
+   war. Abdullah hat das gemeldet.
+   Lehre: Ein fremdes Format im eigenen Code festzuschreiben heisst, auf die
+   naechste Aenderung zu warten. Geprueft wird deshalb nur noch, was WIRKLICH
+   kaputt ist - leer, Leerzeichen, offensichtlich zu kurz. Ob der Schluessel
+   gilt, sagt der Dienst, nicht wir. */
 function belksGeminiKeyForm(k){
   var v = String(k == null ? "" : k).trim();
   if (!v) return { ok:false, grund:"leer" };
   if (/\s/.test(v)) return { ok:false, grund:"enth\u00e4lt Leerzeichen oder Zeilenumbruch" };
-  /* v349: Nicht nur SAGEN, dass es falsch ist - zeigen, WAS dort steht.
-     Sonst kann niemand pruefen, ob die Meldung stimmt. */
-  if (v.indexOf("AIza") !== 0) return { ok:false, grund:"beginnt mit \u201E" + v.slice(0,4) + "\u201C statt AIza (" + v.length + " Zeichen)" };
-  if (!/^[A-Za-z0-9_\-]+$/.test(v)) return { ok:false, grund:"enth\u00e4lt ungewohnte Zeichen" };
-  if (v.length !== 39) return { ok:false, grund:v.length + " Zeichen statt 39" };
-  return { ok:true, grund:"" };
+  if (v.length < 20) return { ok:false, grund:"nur " + v.length + " Zeichen \u2013 das ist zu kurz f\u00fcr einen Schl\u00fcssel" };
+  /* Bekannte Formen nur noch als HINWEIS, nie als Ablehnung. */
+  var form = (v.indexOf("AIza") === 0) ? "AIza\u2026 (bisheriges Format)"
+           : (v.indexOf("AQ.")  === 0) ? "AQ.\u2026 (neues Format seit 2026)"
+           : "unbekannte Form \u2013 wird trotzdem versucht";
+  return { ok:true, grund:"", form:form };
 }
 
 function belksSprachPruefung(){
@@ -18258,14 +18270,15 @@ function PrinterSettingsView({
     /* v341: Hier stand fruher bei JEDEM Text ein gruener Haken - auch bei
        "0000". Genau daran ist der Betrieb haengen geblieben. */
     form.geminiKey && belksGeminiKeyForm(form.geminiKey).ok && /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:8, padding:"8px 10px", fontSize:12, color:C.green, fontWeight:700 } },
-      "\u2705 Form stimmt (AIza\u2026, 39 Zeichen)",
+      /* v381: nicht mehr das Format behaupten, sondern zeigen, was da ist. */
+      "\u2705 " + (belksGeminiKeyForm(form.geminiKey).form || "sieht brauchbar aus"),
       /*#__PURE__*/React.createElement("div", { style:{ fontWeight:500, fontSize:11, color:"#4a7c4e", marginTop:3 } },
         "Ob er wirklich funktioniert, zeigt \uD83E\uDDE0 \u201EKI-Dienst pr\u00fcfen\u201C in der AI Kellnerin.")
     ),
     form.geminiKey && !belksGeminiKeyForm(form.geminiKey).ok && /*#__PURE__*/React.createElement("div", { style:{ background:"#ffebee", border:"2px solid #ef9a9a", borderRadius:8, padding:"8px 10px", fontSize:12, color:"#c62828", fontWeight:700 } },
       "\u274C Das sieht nicht wie ein Gemini-Key aus \u2014 " + belksGeminiKeyForm(form.geminiKey).grund,
       /*#__PURE__*/React.createElement("div", { style:{ fontWeight:500, fontSize:11, marginTop:3 } },
-        "Ein g\u00fcltiger Key beginnt mit AIza und hat 39 Zeichen. Kostenlos: aistudio.google.com/apikey",
+        "Kostenlos neu erstellen: aistudio.google.com/apikey \u2013 neue Schl\u00fcssel beginnen mit AQ., \u00e4ltere mit AIza. Beide gehen.",
         /*#__PURE__*/React.createElement("div", { style:{ marginTop:4 } },
           "Achtung: Der Schl\u00fcssel gilt nur f\u00fcr DIESES Restaurant \u2013 in den anderen H\u00e4usern muss er ebenfalls eingetragen werden."))
     ),
@@ -24094,7 +24107,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v379"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v381"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27660,6 +27673,7 @@ function FirmendatenView() {
       R.createElement('button',{onClick:save,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'Speichern')
     ),
     R.createElement(TischAnzahlCard,null),
+    R.createElement(GrabsteinCard,null),        // v380
     R.createElement(AnzeigenameCard,null)
   );
 }
@@ -27706,6 +27720,59 @@ function TischAnzahlCard(){
     R.createElement('div',{style:{fontSize:11,color:'#999',marginBottom:8,lineHeight:1.6}},'Gilt nur f\u00fcr DIESES Restaurant \u2013 jede Tochter stellt ihre eigene Anzahl ein (auch mehr f\u00fcr Au\u00dfenbereich, z.B. 40). Beim Verkleinern darauf achten, dass auf hohen Tischnummern keine offenen Bestellungen liegen (Cloud-Daten bleiben erhalten \u2013 beim Vergr\u00f6\u00dfern wieder sichtbar). QR-Tischkarten danach ggf. neu drucken.'),
     msg?R.createElement('div',{style:{color:'#2e7d32',fontSize:12,fontWeight:700,marginBottom:8}},msg):null,
     R.createElement('button',{onClick:saveN,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'\uD83E\uDE91 Tisch-Anzahl speichern')
+  );
+}
+
+/* ═══ v380: WIE LANGE LEBT EINE LOESCHMARKE? ═══
+   Der Wert steckt seit v379 in den Firmendaten, hatte aber kein Feld - ohne
+   Maske laesst er sich nicht aendern, und genau darum ging es.
+   Bewusst mit deutlicher Warnung: Das ist keine Geschmacksfrage wie die
+   Tischanzahl, sondern die Frist, in der ein Geraet abgeglichen haben MUSS.
+   Zu kurz eingestellt, kommen bezahlte Tische zurueck. */
+function GrabsteinCard(){
+  var R=React;
+  var lesen=function(){
+    try{
+      var f=JSON.parse(localStorage.getItem('eatdesi_firma')||'null')||{};
+      return f.grabsteinMin==null?'':String(f.grabsteinMin);
+    }catch(e){ return ''; }
+  };
+  var [w,setW]=R.useState(lesen);
+  var [msg,setMsg]=R.useState('');
+  var iS={width:'100%',padding:'8px 10px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8};
+  function save(){
+    var n=parseFloat(String(w||'').replace(',','.'));
+    if(w!=='' && (!isFinite(n) || n<1)){
+      setMsg('\u26A0\uFE0F Mindestens 1 Minute \u2013 k\u00fcrzer als ein Abgleich w\u00e4re wirkungslos.');
+      return;
+    }
+    var neu={ grabsteinMin: (w==='' ? '' : Math.round(n*10)/10) };
+    try{ window.belksFirmaSpeichern(neu); }
+    catch(e){
+      try{
+        var f=JSON.parse(localStorage.getItem('eatdesi_firma')||'null')||{};
+        LS.set('eatdesi_firma', Object.assign({}, f, neu));
+      }catch(e2){}
+    }
+    setMsg('\u2705 Gespeichert: '+(w===''?'2 Minuten (Vorgabe)':(neu.grabsteinMin+' Minuten'))
+      +' \u2013 gilt nach dem n\u00e4chsten Neustart der App.');
+    try{ if(window.runSync) window.runSync(); }catch(e){}
+  }
+  return R.createElement('div',{style:{background:'#fff',borderRadius:12,padding:14,border:'1px solid #eee',marginTop:14}},
+    R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:6}},'\uD83E\uDEA6 L\u00f6schmarken'),
+    R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},'Minuten, die eine L\u00f6schmarke lebt (leer = 2)'),
+    R.createElement('input',{type:'text',inputMode:'decimal',value:w,placeholder:'2',
+      onChange:function(e){setW(e.target.value);},style:iS}),
+    R.createElement('div',{style:{fontSize:11,color:'#999',marginBottom:8,lineHeight:1.6}},
+      'Wird ein Tisch gel\u00f6scht oder kassiert, merkt sich die Kasse das kurz \u2013 damit ein Ger\u00e4t, '
+      +'das gerade nicht abgeglichen hat, den Tisch nicht wieder hochl\u00e4dt. '
+      +'Die Marke muss nur so lange leben, wie ein Ger\u00e4t braucht, um einmal abzugleichen.'),
+    R.createElement('div',{style:{fontSize:11,color:'#c62828',marginBottom:8,lineHeight:1.6,background:'#fff5f5',borderRadius:8,padding:'8px 10px'}},
+      '\u26A0\uFE0F Zu kurz eingestellt: Ein Ger\u00e4t im Funkloch oder mit leerem Akku kennt die Marke '
+      +'nicht mehr und schiebt einen bezahlten Tisch zur\u00fcck \u2013 er steht dann wieder offen da. '
+      +'Passiert das, diesen Wert erh\u00f6hen.'),
+    msg?R.createElement('div',{style:{color:msg.indexOf('\u26A0')===0?'#c62828':'#2e7d32',fontSize:12,fontWeight:700,marginBottom:8}},msg):null,
+    R.createElement('button',{onClick:save,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDCBE Speichern')
   );
 }
 
