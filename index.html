@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v409</title>
+<title>eatDeSi POS v410</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -24566,7 +24566,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v409"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v410"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -29162,11 +29162,25 @@ window.belksDiktat = function(opt){
 
   if (nativ && Plug) {
     var stilleTimer = null, letzter = '';
+    /* v410: Gesamt-Wecker. Der Stille-Timer unten laeuft erst an, wenn TEXT
+       kommt. Kommt keiner - Gast schweigt, Erkennung versteht nichts, Android
+       beendet die Sitzung stumm -, wurde beenden() nie gerufen und das
+       Gespraech stand fuer immer ("Hoert zu..." und dann nichts mehr).
+       Nach dieser Zeit endet die Sitzung in jedem Fall, damit der Aufrufer
+       ueber beiEnde() neu anfangen kann. */
+    var maxStille = opt.maxStille || 12000;
+    var gesamtWecker = null;
     var beenden = function(){
       if (beendet) return; beendet = true;
       if (stilleTimer) clearTimeout(stilleTimer);
+      if (gesamtWecker) { clearTimeout(gesamtWecker); gesamtWecker = null; }
       try { Plug.stop(); } catch(e){}
-      try { Plug.removeAllListeners(); } catch(e){}
+      /* v410: KEIN removeAllListeners() mehr an dieser Stelle. Es ist ein
+         Versprechen; loest es erst ein, wenn die naechste Sitzung ihre
+         Zuhoerer schon angemeldet hat, nimmt es der NEUEN Sitzung die
+         Zuhoerer weg - und es kommt nie wieder etwas an.
+         Die naechste Sitzung raeumt vor dem Anmelden ohnehin auf, und die
+         Zuhoerer unten steigen aus, sobald beendet gesetzt ist. */
       if (letzter) beiText(letzter, true);
       beiEnde();
     };
@@ -29177,17 +29191,29 @@ window.belksDiktat = function(opt){
           if (!perm || perm.speechRecognition !== 'granted') await Plug.requestPermissions();
         } catch(pe) { try { await Plug.requestPermission(); } catch(pe2){} }
         try { await Plug.removeAllListeners(); } catch(re){}
+        /* v410: Der Wecker wird VOR den Zuhoerern gesetzt. Bliebe die
+           Anmeldung haengen, gaebe es sonst einen Moment ganz ohne
+           Absicherung - und genau der ist der Fehlerfall. */
+        gesamtWecker = setTimeout(beenden, maxStille);
         Plug.addListener('partialResults', function(d){
+          /* v410: Zuhoerer einer beendeten Sitzung schweigen. Ohne diese
+             Zeile koennte ein spaet eintreffendes Ergebnis der VORIGEN
+             Sitzung in die laufende hineinreden. */
+          if (beendet) return;
           var arr = d && (d.matches || d.value);
           if (arr && arr.length) {
             letzter = arr[0];
             beiText(letzter, false);
+            /* Sobald etwas gesagt wird, ist der Gesamt-Wecker nicht mehr
+               zustaendig - ab hier zaehlt die Stille nach dem letzten Wort. */
+            if (gesamtWecker) { clearTimeout(gesamtWecker); gesamtWecker = null; }
             if (stilleTimer) clearTimeout(stilleTimer);
             // nach 1,6 s Stille ist der Satz zu Ende
             stilleTimer = setTimeout(beenden, 1600);
           }
         });
         Plug.addListener('listeningState', function(st){
+          if (beendet) return;
           if (st && st.status === 'stopped') beenden();
         });
         await Plug.start({ language: sprache, partialResults: true, popup: false, maxResults: 1 });
@@ -32244,10 +32270,39 @@ function AiTelefonistinView() {
      die Kette nach dem ersten Satz ab. */
   const aktivRef = React.useRef(false);
   const sprichtRef = React.useRef(false);
+  /* v410: Wann ist zuletzt irgendetwas passiert? Der Wachhund unten
+     vergleicht damit. */
+  const regungRef = React.useRef(Date.now());
   React.useEffect(function(){ aktivRef.current = active; }, [active]);
+
+  /* ═══ v410: DER WACHHUND ═══
+     Im Protokoll vom 25.08. stand "Hoert zu..." und danach eine Minute
+     nichts - die Telefonistin war aktiv und trotzdem tot. Die Ursachen sind
+     in belksDiktat geschlossen (Gesamt-Wecker, Zuhoerer-Abraeumen), aber ein
+     Gespraech, das im Betrieb stehenbleibt, ist zu teuer fuer nur EINE
+     Absicherung. Dieser Wachhund kennt die Ursache nicht - er merkt nur,
+     dass sich nichts mehr ruehrt, und faengt neu an. */
+  React.useEffect(function(){
+    if (!active) return;
+    var t = setInterval(function(){
+      if (!aktivRef.current) return;
+      if (sprichtRef.current) return;              // sprechen darf dauern
+      if (Date.now() - regungRef.current < 30000) return;
+      regungRef.current = Date.now();
+      addLog('\u2139\ufe0f Keine Regung \u2013 h\u00f6re neu zu.','info');
+      try { startListening(); } catch(e){}
+    }, 5000);
+    return function(){ clearInterval(t); };
+  }, [active]);
   const firma = LS.get('eatdesi_firma', {name:'eatDeSi Restaurant', oeffnung:'11:30-22:00'});
 
-  const addLog = (msg, type) => setLog(l => [{msg,type,t:new Date().toLocaleTimeString('de-DE')},...l.slice(0,29)]);
+  const addLog = (msg, type) => {
+    /* v410: Jeder Protokolleintrag ist eine Regung. Damit braucht der
+       Wachhund keine eigenen Stempel an zehn Stellen - er sieht einfach,
+       ob ueberhaupt noch etwas geschieht. */
+    try { if (regungRef) regungRef.current = Date.now(); } catch(e){}
+    setLog(l => [{msg,type,t:new Date().toLocaleTimeString('de-DE')},...l.slice(0,29)]);
+  };
 
   /* v408: Ueber belksSprechen - in der APK das native Plugin, im Browser die
      eingebaute Ausgabe. Vorher stand hier "if (!window.speechSynthesis)
@@ -32438,6 +32493,10 @@ function AiTelefonistinView() {
         }
       },
       beiEnde: function(){
+        /* v410: Sichtbar machen, dass eine Runde ohne Ergebnis zu Ende ging.
+           Vorher sah man nur "Hoert zu..." und danach nichts - man konnte
+           nicht unterscheiden, ob sie noch hoert oder haengt. */
+        if (!fertig) addLog('\u2026 nichts verstanden, h\u00f6re weiter.','info');
         /* v408: aktivRef statt active. Der eingefrorene Zustand war beim
            ersten Start noch false - die Kette brach nach einem Satz ab und
            es sah aus, als hoere sie einfach auf.
