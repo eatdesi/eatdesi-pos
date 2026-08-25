@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v396</title>
+<title>eatDeSi POS v405</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -540,6 +540,9 @@ window.BELKS_FIRMA_FELDER = ['name','address','phone','footer','googleLink',
   'firmaUst','firmaGericht','firmaEmail','firmaWeb','firmaPhone',
   'stNr','street','city','email','taxId','slogan','oeffnung',
   'sumupKey','geminiKey','grabsteinMin',
+  /* v405: Frist der fiskalischen Marken. Gehoert zum Restaurant, nicht zum
+     Geraet - sonst haette jedes Handy eine andere Schutzfrist. */
+  'grabsteinTage',
   /* v373: Liefergebuehren. Bewusst HIER und nicht in printerSettings -
      der Drucker gehoert dem Geraet, die Gebuehren gehoeren dem Restaurant.
      So sehen alle Geraete eines Standorts dieselben Betraege, und jede
@@ -7420,7 +7423,15 @@ function belksGrabsteineWeg(){
     try{ m = JSON.parse(localStorage.getItem('eatdesi_to_meta') || '{}') || {}; }catch(e){}
     var anzahl = (m && m.del) ? Object.keys(m.del).length : 0;
     if(!anzahl) return { ok:true, anzahl:0 };
-    var sauber = { ts: (m && m.ts) || {}, del: {} };
+    /* ═══ v405: DIE LANGEN MARKEN BLEIBEN ═══
+       Bisher wurden beim Tagesabschluss ALLE Marken entfernt. Das war genau
+       das Loch: ein Geraet, das drei Tage aus war, kam nach dem Abschluss
+       zurueck und schob seinen alten, laengst bezahlten Tisch wieder hoch -
+       es gab keine Marke mehr, die das verhindert haette.
+       Weggeraeumt werden nur noch die kurzen (Entwuerfe). Die fiskalischen
+       verschwinden allein durch Zeitablauf. */
+    var sauber = { ts: (m && m.ts) || {}, del: {},
+                   delF: (m && m.delF) || {}, idelF: (m && m.idelF) || {} };
     try{ window._syncWriting = true; }catch(e){}
     localStorage.setItem('eatdesi_to_meta', JSON.stringify(sauber));
     try{ window._syncWriting = false; }catch(e){}
@@ -12595,7 +12606,7 @@ Beispiel C - der Gast nimmt etwas zurueck
 Aktuelle Speisekarte:
 ${menuContext}
 
-Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(", ") : "noch nichts"}${_custInfo}`;
+Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(", ") : "noch nichts"}${_custInfo}${(typeof window.belksVerkaufsHinweis === "function" ? window.belksVerkaufsHinweis() : "")}`;
 
   const startSession = () => {
     /* v337: Im Takeaway ist die erste Frage eine andere - der Gast steht
@@ -19899,10 +19910,9 @@ function LoyaltyView({ customers, onUpdate, loyaltySettings, setLoyaltySettings 
     c.phone?.includes(search)
   ).sort((a,b) => (b.points||0) - (a.points||0));
 
-  const addPoints = (idx, pts) => {
-    const c = customers[idx];
-    onUpdate(idx, { ...c, points: (c.points||0) + pts });
-  };
+  /* v398: addPoints() ist entfallen - siehe Kommentar bei den Knoepfen.
+     Bewusst ganz geloescht statt nur abgeklemmt: toter Code wird beim
+     naechsten Umbau gern versehentlich wieder angeschlossen. */
 
   const redeemPoints = (idx) => {
     const pts = parseInt(redeemPts)||0;
@@ -20012,9 +20022,13 @@ function LoyaltyView({ customers, onUpdate, loyaltySettings, setLoyaltySettings 
             React.createElement("div", { style:{ background:"#f5f5f5", borderRadius:999, height:6, marginBottom:8 } },
               React.createElement("div", { style:{ background:tierColor(pts), height:6, borderRadius:999, width:Math.min(100,(pts%500)/5)+"%", transition:"width .3s" } })
             ),
+            /* v398: Hier standen "+50 Pts" und "+100 Pts". Sie vergaben Punkte
+               ohne Umsatz, ohne Grund und ohne Eintrag in pointsHistory -
+               hinterher war nicht mehr erkennbar, dass sie von Hand kamen.
+               Bei redeemRate 100 sind 100 Punkte 1,00 EUR Rabatt; damit
+               konnte sich jeder am Geraet selbst bedienen.
+               Punkte entstehen jetzt nur noch bei der Zahlung. */
             React.createElement("div", { style:{ display:"flex", gap:8 } },
-              React.createElement("button", { onClick:()=>addPoints(idx,50), style:{ flex:1, padding:"6px 0", borderRadius:8, border:"none", background:"#e8f5e9", color:C.green, cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 } }, "+50 Pts"),
-              React.createElement("button", { onClick:()=>addPoints(idx,100), style:{ flex:1, padding:"6px 0", borderRadius:8, border:"none", background:"#e8f5e9", color:C.green, cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 } }, "+100 Pts"),
               pts >= (settings.minRedeem||100) && React.createElement("button", { onClick:()=>setRedeemIdx(idx),
                 style:{ flex:1, padding:"6px 0", borderRadius:8, border:"none", background:"#fff8e1", color:"#f57f17", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 } }, "🎁 Einlösen")
             )
@@ -20194,6 +20208,12 @@ function CustomersView({
   const getCustomerOrders = customer => {
     const n = _tel(customer.phone) || _tel(customer.kundenNr);
     return completedOrders.filter(o => {
+      /* v397: Der Storno-Filter fehlte AUSGERECHNET hier. Ueberall sonst
+         (Tagesbericht, Zeitraum, belksUmsatzListe) steht er. Ein stornierter
+         Beleg zaehlte deshalb beim Kunden weiter mit: Umsatz, Besuche,
+         Oe-Bon und "Letzte Bestellungen". In kk sah man 74,30 EUR, obwohl
+         46,60 EUR davon storniert waren. */
+      if (o.storniert) return false;
       if (n && (_tel(o.customerPhone) === n)) return true;
       // Nur wenn gar keine Nummer bekannt ist, ueber den Namen gehen
       return !n && !!customer.name && o.customerName === customer.name;
@@ -24424,7 +24444,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v396"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v405"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25898,7 +25918,15 @@ function App() {
         if (ta.customerPhone && loyaltySettings?.active !== false) {
           const pts = Math.floor(orderTotal * (loyaltySettings?.pointsPerEuro||3));
           const cIdx = customers.findIndex(c => c.phone === ta.customerPhone || c.name === ta.customerName);
-          if (cIdx >= 0) setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts} : c));
+          if (cIdx >= 0) {
+            /* v397: siehe Tisch-Zahlung - der Beleg merkt sich die Punkte,
+               damit der Storno sie zurueckgeben kann. */
+            const _kd = customers[cIdx];
+            setCompletedOrders(p => p.map(o => o.bonNr === _bonNr
+              ? Object.assign({}, o, { punkteVergeben: pts, punkteKunde: (_kd && _kd.id) || null })
+              : o));
+            setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts} : c));
+          }
         }
       }
       // NICHT löschen! Takeaway bleibt im KDS Pro bis "Ausgeliefert".
@@ -25953,6 +25981,14 @@ function App() {
             (c.kundenNr||"").toLowerCase() === norm
           );
           if (cIdx >= 0) {
+            /* v397: Auf dem Beleg festhalten, wie viele Punkte an WEN gingen.
+               Der Storno nimmt spaeter genau diese Zahl zurueck. Wuerde er
+               neu rechnen, kaeme nach einer Aenderung von pointsPerEuro
+               etwas anderes heraus als vergeben wurde. */
+            const _kd = customers[cIdx];
+            setCompletedOrders(p => p.map(o => o.bonNr === _bonNr
+              ? Object.assign({}, o, { punkteVergeben: pts, punkteKunde: (_kd && _kd.id) || null })
+              : o));
             setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:Math.max(0,(c.points||0) - (redeemedPts||0) + pts), visits:(c.visits||0)+1, lastVisit:new Date().toISOString(), pointsHistory:[...(c.pointsHistory||[]), ...(redeemedPts>0?[{date:new Date().toLocaleDateString("de-DE"),pts:-redeemedPts,note:"Eingelöst beim Kauf"}]:[]), {date:new Date().toLocaleDateString("de-DE"),pts:pts,note:"Gesammelt"}]} : c));
           } else {
             // neuen Stammkunden anlegen (nur wenn es wie eine Telefonnummer aussieht)
@@ -26083,6 +26119,42 @@ function App() {
         stornoVon: (loggedInUser && loggedInUser.name) || "?",
         stornoGrund: grund || "ohne Angabe"
       };
+      /* ═══ v397: DIE PUNKTE MUESSEN MIT ═══
+         Bisher markierte der Storno nur den Beleg. Die Treuepunkte blieben
+         beim Kunden stehen - er behielt Punkte fuer einen Umsatz, den es
+         nicht gibt. In kk waren 46,60 EUR storniert und trotzdem in den
+         422 Punkten von Zetar enthalten.
+         Zurueckgenommen wird, was der Beleg selbst festhaelt. Nur bei
+         Altbelegen ohne das Feld wird ersatzweise gerechnet. */
+      try {
+        var _pts = (typeof o.punkteVergeben === "number")
+          ? o.punkteVergeben
+          : Math.floor((o.total || 0) * ((loyaltySettings && loyaltySettings.pointsPerEuro) || 3));
+        if (_pts > 0) {
+          var _telN = function(t){ return String(t||"").replace(/[^0-9]/g,""); };
+          var _n = _telN(o.customerPhone);
+          var _idx = customers.findIndex(function(c){
+            if (o.punkteKunde && c.id === o.punkteKunde) return true;
+            return !!_n && (_telN(c.phone) === _n || _telN(c.kundenNr) === _n);
+          });
+          if (_idx >= 0) {
+            setCustomers(function(p){ return p.map(function(c, ci){
+              if (ci !== _idx) return c;
+              return Object.assign({}, c, {
+                points: Math.max(0, (c.points||0) - _pts),
+                /* Besuche runter, aber nie unter null - sonst kippt der
+                   Zaehler ins Minus, wenn zweimal storniert wird. */
+                visits: Math.max(0, (c.visits||0) - 1),
+                pointsHistory: (c.pointsHistory||[]).concat([{
+                  date: new Date().toLocaleDateString("de-DE"),
+                  pts: -_pts,
+                  note: "Storno Beleg " + (o.bonNr || "?")
+                }])
+              });
+            }); });
+          }
+        }
+      } catch(e){ console.warn("v397: Punkte-Ruecknahme fehlgeschlagen:", e); }
       // Stornierung sofort in der Cloud aktualisieren (alle Geraete bekommen es)
       if (typeof updateOrderInSupabase === "function") {
         setTimeout(function(){ updateOrderInSupabase(stornoOrder); }, 100);
@@ -26354,7 +26426,8 @@ function App() {
        Löschmarken zu entfernen, lokal und in der Cloud. */
     try {
       const gw = belksGrabsteineWeg();
-      if (gw.ok && gw.anzahl) console.log("Tagesabschluss: " + gw.anzahl + " Grabstein(e) entfernt");
+      if (gw.ok && gw.anzahl) console.log("Tagesabschluss: " + gw.anzahl
+        + " kurze Grabstein(e) entfernt \u2013 fiskalische bleiben (v405)");
       else if (!gw.ok) console.warn("Grabsteine nicht entfernt: " + gw.grund);
     } catch (e) {}
     // 2) Signal an alle Geraete senden (eindeutiger Zeitstempel)
@@ -27130,6 +27203,11 @@ function App() {
                 };
                 _dg.push('Marken offen:  ' + _liste(_lm.ts));
                 _dg.push('Grabsteine:  ' + _liste(_lm.del));
+                /* v405: Die fiskalischen getrennt ausweisen. Wer eine Stoerung
+                   sucht, muss sehen koennen, welcher Tisch noch geschuetzt
+                   ist und welcher nicht mehr. */
+                if (_lm.delF && Object.keys(_lm.delF).length)
+                  _dg.push('  davon fiskalisch: ' + _liste(_lm.delF));
                 /* v276: Warteschlange und letzter Push-Fehler. Damit trennt sich
                    endlich "es wurde nie gesendet" von "es wurde abgelehnt". */
                 var _wq = [];
@@ -27675,7 +27753,7 @@ function App() {
   ), view === "firmendaten" && React.createElement(FirmendatenView, null
   ), view === "menu_import" && React.createElement(MenuImportExportView, {menuData:menuData,onUpdate:setMenuData}
   ), view === "test_center" && React.createElement(TestCenterView, {menuData:menuData,printerSettings:printerSettings,completedOrders:completedOrders}
-  ), view === "ai_betriebsleiter" && React.createElement(AiBetriebsleiterView, {completedOrders:completedOrders}
+  ), view === "ai_betriebsleiter" && React.createElement(AiBetriebsleiterView, {completedOrders:completedOrders, expenses:expenses, customers:customers}
   ), view === "ai_telefonistin" && React.createElement(AiTelefonistinView, {}
   ), view === "ai_whatsapp" && React.createElement(AiWhatsAppView, {menuData:menuData}
   ), view === "ai_marketing" && React.createElement(AiMarketingView, {completedOrders:completedOrders}
@@ -28180,7 +28258,14 @@ function GrabsteinCard(){
       return f.grabsteinMin==null?'':String(f.grabsteinMin);
     }catch(e){ return ''; }
   };
+  var lesenTage=function(){
+    try{
+      var f=JSON.parse(localStorage.getItem('eatdesi_firma')||'null')||{};
+      return f.grabsteinTage==null?'':String(f.grabsteinTage);
+    }catch(e){ return ''; }
+  };
   var [w,setW]=R.useState(lesen);
+  var [wt,setWt]=R.useState(lesenTage);      // v405: Tage fuer die fiskalischen
   var [msg,setMsg]=R.useState('');
   var iS={width:'100%',padding:'8px 10px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8};
   function save(){
@@ -28189,7 +28274,13 @@ function GrabsteinCard(){
       setMsg('\u26A0\uFE0F Mindestens 1 Minute \u2013 k\u00fcrzer als ein Abgleich w\u00e4re wirkungslos.');
       return;
     }
-    var neu={ grabsteinMin: (w==='' ? '' : Math.round(n*10)/10) };
+    var nt=parseFloat(String(wt||'').replace(',','.'));
+    if(wt!=='' && (!isFinite(nt) || nt<1)){
+      setMsg('\u26A0\uFE0F Mindestens 1 Tag \u2013 k\u00fcrzer sch\u00fctzt ein Ger\u00e4t nicht, das \u00fcber Nacht aus war.');
+      return;
+    }
+    var neu={ grabsteinMin: (w==='' ? '' : Math.round(n*10)/10),
+              grabsteinTage: (wt==='' ? '' : Math.round(nt)) };
     try{ window.belksFirmaSpeichern(neu); }
     catch(e){
       try{
@@ -28197,7 +28288,8 @@ function GrabsteinCard(){
         LS.set('eatdesi_firma', Object.assign({}, f, neu));
       }catch(e2){}
     }
-    setMsg('\u2705 Gespeichert: '+(w===''?'2 Minuten (Vorgabe)':(neu.grabsteinMin+' Minuten'))
+    setMsg('\u2705 Gespeichert: Entw\u00fcrfe '+(w===''?'2 Minuten':(neu.grabsteinMin+' Minuten'))
+      +', Betrieb '+(wt===''?'14 Tage':(neu.grabsteinTage+' Tage'))
       +' \u2013 gilt nach dem n\u00e4chsten Neustart der App.');
     try{ if(window.runSync) window.runSync(); }catch(e){}
   }
@@ -28208,9 +28300,22 @@ function GrabsteinCard(){
        Begruendung steht weiterhin vollstaendig am Wert selbst
        (siehe TO_TOMB_MS), wo sie beim Aendern gelesen wird. */
     R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:6}},'\uD83E\uDEA6 Grabsteine'),
-    R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},'Minuten, die ein Grabstein lebt (leer = 2)'),
+    /* v405: Zwei Fristen statt einer. Oben die Entwuerfe (kurz, spurlos),
+       unten alles mit Nummer oder TSE (lang). Die Trennung ist der ganze
+       Sinn der Aenderung, deshalb steht sie auch so in der Maske. */
+    R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},
+      '\uD83D\uDCDD Entw\u00fcrfe \u2013 Minuten (leer = 2)'),
     R.createElement('input',{type:'text',inputMode:'decimal',value:w,placeholder:'2',
       onChange:function(e){setW(e.target.value);},style:iS}),
+    R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},
+      '\uD83E\uDDFE Gebucht, bezahlt, storniert \u2013 Tage (leer = 14)'),
+    R.createElement('input',{type:'text',inputMode:'numeric',value:wt,placeholder:'14',
+      onChange:function(e){setWt(e.target.value);},style:iS}),
+    R.createElement('div',{style:{fontSize:11,color:'#7a5c00',background:'#fff8e1',
+      borderRadius:8,padding:'8px 10px',marginBottom:8,lineHeight:1.5}},
+      'Die untere Frist ist die Zeit, in der ein Ger\u00e4t sp\u00e4testens abgeglichen haben muss. '
+      + 'Zu kurz eingestellt, kann ein Ger\u00e4t, das l\u00e4nger aus war, einen bezahlten Tisch '
+      + 'wieder \u00f6ffnen.'),
     msg?R.createElement('div',{style:{color:msg.indexOf('\u26A0')===0?'#c62828':'#2e7d32',fontSize:12,fontWeight:700,marginBottom:8}},msg):null,
     R.createElement('button',{onClick:save,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDCBE Speichern')
   );
@@ -30357,35 +30462,1147 @@ function TestCenterView({ menuData, printerSettings, completedOrders }) {
 }
 
 
-function AiBetriebsleiterView({ completedOrders }) {
+
+/* ═══ v399: DIE BETRIEBSZAHLEN ═══
+   Eine Stelle, die aus Belegen und Ausgaben macht, was ein Betriebsleiter
+   braucht. Sie speist die Anzeige UND den Auftrag an die AI. Wuerde die AI
+   ihre eigenen Zahlen bekommen, haetten wir wieder zwei Orte, die dasselbe
+   wissen - der Fehler, der uns in dieser Sitzung sechsmal begegnet ist.
+
+   Bewusst OHNE Wetter, Feiertage oder Saison: die kennt die Kasse nicht.
+   Was hier nicht drinsteht, darf die AI auch nicht behaupten. */
+
+/* v399: Gemini antwortet in Markdown. Roh gesetzt stehen die Sternchen im
+   Text ("**Tagesbericht**" im Screenshot vom 25.08.). Umgesetzt werden nur
+   fett, Aufzaehlung und Absatz - mehr braucht ein Tagesbericht nicht, und
+   die Datei bleibt ohne fremde Bibliothek. */
+window.belksMarkdownZuReact = function(text, R){
+  var zeilen = String(text || '').split('\n');
+  var raus = [], schluessel = 0;
+  var fett = function(zeile){
+    var teile = String(zeile).split(/\*\*(.+?)\*\*/g);
+    return teile.map(function(t, i){
+      return (i % 2 === 1)
+        ? R.createElement('strong', { key: 'f' + i, style:{ color:'#C84B31' } }, t)
+        : t;
+    });
+  };
+  zeilen.forEach(function(z){
+    var zeile = z.replace(/\s+$/, '');
+    if (!zeile.trim()){
+      raus.push(R.createElement('div', { key:'l'+(schluessel++), style:{ height:8 } }));
+      return;
+    }
+    /* Eine Zeile, die nur aus einer fetten Stelle besteht, ist eine
+       Ueberschrift - die bekommt Abstand nach oben. */
+    var nurFett = /^\s*\*\*[^*]+\*\*\s*:?\s*$/.test(zeile);
+    var punkt = /^\s*[-*\u2022]\s+/.test(zeile);
+    if (punkt){
+      raus.push(R.createElement('div', { key:'l'+(schluessel++),
+        style:{ display:'flex', gap:8, marginBottom:5 } },
+        R.createElement('span', { style:{ color:'#C84B31', fontWeight:800 } }, '\u2022'),
+        R.createElement('span', null, fett(zeile.replace(/^\s*[-*\u2022]\s+/, '')))
+      ));
+      return;
+    }
+    raus.push(R.createElement('div', { key:'l'+(schluessel++),
+      style: nurFett
+        ? { marginTop:14, marginBottom:6, fontSize:15 }
+        : { marginBottom:5 } },
+      fett(zeile)));
+  });
+  return raus;
+};
+
+
+/* ═══ v400: WAS WUERDE EINEM BETRIEBSLEITER AUFFALLEN? ═══
+   Feste Regeln, keine AI. Jede Regel nennt die Zahl, auf der sie beruht -
+   sonst ist es eine Meinung und keine Auffaelligkeit.
+
+   Die Schwellen sind Erfahrungswerte aus der Gastronomie, nicht Gesetz:
+     Wareneinsatz     bis ~30 % gilt als gesund, ueber 35 % wird es eng
+     Getraenkeanteil  unter 15 % faellt die Marge weg, die Getraenke tragen
+     Stornoquote      ueber 5 % ist entweder Chaos oder Missbrauch
+   Wer andere Werte will, aendert sie HIER - an einer Stelle.
+
+   z   = Zahlen der letzten 7 Tage
+   vor = dieselbe Rechnung, sieben Tage frueher stehengeblieben */
+
+/* ═══ v401: DAS GEDAECHTNIS DES BETRIEBSLEITERS ═══
+   Hoechstens 14 Berichte, das reicht fuer zwei Wochen Rueckschau und haelt
+   den Datensatz klein genug fuer den Abgleich. Aeltere fallen hinten raus. */
+
+/* ═══ v402: DAS DATENTOR FUER ALLE AI-FUNKTIONEN ═══
+   Abdullahs Regel: die AI sieht einen Vorgang erst, wenn er GESPEICHERT oder
+   ABGESCHLOSSEN ist - egal ob er aus der Kasse, von der Website oder von
+   einem Lieferpartner kommt. Ein Entwurf hinterlaesst keine Spur: keine
+   Nummer, keine Kueche, keine TSE, und eben auch keine AI.
+
+   Vorher hatte jede AI-Funktion ihre eigene Vorstellung davon, was zaehlt.
+   Drei von sechs lasen completedOrders roh und rechneten Stornos mit.
+
+   WAS NICHT DURCHKOMMT:
+     _entwurf          noch nicht bestellt - existiert fuer niemanden
+     storniert         war da, zaehlt aber nicht mehr
+     Gutscheinverkauf  Mehrzweckgutschein ist erst bei Einloesung Umsatz
+                       (§ 3 Abs. 15 UStG) - sonst wuerde die AI einen
+                       verkauften 100-EUR-Gutschein fuer Kuechenumsatz halten
+
+   BEWUSST NICHT GEPRUEFT: ob eine Belegnummer da ist. Ein Eintrag in
+   completedOrders IST abgeschlossen - dort landet nur die Zahlung. Wuerde
+   das Tor zusaetzlich eine Nummer verlangen, waere es strenger als der
+   Tagesbericht (belksUmsatzBuchungen) und ein Altbeleg ohne Nummer wuerde
+   der AI einen anderen Umsatz zeigen als dem Chef. Genau der Fehler, den
+   dieses Tor verhindern soll.
+
+   WICHTIG fuer alle, die spaeter etwas anschliessen: keine AI-Funktion darf
+   completedOrders direkt lesen. Immer durch dieses Tor. */
+
+/* ═══ v403: DER GEMEINSAME KOPF ALLER AI-FUNKTIONEN ═══
+   Jede AI-Funktion beginnt ihren Auftrag mit diesem Block. Er beantwortet
+   drei Fragen, die vorher jede fuer sich (und teils falsch) beantwortet hat:
+     1. In welchem Haus arbeite ich?     - aus den Firmendaten, nie aus dem Code
+     2. Wie laeuft der Betrieb gerade?   - aus belksBetriebszahlen()
+     3. Worauf soll ich achten?          - aus belksAuffaelligkeiten()
+
+   Vorher: sechs Angestellte, die sich nie unterhalten haben. Zwei wussten
+   nicht einmal, in welchem Haus sie arbeiten ("eatDeSi Restaurant" stand
+   fest im Code) - in einer verkauften Tochter-App haetten sie fremde Gaeste
+   mit dem falschen Namen begruesst.
+
+   Die Daten holt die Funktion selbst aus dem Speicher, wenn ihr nichts
+   uebergeben wird. Grund: die sechs AI-Ansichten bekommen voellig
+   verschiedene Eigenschaften mit; muesste jede erst umgebaut werden, waere
+   die Aenderung sechsmal so gross und sechsmal so fehleranfaellig.
+
+   aufgabe = kurzer Satz, was diese eine Funktion tut. Er entscheidet, welche
+   Hebel betont werden - eine Telefonistin braucht andere als der Einkauf. */
+
+/* ═══ v404: RESERVIERUNGEN, LAGER UND BESETZUNG ═══
+   Drei Quellen, die der Betriebsleiter bisher nicht kannte. Bewusst eine
+   eigene Funktion und nicht in belksBetriebszahlen hineingeschrieben: die
+   dortigen Zahlen kommen alle aus den Belegen, diese hier nicht. Wer spaeter
+   sucht, warum eine Zahl anders ist, soll die Quelle sofort finden.
+
+   z = die Belegzahlen aus belksBetriebszahlen(), fuer den Abgleich
+       (Lagerreichweite braucht den Verbrauch, Besetzung den Umsatz). */
+window.belksBetriebUmfeld = function(reservations, inventory, staff, z, stichtag){
+  var heute = stichtag ? new Date(stichtag) : new Date();
+  var tagStr = function(d){ try{ return new Date(d).toLocaleDateString('de-DE'); }catch(e){ return ''; } };
+  var raus = { reservierungen: null, lager: null, besetzung: null };
+
+  /* ── RESERVIERUNGEN: wie voll wird es? ──
+     Die naechsten sieben Tage einzeln, damit ein leerer Samstag auffaellt.
+     Das Datum steht als ISO-Text im Datensatz (selDate aus dem Kalender). */
+  try {
+    var res = reservations || [];
+    var tage = [];
+    for (var i = 0; i <= 6; i++){
+      var d = new Date(heute.getTime() + i * 86400000);
+      var iso = d.toISOString().slice(0,10);
+      var drauf = res.filter(function(r){
+        return String(r && r.date || '').slice(0,10) === iso;
+      });
+      var gaeste = drauf.reduce(function(s,r){ return s + (Number(r.persons)||0); }, 0);
+      tage.push({
+        datum: tagStr(d), iso: iso,
+        wochentag: d.toLocaleDateString('de-DE',{weekday:'short'}),
+        anzahl: drauf.length, gaeste: gaeste,
+        /* Fruehester und spaetester Zeitpunkt - sagt der Kueche mehr als
+           eine blosse Zahl. */
+        von: drauf.map(function(r){ return r.time||''; }).sort()[0] || '',
+        bis: drauf.map(function(r){ return r.time||''; }).sort().slice(-1)[0] || ''
+      });
+    }
+    raus.reservierungen = {
+      tage: tage,
+      morgen: tage[1] || null,
+      gaesteWoche: tage.reduce(function(s,t){ return s + t.gaeste; }, 0)
+    };
+  } catch(e){}
+
+  /* ── LAGER ──
+     Kapitalbindung = was im Regal an Geld steht.
+     Ladenhueter    = Ware, deren verknuepfte Gerichte in 7 Tagen NICHT
+                      verkauft wurden. Das ist der ehrliche Ersatz fuer
+                      "Verderb": ein Abschrieb-Feld gibt es nicht. */
+  try {
+    var inv = inventory || [];
+    var wert = 0, knapp = [], tot = [];
+    var verkauft = {};
+    if (z && z.topArtikel) z.topArtikel.forEach(function(a){ verkauft[a.name] = a.anzahl; });
+    if (z && z.schwachArtikel) z.schwachArtikel.forEach(function(a){ verkauft[a.name] = a.anzahl; });
+
+    inv.forEach(function(i){
+      var menge = Number(i.stock) || 0;
+      var preis = Number(i.costPerUnit) || 0;
+      wert += menge * preis;
+      if (Number(i.minStock) > 0 && menge <= Number(i.minStock))
+        knapp.push({ name: i.name, bestand: menge, minimum: Number(i.minStock), einheit: i.unit || '' });
+      /* Nur Ware mit Verknuepfung zur Karte kann beurteilt werden. Ohne
+         menuLinks weiss die Kasse nicht, wofuer sie gebraucht wird. */
+      var links = i.menuLinks || [];
+      if (links.length && menge > 0){
+        var benutzt = links.some(function(g){ return (verkauft[g] || 0) > 0; });
+        if (!benutzt) tot.push({ name: i.name, bestand: menge, einheit: i.unit || '',
+                                 wert: Math.round(menge * preis * 100) / 100,
+                                 gerichte: links.slice(0,3) });
+      }
+    });
+    raus.lager = {
+      posten: inv.length,
+      wert: Math.round(wert * 100) / 100,
+      knapp: knapp,
+      liegenGeblieben: tot.sort(function(a,b){ return b.wert - a.wert; }).slice(0,5),
+      wertLiegenGeblieben: Math.round(tot.reduce(function(s,t){ return s + t.wert; }, 0) * 100) / 100,
+      ohneVerknuepfung: inv.filter(function(i){ return !(i.menuLinks||[]).length; }).length
+    };
+  } catch(e){}
+
+  /* ── BESETZUNG ──
+     schichten enthaelt nur Wochentage ('Mo'...'So'), keine Uhrzeiten.
+     Deshalb Umsatz je WOCHENTAG gegen Koepfe an diesem Tag - nicht je
+     Stunde. Lieber eine ehrliche Zahl als eine erfundene. */
+  try {
+    var mann = staff || [];
+    if (mann.length){
+      var kuerzel = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+      var koepfe = {};
+      kuerzel.forEach(function(k){ koepfe[k] = 0; });
+      mann.forEach(function(p){
+        (p.schichten || []).forEach(function(d){ if (koepfe[d] !== undefined) koepfe[d]++; });
+      });
+      /* Umsatz je Wochentag aus den Tagen der letzten Woche */
+      var proTag = {};
+      if (z && z.woche && z.woche.tage){
+        z.woche.tage.forEach(function(t){
+          try {
+            var teile = String(t.tag).split('.');
+            var d = new Date(Number(teile[2]), Number(teile[1]) - 1, Number(teile[0]));
+            var k = kuerzel[d.getDay()];
+            proTag[k] = Math.round(((proTag[k] || 0) + t.umsatz) * 100) / 100;
+          } catch(e){}
+        });
+      }
+      var zeilen = kuerzel.filter(function(k){ return koepfe[k] > 0 || proTag[k]; })
+        .map(function(k){
+          return { tag: k, koepfe: koepfe[k], umsatz: proTag[k] || 0,
+                   proKopf: koepfe[k] > 0 ? Math.round((proTag[k]||0) / koepfe[k] * 100) / 100 : null };
+        });
+      raus.besetzung = {
+        mitarbeiter: mann.length,
+        rollen: mann.reduce(function(o,p){ var r = p.rolle||'?'; o[r]=(o[r]||0)+1; return o; }, {}),
+        tage: zeilen,
+        /* Der teuerste Tag: viele Leute, wenig Umsatz. */
+        /* Nur Tage MIT Umsatz vergleichen. Ein Tag mit 0,00 EUR ist entweder
+           Ruhetag oder es liegt kein Beleg vor - ihn als "schwaechsten Tag"
+           zu melden hiesse, eine Umbesetzung fuer einen Tag vorzuschlagen,
+           an dem gar nicht gearbeitet wird. (Gefunden von test_v404 Nr. 19:
+           gemeldet wurde Montag, 1 Kopf, 0,00 EUR.) */
+        schwaechster: zeilen.filter(function(x){ return x.koepfe > 0 && x.umsatz > 0; })
+          .sort(function(a,b){ return a.proKopf - b.proKopf; })[0] || null,
+        ohneUhrzeiten: true    // damit niemand spaeter "Umsatz je Stunde" erwartet
+      };
+    }
+  } catch(e){}
+
+  return raus;
+};
+
+/* Als Text fuer die AI - dieselbe Quelle wie die Anzeige. */
+window.belksUmfeldBriefing = function(u){
+  if (!u) return '';
+  var eur = function(n){ return (Number(n)||0).toFixed(2) + ' EUR'; };
+  var t = [];
+  /* Nur schreiben, was es gibt. Vorher stand bei leeren Daten "0 Tische /
+     0 Gaeste" im Auftrag - die AI haette daraus einen leeren Laden gelesen,
+     obwohl schlicht nichts eingetragen ist. (test_v404 Nr. 29) */
+  if (u.reservierungen && u.reservierungen.gaesteWoche > 0){
+    var m = u.reservierungen.morgen;
+    t.push('RESERVIERUNGEN: morgen ' + (m ? m.anzahl + ' Tische / ' + m.gaeste + ' Gaeste'
+      + (m.von ? ' (' + m.von + ' bis ' + m.bis + ')' : '') : 'keine')
+      + '; naechste 7 Tage zusammen ' + u.reservierungen.gaesteWoche + ' Gaeste');
+    var voll = u.reservierungen.tage.filter(function(x){ return x.gaeste > 0; });
+    if (voll.length) t.push('  im Einzelnen: ' + voll.map(function(x){
+      return x.wochentag + ' ' + x.gaeste; }).join(', '));
+  }
+  if (u.lager && u.lager.posten > 0){
+    t.push('LAGER: ' + u.lager.posten + ' Posten, gebundenes Kapital ' + eur(u.lager.wert)
+      + (u.lager.knapp.length ? '; knapp: ' + u.lager.knapp.map(function(k){
+          return k.name + ' ' + k.bestand + ' ' + k.einheit; }).join(', ') : '; nichts knapp'));
+    if (u.lager.liegenGeblieben.length)
+      t.push('  liegt und wird nicht verkauft: ' + u.lager.liegenGeblieben.map(function(x){
+        return x.name + ' (' + eur(x.wert) + ')'; }).join(', ')
+        + ' \u2013 zusammen ' + eur(u.lager.wertLiegenGeblieben));
+  }
+  if (u.besetzung){
+    t.push('BESETZUNG: ' + u.besetzung.mitarbeiter + ' Mitarbeiter ('
+      + Object.keys(u.besetzung.rollen).map(function(r){
+          return r + ' ' + u.besetzung.rollen[r]; }).join(', ') + ')');
+    if (u.besetzung.tage.length)
+      t.push('  Umsatz je Wochentag und Kopf: ' + u.besetzung.tage.map(function(x){
+        return x.tag + ' ' + x.koepfe + ' Leute / ' + eur(x.umsatz); }).join(' \u00b7 '));
+    t.push('  WICHTIG: Der Schichtplan kennt nur Wochentage, KEINE Uhrzeiten. '
+      + 'Aussagen ueber einzelne Stunden sind damit nicht belegbar - mach keine.');
+  }
+  return t.join('\n');
+};
+
+window.belksBetriebsWissen = function(aufgabe, orders, expenses){
+  try {
+    var f = (typeof window.belksFirmaLesen === 'function' ? window.belksFirmaLesen() : {}) || {};
+    var haus = f.firmaName || f.name
+      || ((typeof tenantDisplayName === 'function') ? tenantDisplayName() : 'unser Restaurant');
+    var ort = f.firmaPlzOrt || f.city || '';
+
+    if (!orders)   { try { orders   = JSON.parse(localStorage.getItem('eatdesi_orders')   || '[]'); } catch(e){ orders = []; } }
+    if (!expenses) { try { expenses = JSON.parse(localStorage.getItem('eatdesi_expenses') || '[]'); } catch(e){ expenses = []; } }
+
+    var z = null, vor = null, auff = [], umfeld = null;
+    try { z = window.belksBetriebszahlen(orders, expenses); } catch(e){}
+    try { vor = window.belksBetriebszahlen(orders, expenses, new Date(Date.now() - 7*86400000)); } catch(e){}
+    /* v404: Reservierungen, Lager und Besetzung. Auch diese holt die Funktion
+       selbst - aus demselben Grund wie die Belege: sonst muesste jede der
+       sechs AI-Ansichten drei weitere Eigenschaften durchreichen. */
+    try {
+      var _r = [], _i = [], _s = [];
+      try { _r = JSON.parse(localStorage.getItem('eatdesi_reservations') || '[]'); } catch(e){}
+      try { _i = JSON.parse(localStorage.getItem('eatdesi_inventory')    || '[]'); } catch(e){}
+      try { _s = JSON.parse(localStorage.getItem('eatdesi_staff')        || '[]'); } catch(e){}
+      umfeld = window.belksBetriebUmfeld(_r, _i, _s, z);
+    } catch(e){}
+    try { auff = window.belksAuffaelligkeiten(z, vor, umfeld) || []; } catch(e){}
+
+    var t = [];
+    t.push('=== DAS HAUS ===');
+    t.push('Name: ' + haus + (ort ? ' in ' + ort : ''));
+    if (f.slogan)   t.push('Slogan: ' + f.slogan);
+    if (f.oeffnung) t.push('Oeffnungszeiten: ' + f.oeffnung);
+    if (f.firmaPhone || f.phone) t.push('Telefon: ' + (f.firmaPhone || f.phone));
+
+    t.push('');
+    t.push('=== WIE ES GERADE LAEUFT (letzte 7 Tage) ===');
+    if (z && z.woche.anzahl > 0){
+      t.push('Umsatz ' + z.woche.umsatz.toFixed(2) + ' EUR aus ' + z.woche.anzahl
+        + ' Bestellungen, Durchschnittsbon ' + z.woche.schnittbon.toFixed(2) + ' EUR');
+      if (vor && vor.woche.umsatz > 0){
+        var d = Math.round((z.woche.umsatz - vor.woche.umsatz) / vor.woche.umsatz * 1000) / 10;
+        t.push('Vorwoche ' + vor.woche.umsatz.toFixed(2) + ' EUR \u2013 ' + (d > 0 ? '+' : '') + d + ' %');
+      }
+      if (z.getraenkeAnteil !== null) t.push('Getraenkeanteil ' + z.getraenkeAnteil + ' %');
+      if (z.topArtikel.length)
+        t.push('Laeuft gut: ' + z.topArtikel.slice(0,5).map(function(a){
+          return a.name + ' (' + a.anzahl + 'x)'; }).join(', '));
+      if (z.schwachArtikel.length)
+        t.push('Laeuft schlecht: ' + z.schwachArtikel.map(function(a){
+          return a.name + ' (' + a.anzahl + 'x)'; }).join(', '));
+      if (z.topStunden.length)
+        t.push('Staerkste Stunde: ' + z.topStunden[0].stunde + ':00 Uhr');
+    } else {
+      t.push('Noch keine abgeschlossenen Buchungen in den letzten 7 Tagen.');
+    }
+
+    if (umfeld){
+      var uTxt = '';
+      try { uTxt = window.belksUmfeldBriefing(umfeld) || ''; } catch(e){}
+      if (uTxt){
+        t.push('');
+        t.push('=== RESERVIERUNGEN, LAGER UND BESETZUNG ===');
+        t.push(uTxt);
+      }
+    }
+
+    t.push('');
+    t.push('=== WAS DER BETRIEBSLEITER GERADE SIEHT ===');
+    t.push(auff.length
+      ? (typeof window.belksAuffaelligkeitenText === 'function'
+          ? window.belksAuffaelligkeitenText(auff) : '')
+      : 'Keine Auffaelligkeiten.');
+
+    t.push('');
+    t.push('=== DAS GEMEINSAME ZIEL ===');
+    t.push('Alle Funktionen dieses Hauses arbeiten auf EIN Ziel hin: gesundes '
+      + 'Wachstum. Nicht Umsatz um jeden Preis, sondern Rohertrag, Stammkunden '
+      + 'und Auslastung ausserhalb der Stosszeit.');
+    /* Nur rot und gelb werden zu Auftraegen - "laeuft gut" braucht keine
+       Massnahme, sonst repariert die AI Funktionierendes. */
+    var hebel = auff.filter(function(a){ return a.stufe === 'rot' || a.stufe === 'gelb'; });
+    if (hebel.length){
+      t.push('Konkret gerade wichtig:');
+      hebel.slice(0,4).forEach(function(a){ t.push('  \u2022 ' + a.titel); });
+      t.push('Wenn deine Aufgabe dazu beitragen kann, tu es - aber nur, wenn es '
+        + 'zur Aufgabe passt. Erzwinge nichts.');
+    }
+
+    if (aufgabe){
+      t.push('');
+      t.push('=== DEINE AUFGABE ===');
+      t.push(aufgabe);
+    }
+
+    t.push('');
+    t.push('=== WAS DU NICHT WEISST ===');
+    /* Dieselbe Regel wie beim Betriebsleiter (v399). Ohne sie erfindet die AI
+       Ursachen - im Bericht vom 25.08. waren es Wetter und Feiertage. */
+    t.push('Wetter, Feiertage, Jahreszeit, Konkurrenz und Personalstand sind dir '
+      + 'NICHT bekannt. Erwaehne sie nicht, auch nicht als Vermutung. Zahlen, die '
+      + 'oben nicht stehen, hast du nicht - sage dann, welche fehlt.');
+    t.push('Entwuerfe und stornierte Vorgaenge sind in den Zahlen NICHT enthalten. '
+      + 'Beruecksichtigt sind nur gespeicherte und abgeschlossene Bestellungen aus '
+      + 'Kasse, Website und Lieferpartnern.');
+
+    return t.join('\n');
+  } catch(e){
+    try { console.warn('Betriebswissen:', e); } catch(x){}
+    /* Faellt hier etwas aus, bekommt die AI wenigstens die Aufgabe - lieber
+       eine Antwort ohne Zahlen als ein Weissbildschirm. */
+    return aufgabe ? ('=== DEINE AUFGABE ===\n' + aufgabe) : '';
+  }
+};
+
+/* ═══ v403: DER VERKAUFSHINWEIS FUER DIE KELLNERIN ═══
+   Kurzform des Betriebswissens. Priya braucht keine Umsatzzahlen - sie
+   braucht zwei Saetze: was soll ich heute anbieten, und warum. Ihr Auftrag
+   ist ohnehin sehr lang und sie muss am Telefon SCHNELL antworten; der ganze
+   Block waere hier falsch.
+   Quelle sind dieselben Auffaelligkeiten wie beim Betriebsleiter - wuerde
+   hier eigenstaendig gerechnet, wuerden Kellnerin und Chef verschiedene
+   Dinge fuer wichtig halten. */
+window.belksVerkaufsHinweis = function(){
+  try {
+    var orders = [], expenses = [];
+    try { orders   = JSON.parse(localStorage.getItem('eatdesi_orders')   || '[]'); } catch(e){}
+    try { expenses = JSON.parse(localStorage.getItem('eatdesi_expenses') || '[]'); } catch(e){}
+    var z    = window.belksBetriebszahlen(orders, expenses);
+    var vor  = window.belksBetriebszahlen(orders, expenses, new Date(Date.now() - 7*86400000));
+    var auff = window.belksAuffaelligkeiten(z, vor) || [];
+    var S    = window.BELKS_BL_SCHWELLEN;
+
+    var tipps = [];
+
+    /* v404: Wie voll ist morgen? Priya NIMMT Reservierungen an - sie muss
+       wissen, was schon steht, bevor sie zusagt. Bisher sagte sie blind zu. */
+    try {
+      var _r = [], _i = [], _s = [];
+      try { _r = JSON.parse(localStorage.getItem('eatdesi_reservations') || '[]'); } catch(e){}
+      try { _i = JSON.parse(localStorage.getItem('eatdesi_inventory')    || '[]'); } catch(e){}
+      try { _s = JSON.parse(localStorage.getItem('eatdesi_staff')        || '[]'); } catch(e){}
+      var u = window.belksBetriebUmfeld(_r, _i, _s, z);
+      if (u && u.reservierungen){
+        var voll = u.reservierungen.tage.filter(function(t){ return t.gaeste > 0; });
+        if (voll.length)
+          tipps.push('Bereits reserviert: ' + voll.map(function(t){
+            return t.wochentag + ' ' + t.gaeste + ' Gaeste'
+              + (t.von ? ' (ab ' + t.von + ')' : ''); }).join(', ')
+            + '. Bei einer neuen Reservierung an einem dieser Tage sage NICHT '
+            + 'einfach zu - sage, dass du es notierst und ein Kollege bestaetigt.');
+      }
+      /* Knappe Ware: nichts anbieten, was nicht mehr da ist. */
+      if (u && u.lager && u.lager.knapp.length)
+        tipps.push('Knapp im Lager: ' + u.lager.knapp.slice(0,4).map(function(k){
+          return k.name; }).join(', ')
+          + '. Empfiehl Gerichte damit NICHT aktiv. Fragt der Gast danach, nimm '
+          + 'die Bestellung normal auf - nur nicht von dir aus vorschlagen.');
+    } catch(e){}
+
+    /* Getraenke: der groesste Hebel am Tisch. Wer sie nicht anbietet,
+       verschenkt die Spanne - und der Gast vermisst nichts. */
+    if (z && z.getraenkeAnteil !== null && z.getraenkeAnteil < S.getraenkeWarn)
+      tipps.push('Biete zu JEDER Bestellung aktiv ein Getraenk an (Getraenkeanteil aktuell nur '
+        + z.getraenkeAnteil + ' %). Frage nach einem konkreten Getraenk aus der Karte, nicht allgemein.');
+    /* Schwache Artikel empfehlen statt der Renner - die laufen von allein. */
+    if (z && z.schwachArtikel && z.schwachArtikel.length){
+      var schwach = z.schwachArtikel.filter(function(a){ return a.anzahl > 0; }).slice(0,3);
+      if (schwach.length)
+        tipps.push('Wenn der Gast unschluessig ist, empfiehl bevorzugt: '
+          + schwach.map(function(a){ return a.name; }).join(', ')
+          + '. Diese laufen gerade schwach und sollen bekannter werden.');
+    }
+    /* Ohne Nummer kein Stammkunde, kein Treuepunkt, keine Werbung. */
+    if (z && z.woche.anzahl >= 5 && z.kundenAnteil < S.kundenWarn)
+      tipps.push('Frage bei Abholung und Lieferung freundlich nach der Telefonnummer '
+        + '(nur bei ' + z.kundenAnteil + ' % der Bestellungen hinterlegt) - fuer Rueckfragen '
+        + 'und Treuepunkte. Wenn der Gast nicht moechte, hake NICHT nach.');
+
+    if (!tipps.length) return '';
+    return '\n\nWAS DEM HAUS GERADE HILFT (vom Betriebsleiter):\n'
+      + tipps.map(function(t){ return '- ' + t; }).join('\n')
+      + '\nDas sind Hinweise, keine Pflicht. Ein Gast, der es eilig hat, wird nicht bedraengt.';
+  } catch(e){ return ''; }
+};
+
+window.belksAbgeschlosseneBuchungen = function(orders){
+  return (orders || []).filter(function(o){
+    if (!o) return false;
+    if (o._entwurf) return false;
+    if (o.storniert) return false;
+    if (typeof belksIstGutscheinVerkauf === 'function' && belksIstGutscheinVerkauf(o)) return false;
+    return true;
+  });
+};
+
+/* Woher kam die Bestellung? Die AI soll Kanaele unterscheiden koennen -
+   ein Partnerauftrag ist etwas anderes als ein Tisch. */
+window.belksKanalVon = function(o){
+  if (!o) return 'unbekannt';
+  if (o.kanal) return o.kanal;                       // Lieferando/UberEats setzen das
+  if (o.quelle === 'webshop' || o.webshop) return 'webshop';
+  if (o.tableId) return 'tisch';
+  if (o.customerStreet) return 'lieferung';
+  return 'abholung';
+};
+
+window.BELKS_BL_JOURNAL = 'eatdesi_bl_journal';
+window.belksBlJournalLesen = function(){
+  try {
+    var j = JSON.parse(localStorage.getItem(window.BELKS_BL_JOURNAL) || '[]');
+    return Array.isArray(j) ? j : [];
+  } catch(e){ return []; }
+};
+window.belksBlJournalSchreiben = function(eintrag){
+  try {
+    var j = window.belksBlJournalLesen();
+    /* Pro Tag nur ein Bericht. Wer dreimal auf den Knopf drueckt, soll nicht
+       dreimal denselben Tag im Gedaechtnis haben - der letzte gilt. */
+    j = j.filter(function(e){ return e.datum !== eintrag.datum; });
+    j.push(eintrag);
+    if (j.length > 14) j = j.slice(-14);
+    localStorage.setItem(window.BELKS_BL_JOURNAL, JSON.stringify(j));
+    return j;
+  } catch(e){ console.warn('Journal:', e); return []; }
+};
+
+window.BELKS_BL_SCHWELLEN = {
+  wareneinsatzWarn: 35, wareneinsatzGut: 30,
+  getraenkeWarn: 15,
+  stornoWarn: 5,
+  kundenWarn: 30,
+  tagAbweichung: 20,     // Prozent gegenueber dem gleichen Wochentag
+  wocheAbweichung: 15,   // Prozent gegenueber der Vorwoche
+  /* v404 */
+  lagerTotWarn: 50,      // EUR Ware, die liegt und nicht verkauft wird
+  reservierungGross: 20  // Gaeste morgen, ab denen vorbereitet werden muss
+};
+
+/* v404: dritter Wert "umfeld" - Reservierungen, Lager, Besetzung.
+   Freiwillig: wer ihn nicht uebergibt, bekommt die Regeln von v400
+   unveraendert. So mussten die bestehenden Aufrufer nicht angefasst werden. */
+window.belksAuffaelligkeiten = function(z, vor, umfeld){
+  var S = window.BELKS_BL_SCHWELLEN;
+  var raus = [];
+  if (!z) return raus;
+  var eur = function(n){ return (Number(n)||0).toFixed(2).replace('.',',') + ' \u20AC'; };
+  var pro = function(n){ return (Number(n)||0).toFixed(1).replace('.',',') + ' %'; };
+  var sag = function(stufe, titel, text){ raus.push({ stufe: stufe, titel: titel, text: text }); };
+
+  /* ── 1. Der Tag gegen den gleichen Wochentag ── */
+  if (z.abweichungProzent === null){
+    sag('grau', 'Kein Vergleichswert',
+      'Fuer denselben Wochentag der Vorwochen liegen keine Buchungen vor. '
+      + 'Erst nach ein paar Wochen laesst sich sagen, ob ein Tag gut oder schlecht war.');
+  } else if (z.abweichungProzent <= -S.tagAbweichung){
+    sag('rot', 'Heute deutlich unter dem Schnitt',
+      eur(z.heute.umsatz) + ' gegenueber ' + eur(z.vergleichSchnitt) + ' an den letzten '
+      + z.vergleich.length + ' gleichen Wochentagen \u2013 ' + pro(z.abweichungProzent) + '.');
+  } else if (z.abweichungProzent >= S.tagAbweichung){
+    sag('gut', 'Heute deutlich ueber dem Schnitt',
+      eur(z.heute.umsatz) + ' gegenueber ' + eur(z.vergleichSchnitt) + ' \u2013 +'
+      + pro(z.abweichungProzent) + '. Nachsehen, was heute anders lief.');
+  }
+
+  /* ── 2. Die Woche gegen die Vorwoche ──
+     Erst dieser Vergleich sagt, ob es steigt oder faellt. Der Tagesvergleich
+     allein zeigt nur Schwankung. */
+  if (vor && vor.woche.umsatz > 0){
+    var d = Math.round((z.woche.umsatz - vor.woche.umsatz) / vor.woche.umsatz * 1000) / 10;
+    if (d <= -S.wocheAbweichung)
+      sag('rot', 'Die Woche faellt',
+        eur(z.woche.umsatz) + ' gegenueber ' + eur(vor.woche.umsatz) + ' in der Vorwoche \u2013 '
+        + pro(d) + '.');
+    else if (d >= S.wocheAbweichung)
+      sag('gut', 'Die Woche steigt',
+        eur(z.woche.umsatz) + ' gegenueber ' + eur(vor.woche.umsatz) + ' in der Vorwoche \u2013 +'
+        + pro(d) + '.');
+
+    /* Durchschnittsbon: faellt er bei gleichem Umsatz, kommen mehr Gaeste
+       mit kleineren Rechnungen - ein anderer Betrieb, andere Massnahmen. */
+    if (vor.woche.schnittbon > 0){
+      var db = Math.round((z.woche.schnittbon - vor.woche.schnittbon) / vor.woche.schnittbon * 1000) / 10;
+      if (Math.abs(db) >= 10)
+        sag(db < 0 ? 'gelb' : 'gut', 'Durchschnittsbon ' + (db < 0 ? 'gefallen' : 'gestiegen'),
+          eur(z.woche.schnittbon) + ' gegenueber ' + eur(vor.woche.schnittbon)
+          + ' in der Vorwoche \u2013 ' + (db > 0 ? '+' : '') + pro(db) + '.');
+    }
+  }
+
+  /* ── 3. Getraenke tragen die Marge ── */
+  if (z.getraenkeAnteil !== null && z.woche.umsatz > 0){
+    if (z.getraenkeAnteil < S.getraenkeWarn)
+      sag('gelb', 'Wenig Getraenkeumsatz',
+        'Nur ' + pro(z.getraenkeAnteil) + ' des Umsatzes sind Getraenke ('
+        + eur(z.getraenke) + ' von ' + eur(z.woche.umsatz) + '). '
+        + 'Getraenke haben die hoechste Spanne \u2013 hier bleibt Geld liegen.');
+    if (vor && vor.getraenkeAnteil !== null && (z.getraenkeAnteil - vor.getraenkeAnteil) <= -5)
+      sag('gelb', 'Getraenkeanteil faellt',
+        pro(z.getraenkeAnteil) + ' gegenueber ' + pro(vor.getraenkeAnteil) + ' in der Vorwoche.');
+  }
+
+  /* ── 4. Wareneinsatz ── */
+  if (z.wareneinsatzQuote !== null){
+    if (z.wareneinsatzQuote > S.wareneinsatzWarn)
+      sag('rot', 'Wareneinsatz zu hoch',
+        pro(z.wareneinsatzQuote) + ' des Umsatzes gehen fuer Lebensmittel und Getraenke weg. '
+        + 'Ueber ' + S.wareneinsatzWarn + ' % wird es eng \u2013 Einkaufspreise, Portionen oder Verderb pruefen.');
+    else if (z.wareneinsatzQuote <= S.wareneinsatzGut && z.ausgaben > 0)
+      sag('gut', 'Wareneinsatz im Rahmen', pro(z.wareneinsatzQuote) + ' vom Umsatz.');
+  } else {
+    sag('gelb', 'Keine Ausgaben erfasst',
+      'In den letzten 7 Tagen wurde keine Ausgabe eingetragen. Ohne Wareneinsatz '
+      + 'gibt es weder Rohertrag noch Wareneinsatzquote \u2013 die beiden Zahlen, an denen '
+      + 'sich Wachstum wirklich ablesen laesst. Umsatz allein sagt nichts.');
+  }
+  if (z.rohertrag < 0)
+    sag('rot', 'Rohertrag negativ',
+      'Die erfassten Ausgaben (' + eur(z.ausgaben) + ') liegen ueber dem Umsatz ('
+      + eur(z.woche.umsatz) + '). Entweder wurde ein Grosseinkauf auf eine Woche gebucht '
+      + 'oder es laeuft etwas schief.');
+
+  /* ── 5. Stornos ── */
+  if (z.stornoQuote > S.stornoWarn)
+    sag('rot', 'Viele Stornos',
+      z.stornoAnzahl + ' Stornos in 7 Tagen, das sind ' + pro(z.stornoQuote)
+      + ' aller Buchungen. Ueber ' + S.stornoWarn + ' % lohnt der Blick ins Storno-Journal: '
+      + 'wer storniert, und warum.');
+
+  /* ── 6. Kundendaten ── */
+  if (z.woche.anzahl >= 5 && z.kundenAnteil < S.kundenWarn)
+    sag('gelb', 'Kaum Kundendaten',
+      'Nur bei ' + pro(z.kundenAnteil) + ' der Bestellungen ist eine Telefonnummer hinterlegt. '
+      + 'Ohne Nummern gibt es keine Stammkunden, kein Treueprogramm und keine Werbung, '
+      + 'die ankommt.');
+  if (z.wiederkehrer > 0)
+    sag('gut', 'Stammkunden da',
+      z.wiederkehrer + ' Kundennummer' + (z.wiederkehrer === 1 ? ' hat' : 'n haben')
+      + ' in den letzten 7 Tagen mehr als einmal bestellt.');
+
+  /* ── 7. Ein Verkaufsschlager bricht weg ──
+     Nur was in der Vorwoche unter den ersten fuenf war und jetzt gar nicht
+     mehr verkauft wurde. Alles andere ist normale Schwankung. */
+  if (vor && vor.topArtikel.length){
+    var jetzt = {};
+    z.topArtikel.forEach(function(a){ jetzt[a.name] = a.anzahl; });
+    var weg = vor.topArtikel.slice(0,5).filter(function(a){ return !jetzt[a.name]; });
+    if (weg.length)
+      sag('gelb', 'Renner nicht mehr verkauft',
+        weg.map(function(a){ return a.name + ' (Vorwoche ' + a.anzahl + '\u00d7)'; }).join(', ')
+        + ' \u2013 in dieser Woche kein einziges Mal. Ausverkauft, von der Karte, oder nicht mehr angeboten?');
+  }
+
+  /* ── 8. Stosszeit ── */
+  if (z.topStunden.length >= 1 && z.woche.umsatz > 0){
+    var anteil = Math.round(z.topStunden[0].umsatz / z.woche.umsatz * 1000) / 10;
+    if (anteil >= 40)
+      sag('gelb', 'Alles haengt an einer Stunde',
+        pro(anteil) + ' des Wochenumsatzes fallen um ' + z.topStunden[0].stunde
+        + ':00 Uhr an. Faellt diese Stunde aus, faellt der Tag aus.');
+  }
+
+  /* ═══ v404: RESERVIERUNGEN, LAGER, BESETZUNG ═══
+     Diese drei Quellen liegen nicht in den Belegen. Sie kommen als zweites
+     Argument dazu und sind freiwillig - fehlt eines, schweigt die Regel,
+     statt eine Null zu melden. */
+  if (umfeld){
+    /* ── Wie voll wird morgen? ── */
+    if (umfeld.reservierungen){
+      var m = umfeld.reservierungen.morgen;
+      if (m && m.gaeste >= S.reservierungGross)
+        sag('gut', 'Morgen wird voll',
+          m.anzahl + ' Reservierungen mit ' + m.gaeste + ' Gaesten'
+          + (m.von ? ', von ' + m.von + ' bis ' + m.bis : '')
+          + '. Ware und Besetzung darauf einstellen.');
+      else if (m && m.gaeste > 0)
+        sag('grau', 'Morgen reserviert',
+          m.anzahl + ' Tische mit ' + m.gaeste + ' Gaesten'
+          + (m.von ? ' ab ' + m.von : '') + '.');
+      /* Ein starker Wochentag ohne eine einzige Reservierung ist eine
+         Chance, keine Katastrophe - deshalb gelb und nicht rot. */
+      if (umfeld.reservierungen.gaesteWoche === 0 && z && z.woche.anzahl >= 5)
+        sag('gelb', 'Keine einzige Reservierung',
+          'Fuer die naechsten 7 Tage ist nichts vorgemerkt. Entweder wird nicht '
+          + 'reserviert, oder es wird nicht eingetragen - im zweiten Fall plant '
+          + 'die Kueche blind.');
+    }
+
+    /* ── Lager ── */
+    if (umfeld.lager){
+      if (umfeld.lager.knapp.length)
+        sag('rot', 'Ware wird knapp',
+          umfeld.lager.knapp.slice(0,5).map(function(k){
+            return k.name + ' (' + k.bestand + ' ' + k.einheit + ', Minimum ' + k.minimum + ')';
+          }).join(', ') + '.');
+      /* Der ehrliche Ersatz fuer "Verderb": ein Abschrieb-Feld gibt es
+         nicht, aber Ware, deren Gerichte nicht verkauft werden, IST der
+         Verderb von morgen. */
+      if (umfeld.lager.wertLiegenGeblieben >= S.lagerTotWarn)
+        sag('gelb', 'Ware liegt und wird nicht verkauft',
+          eur(umfeld.lager.wertLiegenGeblieben) + ' Warenwert gehoert zu Gerichten, '
+          + 'die in 7 Tagen kein einziges Mal verkauft wurden: '
+          + umfeld.lager.liegenGeblieben.map(function(x){ return x.name; }).join(', ')
+          + '. Das ist der Verderb von naechster Woche.');
+      if (umfeld.lager.posten > 0 && umfeld.lager.ohneVerknuepfung === umfeld.lager.posten)
+        sag('grau', 'Lager nicht mit der Karte verknuepft',
+          'Kein Posten ist einem Gericht zugeordnet. Ohne Verknuepfung laesst sich '
+          + 'nicht sagen, ob Ware gebraucht wird oder nur liegt.');
+    }
+
+    /* ── Besetzung ── */
+    if (umfeld.besetzung && umfeld.besetzung.schwaechster){
+      var sw = umfeld.besetzung.schwaechster;
+      var beste = umfeld.besetzung.tage.filter(function(x){ return x.proKopf !== null; })
+        .sort(function(a,b){ return b.proKopf - a.proKopf; })[0];
+      /* Erst melden, wenn der Unterschied gross genug ist, um eine
+         Umbesetzung zu rechtfertigen - sonst ist es Rauschen. */
+      if (beste && sw.proKopf >= 0 && beste.proKopf > 0 && sw.proKopf < beste.proKopf * 0.4)
+        sag('gelb', 'Besetzung passt nicht zum Umsatz',
+          sw.tag + ': ' + sw.koepfe + ' Leute fuer ' + eur(sw.umsatz) + ' ('
+          + eur(sw.proKopf) + ' je Kopf), am ' + beste.tag + ' sind es '
+          + eur(beste.proKopf) + '. Eine Kraft vom ' + sw.tag + ' auf den '
+          + beste.tag + ' waere derselbe Lohn bei mehr Umsatz.');
+    }
+  }
+
+  /* Reihenfolge: erst was weh tut, dann was auffaellt, dann was gut laeuft. */
+  var rang = { rot:0, gelb:1, grau:2, gut:3 };
+  return raus.sort(function(a,b){ return rang[a.stufe] - rang[b.stufe]; });
+};
+
+/* Dieselbe Liste als Text fuer die AI - damit Anzeige und Bericht nicht
+   auseinanderlaufen. */
+window.belksAuffaelligkeitenText = function(liste){
+  if (!liste || !liste.length) return 'Keine Auffaelligkeiten.';
+  return liste.map(function(a){
+    return '[' + a.stufe.toUpperCase() + '] ' + a.titel + ': ' + a.text;
+  }).join('\n');
+};
+
+window.belksBetriebszahlen = function(orders, expenses, stichtag){
+  var heute = stichtag ? new Date(stichtag) : new Date();
+  var tagStr = function(d){ try{ return new Date(d).toLocaleDateString('de-DE'); }catch(e){ return ''; } };
+  var heuteStr = tagStr(heute);
+  var alle = orders || [];
+  var ausg = expenses || [];
+
+  /* Umsatzrelevant = nicht storniert und kein Gutscheinverkauf.
+     Mehrzweckgutscheine sind erst bei der Einloesung Umsatz (§ 3 Abs. 15 UStG). */
+  /* v402: Frueher stand hier belksUmsatzBuchungen(). Das Tor macht dasselbe
+     und zusaetzlich die Entwurfs- und Nummernpruefung - und vor allem: es
+     ist DIESELBE Regel, die auch Marketing, Einkauf und Menue-Optimierer
+     benutzen. Vorher hatte jede Funktion ihre eigene. */
+  var echte = (typeof window.belksAbgeschlosseneBuchungen === 'function')
+    ? window.belksAbgeschlosseneBuchungen(alle)
+    /* Rueckfall in zwei Stufen. Der mittlere fehlte zunaechst - damit waere
+       ein verkaufter Gutschein als Umsatz gezaehlt worden, sobald das Tor
+       einmal nicht da ist. Ein Rueckfall darf nie schwaecher sein als der
+       Zustand, den er ersetzt. */
+    : (typeof belksUmsatzBuchungen === 'function'
+        ? belksUmsatzBuchungen(alle)
+        : alle.filter(function(o){ return !o.storniert; }));
+
+  var amTag = function(liste, d){
+    var ds = tagStr(d);
+    return liste.filter(function(o){ return tagStr(o.time) === ds; });
+  };
+  var summe = function(liste){
+    return Math.round(liste.reduce(function(s,o){ return s + (Number(o.total)||0); },0) * 100) / 100;
+  };
+
+  var heuteB = amTag(echte, heute);
+  var heuteUms = summe(heuteB);
+
+  /* ── Vergleich: derselbe Wochentag der letzten vier Wochen ──
+     "Gestern" taugt nicht: ein Montag ist kein Samstag. Verglichen wird
+     Dienstag mit Dienstag. Nur Tage, an denen ueberhaupt etwas lief,
+     zaehlen mit - sonst zieht ein Ruhetag den Schnitt nach unten. */
+  var vergleich = [];
+  for (var w = 1; w <= 4; w++){
+    var d = new Date(heute.getTime() - w * 7 * 86400000);
+    var b = amTag(echte, d);
+    if (b.length > 0) vergleich.push({ datum: tagStr(d), anzahl: b.length, umsatz: summe(b) });
+  }
+  var vglSchnitt = vergleich.length
+    ? Math.round(vergleich.reduce(function(s,v){ return s+v.umsatz; },0) / vergleich.length * 100) / 100
+    : null;
+  var abweichung = (vglSchnitt && vglSchnitt > 0)
+    ? Math.round((heuteUms - vglSchnitt) / vglSchnitt * 1000) / 10
+    : null;
+
+  /* ── Die letzten sieben Tage (inklusive heute) ── */
+  var grenze7 = new Date(heute.getTime() - 6 * 86400000); grenze7.setHours(0,0,0,0);
+  var letzte7 = echte.filter(function(o){
+    try { return new Date(o.time) >= grenze7 && new Date(o.time) <= heute; } catch(e){ return false; }
+  });
+  var tage7 = {};
+  letzte7.forEach(function(o){ var t = tagStr(o.time); tage7[t] = (tage7[t]||0) + (Number(o.total)||0); });
+  var tageListe = Object.keys(tage7).map(function(t){
+    return { tag: t, umsatz: Math.round(tage7[t]*100)/100 };
+  });
+  var bestertag = tageListe.slice().sort(function(a,b){ return b.umsatz - a.umsatz; })[0] || null;
+
+  /* ── Kanaele ──
+     Tisch = hat eine tableId. Lieferung = Kundenadresse vorhanden.
+     Sonst Abholung. Dieselbe Unterscheidung wie auf dem Bon (v296). */
+  var kanal = { tisch:{n:0,ums:0}, lieferung:{n:0,ums:0}, abholung:{n:0,ums:0} };
+  letzte7.forEach(function(o){
+    var k = o.tableId ? 'tisch' : (o.customerStreet ? 'lieferung' : 'abholung');
+    kanal[k].n++; kanal[k].ums += (Number(o.total)||0);
+  });
+  Object.keys(kanal).forEach(function(k){ kanal[k].ums = Math.round(kanal[k].ums*100)/100; });
+
+  /* ── Zahlarten ── */
+  var zahlart = {};
+  letzte7.forEach(function(o){
+    var z = o.payMethod || 'unbekannt';
+    zahlart[z] = Math.round(((zahlart[z]||0) + (Number(o.total)||0)) * 100) / 100;
+  });
+
+  /* ── Speisen gegen Getraenke ──
+     Getraenke tragen die Marge. Faellt ihr Anteil, verdient das Haus trotz
+     gleichem Umsatz weniger. Zugeordnet wird ueber istBar() - das eingestellte
+     Bon-Ziel, nicht die MwSt (siehe v377). */
+  var speisen = 0, getraenke = 0, artikel = {}, stueck = 0;
+  letzte7.forEach(function(o){
+    (o.items||[]).forEach(function(i){
+      var wert = (Number(i.finalPrice)||0) * (Number(i.qty)||0);
+      var bar = (typeof istBar === 'function') ? istBar(i) : false;
+      if (bar) getraenke += wert; else speisen += wert;
+      stueck += (Number(i.qty)||0);
+      var name = i.name || '?';
+      if (!artikel[name]) artikel[name] = { n:0, ums:0, bar:bar };
+      artikel[name].n += (Number(i.qty)||0);
+      artikel[name].ums += wert;
+    });
+  });
+  speisen = Math.round(speisen*100)/100;
+  getraenke = Math.round(getraenke*100)/100;
+  var topArtikel = Object.keys(artikel).map(function(n){
+    return { name:n, anzahl:artikel[n].n, umsatz:Math.round(artikel[n].ums*100)/100, bar:artikel[n].bar };
+  }).sort(function(a,b){ return b.umsatz - a.umsatz; });
+
+  /* ── Stosszeiten: Umsatz je angefangener Stunde ── */
+  var stunden = {};
+  letzte7.forEach(function(o){
+    try {
+      var h = new Date(o.time).getHours();
+      stunden[h] = Math.round(((stunden[h]||0) + (Number(o.total)||0)) * 100) / 100;
+    } catch(e){}
+  });
+  var topStunden = Object.keys(stunden).map(function(h){
+    return { stunde: Number(h), umsatz: stunden[h] };
+  }).sort(function(a,b){ return b.umsatz - a.umsatz; }).slice(0,3);
+
+  /* ── Stornoquote ──
+     Gemessen an ALLEN Buchungen der Woche, nicht nur den umsatzrelevanten -
+     sonst waere der Nenner um die Stornos bereinigt und die Quote zu niedrig. */
+  var alle7 = alle.filter(function(o){
+    try { return new Date(o.time) >= grenze7 && new Date(o.time) <= heute; } catch(e){ return false; }
+  });
+  var stornos = alle7.filter(function(o){ return o.storniert; });
+  var stornoQuote = alle7.length ? Math.round(stornos.length / alle7.length * 1000) / 10 : 0;
+
+  /* ── Stammkunden ──
+     Anteil der Bestellungen, bei denen eine Telefonnummer bekannt ist, und
+     wie viele dieser Nummern in der Woche mehr als einmal auftauchen. */
+  var nummern = {};
+  letzte7.forEach(function(o){
+    var t = String(o.customerPhone||'').replace(/[^0-9]/g,'');
+    if (t) nummern[t] = (nummern[t]||0) + 1;
+  });
+  var mitKunde = letzte7.filter(function(o){ return !!String(o.customerPhone||'').replace(/[^0-9]/g,''); }).length;
+  var wiederkehrer = Object.keys(nummern).filter(function(t){ return nummern[t] > 1; }).length;
+
+  /* ── Trinkgeld ── */
+  var trinkgeld = Math.round(letzte7.reduce(function(s,o){ return s + (Number(o.trinkgeld)||0); },0) * 100) / 100;
+
+  /* ── Ausgaben ── */
+  var ausg7 = ausg.filter(function(e){
+    try { return new Date(e.time) >= grenze7 && new Date(e.time) <= heute; } catch(x){ return false; }
+  });
+  var ausgSumme = Math.round(ausg7.reduce(function(s,e){ return s + (Number(e.amount)||0); },0) * 100) / 100;
+  var ausgNach = {};
+  ausg7.forEach(function(e){
+    var k = e.cat || 'Sonstiges';
+    ausgNach[k] = Math.round(((ausgNach[k]||0) + (Number(e.amount)||0)) * 100) / 100;
+  });
+  var umsatz7 = summe(letzte7);
+  var wareneinsatz = (ausgNach['Lebensmittel']||0) + (ausgNach['Getränke']||0);
+  var wareQuote = umsatz7 > 0 ? Math.round(wareneinsatz / umsatz7 * 1000) / 10 : null;
+
+  return {
+    datum: heuteStr,
+    heute: {
+      anzahl: heuteB.length,
+      umsatz: heuteUms,
+      schnittbon: heuteB.length ? Math.round(heuteUms / heuteB.length * 100) / 100 : 0
+    },
+    vergleich: vergleich,
+    vergleichSchnitt: vglSchnitt,
+    abweichungProzent: abweichung,
+    woche: {
+      umsatz: umsatz7,
+      anzahl: letzte7.length,
+      schnittbon: letzte7.length ? Math.round(umsatz7 / letzte7.length * 100) / 100 : 0,
+      tage: tageListe,
+      bestertag: bestertag,
+      artikelStueck: stueck
+    },
+    kanaele: kanal,
+    zahlarten: zahlart,
+    speisen: speisen,
+    getraenke: getraenke,
+    getraenkeAnteil: (speisen + getraenke) > 0
+      ? Math.round(getraenke / (speisen + getraenke) * 1000) / 10 : null,
+    topArtikel: topArtikel.slice(0, 8),
+    schwachArtikel: topArtikel.slice(-5).reverse(),
+    topStunden: topStunden,
+    stornoAnzahl: stornos.length,
+    stornoQuote: stornoQuote,
+    kundenAnteil: letzte7.length ? Math.round(mitKunde / letzte7.length * 1000) / 10 : 0,
+    wiederkehrer: wiederkehrer,
+    trinkgeld: trinkgeld,
+    ausgaben: ausgSumme,
+    ausgabenNach: ausgNach,
+    wareneinsatzQuote: wareQuote,
+    rohertrag: Math.round((umsatz7 - ausgSumme) * 100) / 100
+  };
+};
+
+/* Aus den Zahlen wird der Text, den die AI zu lesen bekommt. Bewusst nuechtern
+   und vollstaendig - die AI soll rechnen, nicht raten. */
+window.belksBetriebsBriefing = function(z){
+  var e = function(n){ return (Number(n)||0).toFixed(2) + ' EUR'; };
+  var t = [];
+  t.push('HEUTE (' + z.datum + '): ' + z.heute.anzahl + ' Bestellungen, ' + e(z.heute.umsatz)
+    + ', Durchschnittsbon ' + e(z.heute.schnittbon));
+  if (z.vergleichSchnitt !== null){
+    t.push('GLEICHER WOCHENTAG, letzte ' + z.vergleich.length + ' Wochen: Schnitt ' + e(z.vergleichSchnitt)
+      + ' (' + z.vergleich.map(function(v){ return v.datum + ' ' + e(v.umsatz); }).join(', ') + ')');
+    if (z.abweichungProzent !== null)
+      t.push('ABWEICHUNG heute gegenueber diesem Schnitt: ' + (z.abweichungProzent > 0 ? '+' : '') + z.abweichungProzent + ' %');
+  } else {
+    t.push('VERGLEICH: keine Daten fuer denselben Wochentag der Vorwochen vorhanden.');
+  }
+  t.push('LETZTE 7 TAGE: ' + e(z.woche.umsatz) + ' aus ' + z.woche.anzahl + ' Bestellungen, Durchschnittsbon '
+    + e(z.woche.schnittbon) + ', ' + z.woche.artikelStueck + ' verkaufte Artikel');
+  if (z.woche.bestertag) t.push('BESTER TAG der Woche: ' + z.woche.bestertag.tag + ' mit ' + e(z.woche.bestertag.umsatz));
+  t.push('KANAELE (7 Tage): Tisch ' + z.kanaele.tisch.n + ' / ' + e(z.kanaele.tisch.ums)
+    + ' · Abholung ' + z.kanaele.abholung.n + ' / ' + e(z.kanaele.abholung.ums)
+    + ' · Lieferung ' + z.kanaele.lieferung.n + ' / ' + e(z.kanaele.lieferung.ums));
+  var za = Object.keys(z.zahlarten);
+  if (za.length) t.push('ZAHLARTEN (7 Tage): ' + za.map(function(k){ return k + ' ' + e(z.zahlarten[k]); }).join(' · '));
+  t.push('SPEISEN ' + e(z.speisen) + ' gegen GETRAENKE ' + e(z.getraenke)
+    + (z.getraenkeAnteil !== null ? ' (Getraenkeanteil ' + z.getraenkeAnteil + ' %)' : ''));
+  if (z.topArtikel.length)
+    t.push('TOP-ARTIKEL (7 Tage): ' + z.topArtikel.map(function(a){
+      return a.name + ' ' + a.anzahl + 'x / ' + e(a.umsatz); }).join(' · '));
+  if (z.schwachArtikel.length)
+    t.push('SCHWAECHSTE ARTIKEL (7 Tage): ' + z.schwachArtikel.map(function(a){
+      return a.name + ' ' + a.anzahl + 'x'; }).join(' · '));
+  if (z.topStunden.length)
+    t.push('STAERKSTE STUNDEN (7 Tage): ' + z.topStunden.map(function(h){
+      return h.stunde + ':00 Uhr ' + e(h.umsatz); }).join(' · '));
+  t.push('STORNOS (7 Tage): ' + z.stornoAnzahl + ' Stueck, Quote ' + z.stornoQuote + ' %');
+  t.push('KUNDENDATEN: bei ' + z.kundenAnteil + ' % der Bestellungen ist eine Telefonnummer hinterlegt, '
+    + z.wiederkehrer + ' Nummern haben in den 7 Tagen mehr als einmal bestellt');
+  t.push('TRINKGELD (7 Tage): ' + e(z.trinkgeld));
+  t.push('AUSGABEN (7 Tage): ' + e(z.ausgaben)
+    + (Object.keys(z.ausgabenNach).length ? ' (' + Object.keys(z.ausgabenNach).map(function(k){
+        return k + ' ' + e(z.ausgabenNach[k]); }).join(', ') + ')' : '')
+    + (z.wareneinsatzQuote !== null ? ' · Wareneinsatzquote ' + z.wareneinsatzQuote + ' %' : ''));
+  t.push('ROHERTRAG (7 Tage, Umsatz minus erfasste Ausgaben): ' + e(z.rohertrag));
+  return t.join('\n');
+};
+
+function AiBetriebsleiterView({ completedOrders, expenses, customers }) {
   var R = React;
   var [report, setReport] = R.useState(null);
   var [loading, setLoading] = R.useState(false);
   var [error, setError] = R.useState(null);
+  /* v401: Gedaechtnis und Rueckfrage */
+  var [journal, setJournal] = R.useState(function(){
+    try { return window.belksBlJournalLesen(); } catch(e){ return []; }
+  });
+  var [frage, setFrage] = R.useState('');
+  var [antwort, setAntwort] = R.useState(null);
+  var [fragtGerade, setFragtGerade] = R.useState(false);
 
   var orders = completedOrders || [];
   var today = new Date().toLocaleDateString('de-DE');
-  var todayOrders = belksUmsatzBuchungen(orders).filter(function(o) {   // v327
-    try { return new Date(o.time).toLocaleDateString('de-DE') === today; } catch(e) { return false; }
-  });
-  var todayTotal = todayOrders.reduce(function(s,o){return s+(o.total||0);},0);
+
+  /* v399: Die Zahlen kommen aus belksBetriebszahlen() - dieselbe Quelle,
+     aus der auch die Kacheln unten gespeist werden. */
+  var z = R.useMemo(function(){
+    try { return window.belksBetriebszahlen(orders, expenses || []); }
+    catch(e){ console.warn('Betriebszahlen:', e); return null; }
+  }, [orders, expenses]);
+
+  /* v400: Dieselbe Rechnung, sieben Tage frueher stehengeblieben. Erst der
+     Vergleich mit der Vorwoche sagt, ob etwas steigt oder faellt - "letzte
+     7 Tage" allein ist eine Zahl ohne Richtung. */
+  var vor = R.useMemo(function(){
+    try {
+      return window.belksBetriebszahlen(orders, expenses || [],
+        new Date(Date.now() - 7 * 86400000));
+    } catch(e){ return null; }
+  }, [orders, expenses]);
+
+  /* v404: Reservierungen, Lager und Besetzung. Kommen nicht als Eigenschaft,
+     sondern aus dem Speicher - die Ansicht bekommt sie sonst nicht, ohne dass
+     App() vier weitere Werte durchreicht. */
+  var umfeld = R.useMemo(function(){
+    try {
+      var _r = [], _i = [], _s = [];
+      try { _r = JSON.parse(localStorage.getItem('eatdesi_reservations') || '[]'); } catch(e){}
+      try { _i = JSON.parse(localStorage.getItem('eatdesi_inventory')    || '[]'); } catch(e){}
+      try { _s = JSON.parse(localStorage.getItem('eatdesi_staff')        || '[]'); } catch(e){}
+      return window.belksBetriebUmfeld(_r, _i, _s, z);
+    } catch(e){ console.warn('Umfeld:', e); return null; }
+  }, [z]);
+
+  var auff = R.useMemo(function(){
+    try { return window.belksAuffaelligkeiten(z, vor, umfeld); }
+    catch(e){ console.warn('Auffaelligkeiten:', e); return []; }
+  }, [z, vor, umfeld]);
 
   var genReport = function() {
     setLoading(true);
     setError(null);
     setReport(null);
 
-    var prompt = 'Du bist Betriebsleiter von eatDeSi Restaurant Bad Wildungen. '
-      + 'Heute ' + today + ' hatten wir ' + todayOrders.length + ' Bestellungen '
-      + 'mit einem Umsatz von ' + todayTotal.toFixed(2) + ' EUR. '
-      + 'Bitte erstelle einen kurzen Tagesbericht auf Deutsch (max 200 Woerter).';
+    /* Der Name kommt aus den Firmendaten, nicht aus dem Code. Vorher stand
+       hier fest "eatDeSi Restaurant Bad Wildungen" - deshalb schrieb der
+       Bericht fuer die Kleine Kneipe den falschen Namen in die Ueberschrift. */
+    var f = (typeof window.belksFirmaLesen === 'function' ? window.belksFirmaLesen() : {}) || {};
+    var haus = f.firmaName || f.name
+      || ((typeof tenantDisplayName === 'function') ? tenantDisplayName() : 'unser Restaurant');
+    var ort = f.firmaPlzOrt || f.city || '';
 
-    window.callAI(prompt, 500).then(function(text) {
-      setReport(text || 'Kein Bericht verfuegbar.');
+    var briefing = z ? window.belksBetriebsBriefing(z) : 'Keine Zahlen verfuegbar.';
+    /* v400: Die Kasse hat die Auffaelligkeiten schon gefunden. Die AI bekommt
+       sie mit, statt sie noch einmal selbst zu suchen - sonst stuende in der
+       Anzeige etwas anderes als im Bericht. */
+    if (vor) briefing += '\n\nVORWOCHE zum Vergleich: ' + vor.woche.umsatz.toFixed(2)
+      + ' EUR aus ' + vor.woche.anzahl + ' Bestellungen, Durchschnittsbon '
+      + vor.woche.schnittbon.toFixed(2) + ' EUR'
+      + (vor.getraenkeAnteil !== null ? ', Getraenkeanteil ' + vor.getraenkeAnteil + ' %' : '');
+    /* v404: Reservierungen, Lager und Besetzung gehoeren in den Bericht -
+       "morgen kommen 40 Gaeste" aendert jede Empfehlung fuer heute. */
+    if (umfeld){
+      try {
+        var uT = window.belksUmfeldBriefing(umfeld);
+        if (uT) briefing += '\n\nRESERVIERUNGEN, LAGER UND BESETZUNG:\n' + uT;
+      } catch(e){}
+    }
+    briefing += '\n\nDIE KASSE HAT BEREITS FOLGENDES GEFUNDEN:\n'
+      + window.belksAuffaelligkeitenText(auff);
+
+    var prompt =
+      'Du bist der Betriebsleiter von "' + haus + '"' + (ort ? ' in ' + ort : '') + '.\n\n'
+      + 'HIER SIND DIE ZAHLEN AUS DER KASSE:\n' + briefing + '\n\n'
+      + 'AUFGABE: Schreibe den Tagesbericht fuer den Inhaber.\n\n'
+      + 'REGELN:\n'
+      /* Ohne diese Regel erfindet die AI Ursachen. Im Bericht vom 25.08.
+         stand "Wetter, Feiertag oder geringere Nachfrage" - die Kasse kennt
+         weder Wetter noch Kalender. */
+      + '1. Benutze AUSSCHLIESSLICH die Zahlen oben. Erfinde keine Ursachen. '
+      + 'Wetter, Feiertage, Jahreszeit und Konkurrenz sind dir NICHT bekannt - '
+      + 'erwaehne sie nicht einmal als Vermutung.\n'
+      + '2. Wenn eine Zahl fuer eine Aussage fehlt, sage das offen: '
+      + '"dazu liegen keine Daten vor".\n'
+      + '3. Kein Brief. Keine Anrede, kein "Mit freundlichen Gruessen", '
+      + 'keine Unterschrift, keine Platzhalter wie [Ihr Name].\n'
+      + '4. Aufbau mit genau diesen vier Ueberschriften:\n'
+      + '   **Lage** - zwei Saetze: wo steht der Tag gegenueber dem gleichen '
+      + 'Wochentag der Vorwochen, und was hat den Ausschlag gegeben.\n'
+      + '   **Auffaelligkeiten** - hoechstens drei Punkte. Nur was von den '
+      + 'eigenen Vorwochen abweicht. Nenne bei jedem Punkt die Zahl.\n'
+      + '   **Was ich morgen tun wuerde** - genau drei konkrete Massnahmen, '
+      + 'jede mit der Zahl begruendet, auf die sie zielt, und jede von einem '
+      + 'Wirt an EINEM Tag umsetzbar. Keine allgemeinen Ratschlaege wie '
+      + '"mehr Werbung machen".\n'
+      + '   **Woran ich das messe** - fuer jede Massnahme die Zahl, die sich '
+      + 'aendern muss, damit sie gewirkt hat.\n'
+      + '5. Hoechstens 250 Woerter. Nuechtern, direkt, keine Floskeln.\n'
+      + '6. Betraege im deutschen Format: 69,50 EUR.\n'
+      + '7. Die gefundenen Auffaelligkeiten sind bereits geprueft. Widersprich '
+      + 'ihnen nicht und rechne sie nicht neu - ordne sie ein und leite '
+      + 'Massnahmen daraus ab.';
+
+    /* v401: Der letzte Bericht kommt mit. Ohne ihn faengt der Betriebsleiter
+       jeden Tag bei null an und empfiehlt womoeglich dreimal dasselbe, ohne
+       je zu pruefen, ob es gewirkt hat. */
+    var letzter = journal.length ? journal[journal.length - 1] : null;
+    if (letzter && letzter.datum !== (z ? z.datum : '')){
+      prompt += '\n\nDEIN LETZTER BERICHT VOM ' + letzter.datum + ':\n' + letzter.text
+        + '\n\nZUSAETZLICHE AUFGABE: Beginne mit einer Ueberschrift **Nachgehalten** '
+        + '(vor "Lage"). Nimm dort die Massnahmen aus deinem letzten Bericht durch: '
+        + 'Hat sich die Zahl bewegt, an der du sie messen wolltest? Sage bei jeder '
+        + 'ausdruecklich "gewirkt", "nicht gewirkt" oder "nicht messbar" und nenne '
+        + 'die Zahl. Wiederhole keine Massnahme, die nachweislich nicht gewirkt hat - '
+        + 'schlage etwas anderes vor.';
+    }
+
+    window.callAI(prompt, 1600).then(function(text) {
+      var fertig = text || 'Kein Bericht verfuegbar.';
+      setReport(fertig);
       setLoading(false);
+      /* v401: aufheben - der Bericht von morgen soll ihn kennen */
+      if (text && z){
+        try { setJournal(window.belksBlJournalSchreiben({
+          datum: z.datum, zeit: new Date().toISOString(),
+          umsatz: z.heute.umsatz, anzahl: z.heute.anzahl, text: fertig
+        })); } catch(e){}
+      }
     }).catch(function(e) {
       setError('Verbindungsfehler: ' + e.message);
       setLoading(false);
+    });
+  };
+
+  /* ═══ v401: RUECKFRAGE ═══
+     Dieselben Zahlen, andere Frage. Die Antwort wird NICHT ins Journal
+     geschrieben - das Journal ist die Kette der Tagesberichte; Zwischen-
+     fragen wuerden sie zerreissen. */
+  var frageStellen = function(){
+    var f = String(frage || '').trim();
+    if (!f || fragtGerade) return;
+    setFragtGerade(true);
+    setAntwort(null);
+
+    var fi = (typeof window.belksFirmaLesen === 'function' ? window.belksFirmaLesen() : {}) || {};
+    var haus = fi.firmaName || fi.name
+      || ((typeof tenantDisplayName === 'function') ? tenantDisplayName() : 'unser Restaurant');
+    var briefing = z ? window.belksBetriebsBriefing(z) : 'Keine Zahlen verfuegbar.';
+
+    var p = 'Du bist der Betriebsleiter von "' + haus + '".\n\n'
+      + 'ZAHLEN AUS DER KASSE:\n' + briefing + '\n\n'
+      + (vor ? 'VORWOCHE: ' + vor.woche.umsatz.toFixed(2) + ' EUR aus '
+               + vor.woche.anzahl + ' Bestellungen.\n\n' : '')
+      + 'DER INHABER FRAGT: ' + f + '\n\n'
+      + 'REGELN:\n'
+      + '1. Antworte nur aus den Zahlen oben. Fehlt eine Zahl fuer die Antwort, '
+      + 'sage klar welche fehlt und wie man sie bekaeme.\n'
+      + '2. Erfinde nichts. Wetter, Feiertage, Konkurrenz und Personal sind dir '
+      + 'nicht bekannt.\n'
+      + '3. Hoechstens 150 Woerter. Direkt, ohne Anrede, ohne Gruss.\n'
+      + '4. Wenn die Frage eine Entscheidung verlangt, sage was DU tun wuerdest '
+      + 'und woran du den Erfolg messen wuerdest.';
+
+    window.callAI(p, 900).then(function(t){
+      setAntwort(t || 'Keine Antwort erhalten.');
+      setFragtGerade(false);
+    }).catch(function(e){
+      setAntwort('Verbindungsfehler: ' + e.message);
+      setFragtGerade(false);
     });
   };
 
@@ -30397,8 +31614,19 @@ function AiBetriebsleiterView({ completedOrders }) {
       R.createElement('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:8}},
         R.createElement('div',null,
           R.createElement('div',{style:{fontSize:12,color:'#888'}},'Heute '+today),
-          R.createElement('div',{style:{fontWeight:900,fontSize:22,color:'#C84B31'}},todayOrders.length+' Bestellungen'),
-          R.createElement('div',{style:{fontWeight:700,fontSize:16}},todayTotal.toFixed(2)+' EUR Umsatz')
+          R.createElement('div',{style:{fontWeight:900,fontSize:22,color:'#C84B31'}},(z?z.heute.anzahl:0)+' Bestellungen'),
+          R.createElement('div',{style:{fontWeight:700,fontSize:16}},(z?z.heute.umsatz.toFixed(2):'0.00')+' EUR Umsatz'),
+          /* v399: Der Vergleich mit demselben Wochentag der Vorwochen. Er
+             beantwortet die einzige Frage, die morgens wirklich zaehlt:
+             laeuft es besser oder schlechter als sonst dienstags. */
+          z && z.abweichungProzent !== null && R.createElement('div',{
+            style:{ fontSize:13, fontWeight:700, marginTop:4,
+                    color: z.abweichungProzent >= 0 ? '#2e7d32' : '#c62828' } },
+            (z.abweichungProzent > 0 ? '\u25B2 +' : '\u25BC ') + z.abweichungProzent
+            + ' % gegenueber dem gleichen Wochentag (' + z.vergleichSchnitt.toFixed(2) + ' EUR)'),
+          z && z.abweichungProzent === null && R.createElement('div',{
+            style:{ fontSize:12, color:'#999', marginTop:4 } },
+            'Kein Vergleichswert - der gleiche Wochentag der Vorwochen hat keine Daten')
         )
       ),
       R.createElement('button',{
@@ -30408,9 +31636,196 @@ function AiBetriebsleiterView({ completedOrders }) {
       },loading?'Bericht wird erstellt...':'Tagesbericht erstellen')
     ),
 
+    /* ═══ v400: WAS MIR AUFGEFALLEN IST ═══
+       Steht bewusst VOR dem Bericht und braucht keinen Knopfdruck. Ein
+       Betriebsleiter, der erst redet, wenn man ihn fragt, ist keiner. */
+    auff.length > 0 && R.createElement('div',{style:{marginBottom:12}},
+      R.createElement('div',{style:{fontWeight:800,fontSize:14,color:'#333',marginBottom:8}},
+        '\uD83D\uDC41\uFE0F Was mir aufgefallen ist'),
+      auff.map(function(a, i){
+        var farben = {
+          rot:  { rand:'#e57373', hg:'#ffebee', schrift:'#c62828', zeichen:'\u26A0\uFE0F' },
+          gelb: { rand:'#f5c542', hg:'#fff8e1', schrift:'#7a5c00', zeichen:'\uD83D\uDCA1' },
+          gut:  { rand:'#a5d6a7', hg:'#e8f5e9', schrift:'#2e7d32', zeichen:'\u2705' },
+          grau: { rand:'#ddd',    hg:'#fafafa', schrift:'#777',    zeichen:'\u2139\uFE0F' }
+        };
+        var f = farben[a.stufe] || farben.grau;
+        return R.createElement('div',{ key:'a'+i,
+          style:{ background:f.hg, border:'1px solid '+f.rand, borderLeft:'4px solid '+f.rand,
+                  borderRadius:10, padding:'10px 12px', marginBottom:8 } },
+          R.createElement('div',{ style:{ fontWeight:800, fontSize:13, color:f.schrift, marginBottom:3 } },
+            f.zeichen + ' ' + a.titel),
+          R.createElement('div',{ style:{ fontSize:12.5, color:'#555', lineHeight:1.55 } }, a.text)
+        );
+      })
+    ),
+
     error && R.createElement('div',{style:{background:'#ffebee',borderRadius:10,padding:12,marginBottom:12,color:'#c62828',fontSize:13}},error),
 
-    report && R.createElement('div',{style:{background:'#fff',borderRadius:12,padding:16,border:'1px solid #eee',lineHeight:1.7,fontSize:14,color:'#333'}},report)
+    /* v399: Der Bericht kommt jetzt formatiert an - sonst stuenden die
+       Sternchen von Gemini im Text. */
+    report && R.createElement('div',{style:{background:'#fff',borderRadius:12,padding:16,border:'1px solid #eee',lineHeight:1.7,fontSize:14,color:'#333',marginBottom:12}},
+      window.belksMarkdownZuReact(report, R)),
+
+    /* ═══ v404: DIE NAECHSTEN TAGE ═══
+       Reservierungen und Lager auf einen Blick, ohne AI. Die wichtigste Frage
+       am Morgen ist nicht "wie war gestern", sondern "was kommt heute". */
+    umfeld && umfeld.reservierungen && umfeld.reservierungen.gaesteWoche > 0 &&
+    R.createElement('div',{style:{background:'#fff',borderRadius:12,padding:14,border:'1px solid #eee',marginBottom:12}},
+      R.createElement('div',{style:{fontWeight:800,fontSize:14,color:'#333',marginBottom:10}},
+        '\uD83D\uDCC5 Die n\u00e4chsten 7 Tage'),
+      R.createElement('div',{style:{display:'flex',gap:6}},
+        umfeld.reservierungen.tage.map(function(t, i){
+          /* Farbe nach Fuellung, damit ein voller Tag sofort auffaellt. */
+          var hg = t.gaeste === 0 ? '#fafafa'
+                 : t.gaeste >= window.BELKS_BL_SCHWELLEN.reservierungGross ? '#e8f5e9' : '#fff8e1';
+          var rand = t.gaeste === 0 ? '#eee'
+                 : t.gaeste >= window.BELKS_BL_SCHWELLEN.reservierungGross ? '#a5d6a7' : '#f5c542';
+          return R.createElement('div',{ key:'rt'+i,
+            style:{ flex:1, background:hg, border:'1px solid '+rand, borderRadius:9,
+                    padding:'8px 2px', textAlign:'center' } },
+            R.createElement('div',{ style:{ fontSize:10, color:'#888' } },
+              i === 0 ? 'heute' : (i === 1 ? 'morgen' : t.wochentag)),
+            R.createElement('div',{ style:{ fontWeight:800, fontSize:16,
+              color: t.gaeste ? '#333' : '#ccc', marginTop:2 } }, t.gaeste || '\u2013'),
+            R.createElement('div',{ style:{ fontSize:9, color:'#aaa' } },
+              t.anzahl ? t.anzahl + ' T.' : '')
+          );
+        })
+      ),
+      R.createElement('div',{style:{fontSize:11,color:'#999',marginTop:8}},
+        'Gäste laut Reservierung \u00b7 T. = Tische'),
+      umfeld.lager && umfeld.lager.wert > 0 && R.createElement('div',{
+        style:{ marginTop:12, paddingTop:10, borderTop:'1px solid #f2f2f2',
+                display:'flex', justifyContent:'space-between', fontSize:13 } },
+        R.createElement('span',{ style:{ color:'#666' } }, 'Gebundenes Kapital im Lager'),
+        R.createElement('span',{ style:{ fontWeight:700 } },
+          umfeld.lager.wert.toFixed(2).replace('.',',') + ' \u20AC')
+      )
+    ),
+
+    /* ═══ v401: FRAG DEINEN BETRIEBSLEITER ═══
+       Ein Knopf und eine Antwort waren zu wenig. Ein Chef fragt nach. */
+    R.createElement('div',{style:{background:'#fff',borderRadius:12,padding:14,border:'1px solid #eee',marginBottom:12}},
+      R.createElement('div',{style:{fontWeight:800,fontSize:14,color:'#333',marginBottom:8}},
+        '\uD83D\uDCAC Frag deinen Betriebsleiter'),
+      R.createElement('div',{style:{display:'flex',gap:8}},
+        R.createElement('input',{
+          value: frage,
+          onChange: function(e){ setFrage(e.target.value); },
+          onKeyDown: function(e){ if (e.key === 'Enter') frageStellen(); },
+          placeholder: 'Warum war die Woche schw\u00e4cher?',
+          style:{ flex:1, padding:'11px 12px', borderRadius:10, border:'2px solid #ddd',
+                  fontSize:14, fontFamily:'inherit', boxSizing:'border-box', outline:'none' }
+        }),
+        R.createElement('button',{
+          onClick: frageStellen,
+          disabled: fragtGerade || !String(frage||'').trim(),
+          style:{ padding:'11px 16px', borderRadius:10, border:'none',
+                  background: (fragtGerade || !String(frage||'').trim()) ? '#ccc' : '#C84B31',
+                  color:'#fff', fontWeight:800, fontSize:14, fontFamily:'inherit',
+                  cursor: fragtGerade ? 'default' : 'pointer' }
+        }, fragtGerade ? '\u2026' : 'Fragen')
+      ),
+      /* Vorschlaege: auf dem Handy tippt niemand gern lange Saetze. */
+      R.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:6,marginTop:10}},
+        ['Was kostet mich der schwaechste Tag?',
+         'Welche Artikel soll ich von der Karte nehmen?',
+         'Wo verliere ich Marge?',
+         'Wie hole ich mehr Stammkunden?'].map(function(v,i){
+          return R.createElement('button',{ key:'v'+i,
+            onClick: function(){ setFrage(v); },
+            style:{ padding:'6px 10px', borderRadius:14, border:'1px solid #ddd',
+                    background:'#fafafa', color:'#666', fontSize:11.5,
+                    fontFamily:'inherit', cursor:'pointer' } }, v);
+        })
+      ),
+      antwort && R.createElement('div',{style:{marginTop:12,padding:12,background:'#f7f7f7',
+        borderRadius:10,fontSize:13.5,lineHeight:1.65,color:'#333'}},
+        window.belksMarkdownZuReact(antwort, R))
+    ),
+
+    /* ═══ v399: DIE ZAHLEN OHNE AI ═══
+       Bisher sah der Chef nur Anzahl und Umsatz; alles andere ging still an
+       Gemini. Ohne Schluessel oder Netz blieb die Ansicht damit leer. Die
+       Zahlen stehen jetzt hier - der AI-Bericht ist die Zugabe, nicht die
+       Voraussetzung. Quelle ist dieselbe Funktion, die auch die AI fuettert. */
+    z && R.createElement('div',{style:{background:'#fff',borderRadius:12,padding:16,border:'1px solid #eee',marginBottom:24}},
+      R.createElement('div',{style:{fontWeight:800,fontSize:14,color:'#C84B31',marginBottom:2}},'\uD83D\uDCCA Die letzten 7 Tage'),
+      R.createElement('div',{style:{fontSize:11,color:'#999',marginBottom:12}},'aus der Kasse gerechnet \u2013 ohne AI'),
+
+      (function(){
+        var eur = function(n){ return (Number(n)||0).toFixed(2).replace('.',',') + ' \u20AC'; };
+        var zeile = function(k, links, rechts, farbe){
+          return R.createElement('div',{ key:k, style:{ display:'flex', justifyContent:'space-between',
+            padding:'7px 0', borderBottom:'1px solid #f2f2f2', fontSize:13 } },
+            R.createElement('span',{ style:{ color:'#666' } }, links),
+            R.createElement('span',{ style:{ fontWeight:700, color: farbe || '#222' } }, rechts));
+        };
+        var teile = [];
+        teile.push(zeile('u','Umsatz', eur(z.woche.umsatz)));
+        teile.push(zeile('b','Bestellungen', String(z.woche.anzahl)));
+        teile.push(zeile('s','Durchschnittsbon', eur(z.woche.schnittbon)));
+        if (z.woche.bestertag) teile.push(zeile('t','Bester Tag', z.woche.bestertag.tag + ' \u00b7 ' + eur(z.woche.bestertag.umsatz)));
+        teile.push(zeile('k','Tisch \u00b7 Abholung \u00b7 Lieferung',
+          z.kanaele.tisch.n + ' \u00b7 ' + z.kanaele.abholung.n + ' \u00b7 ' + z.kanaele.lieferung.n));
+        if (z.getraenkeAnteil !== null)
+          teile.push(zeile('g','Getr\u00e4nkeanteil', z.getraenkeAnteil.toFixed(1).replace('.',',') + ' %',
+            z.getraenkeAnteil < 15 ? '#c62828' : '#2e7d32'));
+        if (z.topStunden.length)
+          teile.push(zeile('h','St\u00e4rkste Stunde', z.topStunden[0].stunde + ':00 Uhr \u00b7 ' + eur(z.topStunden[0].umsatz)));
+        teile.push(zeile('st','Stornoquote', z.stornoQuote.toFixed(1).replace('.',',') + ' %',
+          z.stornoQuote > 5 ? '#c62828' : '#666'));
+        teile.push(zeile('kd','Bestellungen mit Kundendaten', z.kundenAnteil.toFixed(0) + ' %'));
+        teile.push(zeile('w','Wiederkehrende Nummern', String(z.wiederkehrer)));
+        if (z.trinkgeld > 0) teile.push(zeile('tg','Trinkgeld', eur(z.trinkgeld)));
+        if (z.ausgaben > 0){
+          teile.push(zeile('a','Erfasste Ausgaben', eur(z.ausgaben)));
+          if (z.wareneinsatzQuote !== null)
+            teile.push(zeile('wq','Wareneinsatzquote', z.wareneinsatzQuote.toFixed(1).replace('.',',') + ' %',
+              z.wareneinsatzQuote > 35 ? '#c62828' : '#2e7d32'));
+          teile.push(zeile('r','Rohertrag', eur(z.rohertrag), z.rohertrag < 0 ? '#c62828' : '#2e7d32'));
+        }
+        return teile;
+      })(),
+
+      z.topArtikel.length > 0 && R.createElement('div',{style:{marginTop:16}},
+        R.createElement('div',{style:{fontWeight:700,fontSize:13,marginBottom:8,color:'#333'}},'\uD83C\uDFC6 Meistverkauft'),
+        z.topArtikel.slice(0,5).map(function(a,i){
+          return R.createElement('div',{ key:'ta'+i, style:{ display:'flex', justifyContent:'space-between',
+            padding:'5px 0', fontSize:13, color:'#444' } },
+            R.createElement('span',null, (i+1) + '. ' + a.name + '  ' ,
+              R.createElement('span',{style:{color:'#999'}}, a.anzahl + '\u00d7')),
+            R.createElement('span',{ style:{ fontWeight:700 } }, (a.umsatz).toFixed(2).replace('.',',') + ' \u20AC'));
+        })
+      ),
+
+      /* v400: Der Hinweis auf fehlende Ausgaben stand hier UND ist jetzt eine
+         Auffaelligkeit oben. Zwei Orte mit derselben Aussage - genau das
+         Muster, das uns diese Sitzung ueber verfolgt hat. Er bleibt oben. */
+      null
+    ),
+
+    /* ═══ v401: FRUEHERE BERICHTE ═══
+       Damit nachvollziehbar bleibt, was der Betriebsleiter wann empfohlen
+       hat - und damit man selbst nachsehen kann, ob es gewirkt hat. */
+    journal.length > 1 && R.createElement('div',{style:{background:'#fff',borderRadius:12,
+      padding:14,border:'1px solid #eee',marginBottom:24}},
+      R.createElement('div',{style:{fontWeight:800,fontSize:14,color:'#333',marginBottom:2}},
+        '\uD83D\uDCD3 Fr\u00fchere Berichte'),
+      R.createElement('div',{style:{fontSize:11,color:'#999',marginBottom:10}},
+        journal.length + ' aufgehoben \u00b7 der neue Bericht kennt den letzten'),
+      journal.slice(0, -1).reverse().slice(0, 7).map(function(e, i){
+        return R.createElement('div',{ key:'j'+i,
+          style:{ padding:'8px 0', borderTop:'1px solid #f2f2f2', display:'flex',
+                  justifyContent:'space-between', fontSize:13 } },
+          R.createElement('span',{ style:{ color:'#666' } }, e.datum),
+          R.createElement('span',{ style:{ fontWeight:700 } },
+            (Number(e.umsatz)||0).toFixed(2).replace('.',',') + ' \u20AC \u00b7 '
+            + (e.anzahl||0) + ' Best.')
+        );
+      })
+    )
   );
 }
 
@@ -30434,7 +31849,14 @@ function AiTelefonistinView() {
 
   const handleCall = async (customerText) => {
     addLog('👤 Gast: '+customerText, 'user');
-    const prompt = 'Du bist die freundliche AI Telefonistin von ' + (firma.name) + '. \nÖffnungszeiten: ' + (firma.oeffnung) + '.\nAntworte kurz auf: "' + (customerText) + '"\nAntwort auf Deutsch, maximal 2 Sätze, freundlich und professionell.';
+    /* v403: Sie kannte nur Name und Oeffnungszeiten. Jetzt weiss sie, was
+       gerade wichtig ist - meldet der Betriebsleiter wenig Getraenkeumsatz,
+       fragt sie bei der Bestellung danach. */
+    const prompt = window.belksBetriebsWissen(
+        'Du nimmst Anrufe entgegen. Antworte kurz und freundlich, hoechstens '
+      + 'zwei Saetze auf Deutsch, professionell. Wenn es zur Frage passt, weise '
+      + 'auf etwas hin, das dem Haus gerade hilft - aber draenge nicht.')
+      + '\n\nDER ANRUFER SAGT: "' + (customerText) + '"';
     try {
       const text = (await window.callAI(prompt, 200)) || 'Einen Moment bitte.';
       addLog('🤖 AI: '+text, 'ai');
@@ -30519,7 +31941,14 @@ function AiWhatsAppView({ menuData }) {
     const userMsg = input.trim(); setInput('');
     setMessages(m => [...m, {from:'user', text:userMsg}]);
     setLoading(true);
-    const prompt = 'Du bist der WhatsApp Chatbot von ' + (firma.name) + '.\nÖffnungszeiten: ' + (firma.oeffnung) + '\nSpeisekarte Auszug:\\n' + (menuStr) + '\n\nAntworte auf: "' + (userMsg) + '"\n- Kurz (max 3 Sätze)\n- WhatsApp-Stil (keine HTML)\n- Bestellungen bestätigen mit Preis\n- Bei Reservierung: Datum, Zeit, Personenzahl abfragen\n- Freundlich, mit passenden Emojis';
+    /* v403: siehe Telefonistin - derselbe Kopf, andere Aufgabe. */
+    const prompt = window.belksBetriebsWissen(
+        'Du beantwortest WhatsApp-Nachrichten von Gaesten. Kurz, freundlich, '
+      + 'mit Emojis, auf Deutsch. Empfiehl bevorzugt, was dem Haus gerade hilft '
+      + '(z.B. Getraenke bei niedrigem Getraenkeanteil oder Artikel, die schlecht '
+      + 'laufen) - aber nur, wenn es zur Nachricht passt.')
+      + '\n\nSPEISEKARTE (Auszug):\n' + (menuStr)
+      + '\n\nDIE NACHRICHT: "' + (userMsg) + '"';
     try {
       const text = (await window.callAI(prompt, 300)) || 'Einen Moment...';
       setMessages(m => [...m, {from:'bot', text:text}]);
@@ -30556,13 +31985,34 @@ function AiMarketingView({ completedOrders, menuData }) {
   const [platform, setPlatform] = React.useState('instagram');
   const firma = LS.get('eatdesi_firma', {name:((typeof tenantDisplayName==='function')?tenantDisplayName():'eatDeSi'), slogan:(LOCATION_ID==='eatdesi-bw')?'Indien trifft Trends':''});
   const itemCounts = {};
-  (completedOrders||[]).slice(-100).forEach(o => (o.items||[]).forEach(it => { itemCounts[it.name]=(itemCounts[it.name]||0)+(it.qty||1); }));
+  /* v402: Vorher wurden hier die letzten 100 Buchungen ROH gelesen. Ein
+     storniertes Gericht konnte damit zum beworbenen Bestseller werden. */
+  (window.belksAbgeschlosseneBuchungen(completedOrders)).slice(-100).forEach(o => (o.items||[]).forEach(it => { itemCounts[it.name]=(itemCounts[it.name]||0)+(it.qty||1); }));
   const top3 = Object.entries(itemCounts).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([n])=>n);
 
   const generate = async (type) => {
     setLoading(true);
     const platforms = { instagram:'Instagram', facebook:'Facebook', google:'Google Unternehmen', rabatt:'Rabattaktion' };
-    const prompt = 'Erstelle einen ' + (platforms[platform]) + ' Post für das Restaurant "' + (firma.name) + '".\nSlogan: ' + (firma.slogan||'Authentische indische Küche') + '\nBestseller: ' + (top3.join(', ')||'Butter Chicken, Dal Makhani, Biryani') + '\nTyp: ' + (type) + '\n\n' + (platform==='instagram'?'Instagram Post mit Emojis, Hashtags (10-15), Call-to-Action':'') + '\n' + (platform==='facebook'?'Facebook Post, freundlich, lokal, mit Öffnungszeiten-Hinweis':'') + '\n' + (platform==='google'?'Google Unternehmen Post, sachlich, SEO-optimiert':'') + '\n' + (platform==='rabatt'?'Rabattaktion ankündigen (z.B. 10% Dienstag-Aktion), mit Bedingungen':'') + '\n\nErstelle 3 verschiedene Versionen. Auf Deutsch.';
+    /* v403: Das Marketing bewarb bisher blind die drei meistverkauften
+       Gerichte. Das ist genau falsch herum: was ohnehin laeuft, braucht
+       keine Werbung. Jetzt kennt es die Auffaelligkeiten und kann bewerben,
+       was dem Haus wirklich fehlt - schwache Artikel, Getraenke, oder die
+       Stunden ausserhalb der Stosszeit. */
+    const prompt = window.belksBetriebsWissen(
+        'Du machst das Marketing fuer dieses Haus. Erstelle einen Post fuer '
+      + platforms[platform] + ' (Typ: ' + type + ').')
+      + '\n\nWAS DER POST ERREICHEN SOLL:\n'
+      + 'Waehle das Thema NICHT nach dem, was ohnehin am besten laeuft. '
+      + 'Bewirb das, was dem Haus gerade weiterhilft: schwach laufende Gerichte, '
+      + 'Getraenke bei niedrigem Getraenkeanteil, oder Zeiten ausserhalb der '
+      + 'staerksten Stunde. Begruende in EINEM Satz vorab, warum du dieses '
+      + 'Thema gewaehlt hast, und nenne die Zahl dazu.\n\n'
+      + 'FORMAT:\n'
+      + (platform==='instagram'?'Instagram-Post mit Emojis, 10-15 Hashtags, Call-to-Action.':'')
+      + (platform==='facebook'?'Facebook-Post, freundlich, lokal, mit Hinweis auf die Oeffnungszeiten.':'')
+      + (platform==='google'?'Google-Unternehmen-Post, sachlich, suchmaschinenfreundlich.':'')
+      + (platform==='rabatt'?'Rabattaktion ankuendigen, mit klaren Bedingungen. Der Rabatt muss zu einer Schwaeche aus den Zahlen passen - z.B. ein schwacher Wochentag.':'')
+      + '\n\nErstelle 3 verschiedene Versionen zur Auswahl.';
 
     try {
       const text = (await window.callAI(prompt, 1000)) || '';
@@ -30601,7 +32051,9 @@ function AiMenuOptimizerView(props) {
   var analyze = function() {
     setLoading(true);
     var itemStats = {};
-    completedOrders.forEach(function(o){
+    /* v402: Vorher alle Buchungen roh - inklusive Stornos. Ein Artikel
+       konnte dadurch als "laeuft gut" gelten, obwohl er nie bezahlt wurde. */
+    window.belksAbgeschlosseneBuchungen(completedOrders).forEach(function(o){
       (o.items||[]).forEach(function(it){
         if (!itemStats[it.name]) itemStats[it.name] = {count:0, revenue:0};
         itemStats[it.name].count += it.qty||1;
@@ -30613,7 +32065,21 @@ function AiMenuOptimizerView(props) {
     var totalItems = Object.values(menuData).reduce(function(s,a){return s+a.length;},0);
     var topItems = sorted.slice(0,5).map(function(x){return x[0]+': '+x[1].count+'x';}).join(', ');
     var slowItems = sorted.slice(-3).map(function(x){return x[0]+': '+x[1].count+'x';}).join(', ');
-    var prompt = 'Du bist ein Gastro-Berater fuer eatDeSi Restaurant. ' +
+    /* v403: Hier stand "eatDeSi Restaurant" fest im Code - in einer
+       verkauften Tochter-App haette der Berater ueber ein fremdes Haus
+       geredet. Jetzt kommt der Name aus den Firmendaten, und der Berater
+       kennt Rohertrag und Wareneinsatz statt nur Verkaufszahlen. */
+    var prompt = window.belksBetriebsWissen(
+        'Du bist der Berater fuer die Speisekarte dieses Hauses. '
+      + 'Die Karte hat ' + totalItems + ' Gerichte in ' + cats.length + ' Kategorien. '
+      + 'Bestseller: ' + (topItems||'keine Daten') + '. '
+      + 'Schwach: ' + (slowItems||'keine Daten') + '.')
+      + '\n\nAUFBAU DER ANALYSE (max 250 Woerter, Deutsch):\n'
+      + '1. Was traegt den Umsatz - und traegt es auch die Marge?\n'
+      + '2. Welche Gerichte kosten mehr Aufwand als sie einbringen? Nenne die Zahl.\n'
+      + '3. Preisvorschlaege: nur dort, wo die Zahlen sie stuetzen.\n'
+      + '4. Hoechstens zwei neue Gerichte - und nur, wenn sie eine Luecke '
+      + 'schliessen, die in den Zahlen sichtbar ist (z.B. Getraenke, schwache Stunde).';
       'Speisekarte: ' + totalItems + ' Gerichte in ' + cats.length + ' Kategorien. ' +
       'Bestseller: ' + (topItems||'keine Daten') + '. ' +
       'Schwach: ' + (slowItems||'keine Daten') + '. ' +
@@ -30641,9 +32107,27 @@ function AiEinkaufView({ inventory, menuData, completedOrders }) {
   const generateList = async () => {
     setLoading(true);
     const itemCounts = {};
-    (completedOrders||[]).slice(-50).forEach(o => (o.items||[]).forEach(it => { itemCounts[it.name]=(itemCounts[it.name]||0)+(it.qty||1); }));
+    /* v402: Vorher roh - der Einkauf bestellte Ware fuer stornierte
+       Bestellungen nach. */
+    (window.belksAbgeschlosseneBuchungen(completedOrders)).slice(-50).forEach(o => (o.items||[]).forEach(it => { itemCounts[it.name]=(itemCounts[it.name]||0)+(it.qty||1); }));
     const top5 = Object.entries(itemCounts).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([n,c])=>n+' ('+c+'×)').join(', ');
-    const prompt = 'Du bist der Einkaufsmanager von eatDeSi, einem indischen Restaurant.\n\nAKTUELLER LAGERSTAND (niedrig):\n' + (lowStock.map(i=>i.name+': '+i.quantity+' (Minimum: '+i.minStock+')').join('\n')||'Keine kritischen Bestände') + '\n\nMEIST VERKAUFTE GERICHTE (letzte 50 Bestellungen):\n' + (top5||'Butter Chicken, Dal Makhani, Biryani') + '\n\nErstelle eine Einkaufsliste für die nächsten 5 Tage auf Deutsch:\n1. Kritisch (sofort kaufen)\n2. Diese Woche kaufen  \n3. Geschätzte Mengen und Hinweise\n\nFormat: übersichtliche Liste mit Emojis. Max 200 Wörter.';
+    /* v403: "eatDeSi, einem indischen Restaurant" stand fest im Code, und
+       die Bestseller fielen auf Butter Chicken zurueck. Jetzt kennt der
+       Einkauf das eigene Haus und die Wareneinsatzquote - die Zahl, um die
+       es beim Einkauf ueberhaupt geht. */
+    const prompt = window.belksBetriebsWissen(
+        'Du bist der Einkauf dieses Hauses. Erstelle die Einkaufsliste fuer '
+      + 'die naechsten 5 Tage.')
+      + '\n\nLAGERSTAND (niedrig):\n'
+      + (lowStock.map(i=>i.name+': '+i.quantity+' (Minimum: '+i.minStock+')').join('\n')||'Keine kritischen Bestaende')
+      + '\n\nMEIST VERKAUFT (letzte 50 abgeschlossene Bestellungen):\n' + (top5||'keine Daten')
+      + '\n\nAUFBAU (Deutsch, max 250 Woerter, uebersichtliche Liste mit Emojis):\n'
+      + '1. Kritisch \u2013 sofort kaufen\n'
+      + '2. Diese Woche kaufen\n'
+      + '3. Mengen und Hinweise\n'
+      + '4. Ein Satz zur Wareneinsatzquote: liegt sie hoch, nenne EINEN konkreten '
+      + 'Posten, an dem sich sparen laesst, ohne die Qualitaet zu senken.\n\n'
+      + 'Kaufe nichts fuer Gerichte ein, die laut den Zahlen kaum verkauft werden.';
     try {
       const text = (await window.callAI(prompt, 600)) || '';
       setList(text);
@@ -32014,21 +33498,51 @@ var TO_TOMB_MS = (function(){
   return 2 * 60 * 1000;      // Vorgabe: 2 Minuten
 })();
 
+/* ═══ v405: DIE LANGE MARKE ═══
+   Gilt fuer alles, was den Betrieb beruehrt: gespeicherte Tische,
+   geschlossene, Storno vor und nach der Zahlung, Artikel-Storno. Kurz gesagt
+   alles, wozu es eine Nummer oder eine TSE-Signatur gibt.
+
+   Vorgabe 14 Tage. Begruendung steht im Patch-Kommentar; kurz: ein
+   zurueckkehrender bezahlter Tisch ist ein fiskalischer Vorfall, ein paar
+   Kilobyte mehr sind keiner. Einstellbar als grabsteinTage. */
+var TO_TOMB_FISKAL_MS = (function(){
+  try {
+    var f = JSON.parse(localStorage.getItem('eatdesi_firma') || 'null') || {};
+    var d = parseFloat(String(f.grabsteinTage == null ? '' : f.grabsteinTage).replace(',', '.'));
+    if (isFinite(d) && d >= 1) return d * 24 * 60 * 60 * 1000;
+  } catch(e) {}
+  return 14 * 24 * 60 * 60 * 1000;
+})();
+
 /* v290: idel = Loeschmarken einzelner Artikelzeilen, nach Tisch geordnet:
    { "1": { "<Zeilen-Kennung>": Zeitpunkt } } */
 function toMetaRead(){
   /* v290: idel MUSS mitgelesen und mitgeschrieben werden. Ohne das ginge
      jede Loeschmarke einer einzelnen Artikelzeile beim naechsten Schreiben
      verloren - die gestrichene Zeile kaeme dann vom anderen Geraet zurueck. */
-  try { var m = JSON.parse(localStorage.getItem(TO_META)||'{}'); return { ts:m.ts||{}, del:m.del||{}, idel:m.idel||{} }; }
-  catch(e){ return { ts:{}, del:{}, idel:{} }; }
+  /* v405: delF/idelF = die langen Marken. Fehlen sie (aelteres Geraet oder
+     Datenbestand von vor v405), wird mit leeren Objekten weitergearbeitet -
+     dann gilt einfach nur die kurze Marke wie bisher. */
+  try { var m = JSON.parse(localStorage.getItem(TO_META)||'{}');
+        return { ts:m.ts||{}, del:m.del||{}, idel:m.idel||{}, delF:m.delF||{}, idelF:m.idelF||{} }; }
+  catch(e){ return { ts:{}, del:{}, idel:{}, delF:{}, idelF:{} }; }
 }
 function toMetaWrite(m){
-  try { localStorage.setItem(TO_META, JSON.stringify({ ts:m.ts||{}, del:m.del||{}, idel:m.idel||{} })); } catch(e){}
+  try { localStorage.setItem(TO_META, JSON.stringify({ ts:m.ts||{}, del:m.del||{}, idel:m.idel||{},
+        delF:m.delF||{}, idelF:m.idelF||{} })); } catch(e){}
 }
 // Alte Loeschmarken wegraeumen, damit die Liste nicht ewig waechst
 function toMetaPurge(m){
   var grenze = Date.now() - TO_TOMB_MS;
+  /* v405: zweite, viel spaetere Grenze fuer alles mit Nummer oder TSE. */
+  var grenzeF = Date.now() - TO_TOMB_FISKAL_MS;
+  Object.keys(m.delF||{}).forEach(function(k){ if (m.delF[k] < grenzeF) delete m.delF[k]; });
+  Object.keys(m.idelF||{}).forEach(function(k){
+    var tf = m.idelF[k] || {};
+    Object.keys(tf).forEach(function(i){ if (tf[i] < grenzeF) delete tf[i]; });
+    if (!Object.keys(tf).length) delete m.idelF[k];
+  });
   Object.keys(m.del||{}).forEach(function(k){ if (m.del[k] < grenze) delete m.del[k]; });
   /* v290: auch die Loeschmarken einzelner Artikelzeilen aufraeumen. Ohne das
      waechst die Marken-Datei mit jeder gestrichenen Zeile weiter. */
@@ -32047,7 +33561,12 @@ function toMetaStampChanges(neu, alt){
     if (JSON.stringify(neu[k]) !== JSON.stringify(alt[k])) { m.ts[k] = now; delete m.del[k]; }
   });
   Object.keys(alt).forEach(function(k){
-    if (!(k in neu)) { m.del[k] = now; delete m.ts[k]; }   // Tisch wurde geschlossen/geloescht
+    if (!(k in neu)) {
+      m.del[k] = now; delete m.ts[k];   // Tisch wurde geschlossen/geloescht
+      /* v405: War es mehr als ein Entwurf, kommt die lange Marke dazu. Die
+         kurze bleibt zusaetzlich stehen - aeltere Geraete kennen nur sie. */
+      if (belksIstBetriebsTisch(alt[k])) { m.delF = m.delF || {}; m.delF[k] = now; }
+    }
   });
   toMetaWrite(toMetaPurge(m));
   return m;
@@ -32135,8 +33654,28 @@ function belksZeilenWeg(alt, neu){
   return weg;
 }
 
+/* ═══ v405: ENTWURF ODER BETRIEB? ═══
+   Die eine Stelle, die entscheidet, welche Marke ein verschwundener Tisch
+   bekommt. Bewusst grosszuegig: im Zweifel die LANGE.
+
+   Lang bekommt, wer eine Nummer oder eine Signatur hat, oder wessen Zeilen
+   schon an die Kueche gegangen sind - also gespeicherte Tische, bezahlte,
+   vor der Zahlung stornierte und Artikel-Stornos. Nur ein reiner Entwurf,
+   der nie gespeichert wurde, bekommt die kurze.
+
+   belksTischGesendet() ist dieselbe Pruefung, die auch der Kuechenbon und
+   der Nummernkreis benutzen - wieder EINE Regel statt einer zweiten
+   Vorstellung davon, was "gebucht" heisst. */
+function belksIstBetriebsTisch(t){
+  if (!t) return false;
+  if (t.bestellNr || t.bonNr || t.tseBestellung || t.tse) return true;
+  if (t.storniert || t.stornoGrund) return true;
+  try { if (typeof belksTischGesendet === 'function' && belksTischGesendet(t)) return true; } catch(e){}
+  return false;
+}
+
 /* Loeschmarken fuer einzelne Zeilen in der Marken-Datei ablegen. */
-function belksZeilenMarkeSetzen(tid, iids){
+function belksZeilenMarkeSetzen(tid, iids, fiskalisch){
   if (!iids || !iids.length) return;
   try {
     var m = toMetaRead();
@@ -32144,6 +33683,17 @@ function belksZeilenMarkeSetzen(tid, iids){
     m.idel[tid] = m.idel[tid] || {};
     var jetzt = Date.now();
     iids.forEach(function(id){ m.idel[tid][id] = jetzt; });
+    /* v405: Ein Artikel-Storno an einem gebuchten Tisch ist fiskalisch - es
+       gibt einen Journal-Eintrag mit TSE dazu (v392/v394). Kaeme die Zeile
+       von einem alten Geraet zurueck, stuende sie wieder auf der Rechnung,
+       obwohl sie dokumentiert storniert ist. Deshalb die lange Marke.
+       Ohne Angabe wird von fiskalisch ausgegangen: eine zu lange Marke
+       kostet Bytes, eine zu kurze kostet Geld. */
+    if (fiskalisch !== false){
+      m.idelF = m.idelF || {};
+      m.idelF[tid] = m.idelF[tid] || {};
+      iids.forEach(function(id){ m.idelF[tid][id] = jetzt; });
+    }
     toMetaWrite(m);
   } catch(e){}
 }
@@ -32205,15 +33755,24 @@ function belksZeilenMischen(a, b, geloescht, aIstNeuer){
 
 function toMerge(local, lmeta, remote, rmeta){
   local=local||{}; remote=remote||{};
-  lmeta = { ts:(lmeta&&lmeta.ts)||{}, del:(lmeta&&lmeta.del)||{}, idel:(lmeta&&lmeta.idel)||{} };
-  rmeta = { ts:(rmeta&&rmeta.ts)||{}, del:(rmeta&&rmeta.del)||{}, idel:(rmeta&&rmeta.idel)||{} };
-  var out={}, meta={ ts:{}, del:{}, idel:{} }, keys={};
+  lmeta = { ts:(lmeta&&lmeta.ts)||{}, del:(lmeta&&lmeta.del)||{}, idel:(lmeta&&lmeta.idel)||{},
+            delF:(lmeta&&lmeta.delF)||{}, idelF:(lmeta&&lmeta.idelF)||{} };
+  rmeta = { ts:(rmeta&&rmeta.ts)||{}, del:(rmeta&&rmeta.del)||{}, idel:(rmeta&&rmeta.idel)||{},
+            delF:(rmeta&&rmeta.delF)||{}, idelF:(rmeta&&rmeta.idelF)||{} };
+  var out={}, meta={ ts:{}, del:{}, idel:{}, delF:{}, idelF:{} }, keys={};
   Object.keys(local).forEach(function(k){ keys[k]=1; });
   Object.keys(remote).forEach(function(k){ keys[k]=1; });
   Object.keys(lmeta.del).forEach(function(k){ keys[k]=1; });
   Object.keys(rmeta.del).forEach(function(k){ keys[k]=1; });
+  /* v405: Auch Tische, zu denen es NUR noch die lange Marke gibt, muessen
+     betrachtet werden. Sonst faellt der Schutz genau dann weg, wenn die
+     kurze Marke abgelaufen ist - also in genau dem Fall, fuer den die lange
+     ueberhaupt gebaut wurde. */
+  Object.keys(lmeta.delF).forEach(function(k){ keys[k]=1; });
+  Object.keys(rmeta.delF).forEach(function(k){ keys[k]=1; });
   Object.keys(keys).forEach(function(k){
-    var lt=lmeta.ts[k]||0, ld=lmeta.del[k]||0, rt=rmeta.ts[k]||0, rd=rmeta.del[k]||0;
+    var lt=lmeta.ts[k]||0, ld=Math.max(lmeta.del[k]||0, lmeta.delF[k]||0),
+        rt=rmeta.ts[k]||0, rd=Math.max(rmeta.del[k]||0, rmeta.delF[k]||0);
     var best=Math.max(lt,ld,rt,rd);
     if (best===0){
       /* Keine Zeitstempel (altes Geraet oder in der Startphase gebucht):
@@ -32228,14 +33787,30 @@ function toMerge(local, lmeta, remote, rmeta){
       }
       return;
     }
-    if (best===ld || best===rd){ meta.del[k]=best; return; }   // geloescht gewinnt
+    if (best===ld || best===rd){
+      meta.del[k]=best;
+      /* v405: Hatte eine der beiden Seiten die lange Marke, wird sie
+         fortgeschrieben - sonst ginge sie beim naechsten Abgleich verloren,
+         weil hier ein frisches meta-Objekt entsteht. */
+      var lF = Math.max(lmeta.delF[k]||0, rmeta.delF[k]||0);
+      if (lF) meta.delF[k] = lF;
+      return;   // geloescht gewinnt
+    }
     /* Zusaetzliche Sicherung: Wurde fuer diesen Tisch bereits eine Rechnung
        abgeschlossen, NACHDEM der hier vorliegende Stand entstanden ist, dann
        ist der Tisch bezahlt - er darf nicht zurueckkommen, auch wenn die
        Loeschmarke fehlt (altes Geraet, verfallene Marke, geleerter Speicher). */
     try {
       var bezahltAm = window.belksTischBezahltAm ? window.belksTischBezahltAm(k) : 0;
-      if (bezahltAm && bezahltAm >= best) { meta.del[k] = bezahltAm; return; }
+      if (bezahltAm && bezahltAm >= best) {
+        meta.del[k] = bezahltAm;
+        /* v405: Ein bezahlter Tisch ist der fiskalische Fall schlechthin.
+           Diese Sicherung greift, wenn die Marke ganz fehlt (altes Geraet,
+           geleerter Speicher) - dann muss sie auch die lange setzen, sonst
+           ist der Tisch in zwei Minuten wieder ungeschuetzt. */
+        meta.delF[k] = bezahltAm;
+        return;
+      }
     } catch(e) {}
     /* v290: Nicht mehr EINEN Tisch auswaehlen, sondern die ARTIKELZEILEN
        beider Seiten vereinigen. Nur so ueberlebt die Buchung von Kellner A,
@@ -32244,11 +33819,18 @@ function toMerge(local, lmeta, remote, rmeta){
     var rTisch = (k in remote) ? remote[k] : null;
     if (!lTisch && !rTisch) return;
 
-    var totL = (lmeta.idel && lmeta.idel[k]) || {};
-    var totR = (rmeta.idel && rmeta.idel[k]) || {};
+    /* v405: kurze UND lange Artikelmarken beider Seiten zusammenwerfen.
+       Fuer das Mischen der Zeilen zaehlt nur, DASS eine Zeile gestrichen
+       wurde - wie lange die Marke noch lebt, entscheidet erst das
+       Aufraeumen. */
+    var totL = Object.assign({}, (lmeta.idel && lmeta.idel[k]) || {}, (lmeta.idelF && lmeta.idelF[k]) || {});
+    var totR = Object.assign({}, (rmeta.idel && rmeta.idel[k]) || {}, (rmeta.idelF && rmeta.idelF[k]) || {});
     var tot = {};
     Object.keys(totL).forEach(function(i){ tot[i] = totL[i]; });
     Object.keys(totR).forEach(function(i){ if (!tot[i] || totR[i] > tot[i]) tot[i] = totR[i]; });
+    /* Die langen getrennt fortschreiben, damit sie das Aufraeumen ueberleben. */
+    var totF = Object.assign({}, (lmeta.idelF && lmeta.idelF[k]) || {}, (rmeta.idelF && rmeta.idelF[k]) || {});
+    if (Object.keys(totF).length) meta.idelF[k] = totF;
 
     var zeilen = belksZeilenMischen(lTisch && lTisch.items, rTisch && rTisch.items, tot, (lt >= rt));
 
