@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v410</title>
+<title>eatDeSi POS v411</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8822,7 +8822,23 @@ window.belksAiSchluessel = function(){
   return String(k || '').trim();
 };
 
-window.callAI = async function(prompt, maxTokens) {
+/* ═══ v411: KONTINGENT ═══
+   Google zaehlt Anfragen je Minute (kostenloser Tarif: 20). Ist es voll,
+   kommt Fehler 429 - MIT der Angabe, wie lange zu warten ist. Diese Angabe
+   wird hier ausgelesen und genutzt, statt den Satz des Gastes wegzuwerfen. */
+window.belksWartezeitAus = function(meldung){
+  try {
+    var m = String(meldung||'').match(/retry in ([\d.]+)\s*s/i);
+    if (m) return Math.min(60, Math.ceil(parseFloat(m[1]) + 1)) * 1000;
+  } catch(e){}
+  return 20000;   /* nichts angegeben: eine gute Faustzahl */
+};
+window.belksIstKontingent = function(fehler){
+  var t = String((fehler && fehler.message) || fehler || '');
+  return /\(429\)/.test(t) || /quota/i.test(t) || /rate.?limit/i.test(t);
+};
+
+window.callAI = async function(prompt, maxTokens, opt) {
   var cfg = {};
   try { cfg = JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer")) || '{}') || {}; } catch(e) {}
   var provider = cfg.aiProvider || 'gemini';
@@ -8843,6 +8859,25 @@ window.callAI = async function(prompt, maxTokens) {
     if (!resp.ok) {
       var errTxt = '';
       try { var ej = await resp.json(); errTxt = (ej.error && ej.error.message) || ''; } catch(e){}
+      /* v411: Beim Kontingent EINMAL warten und neu versuchen. Google nennt
+         die Wartezeit selbst. Ein zweiter Anlauf reicht: haelt es danach
+         immer noch, ist das Kontingent wirklich erschoepft und der Benutzer
+         soll es erfahren, statt minutenlang im Kreis zu warten. */
+      if (resp.status === 429 && !(opt && opt.schonGewartet)) {
+        var warte = window.belksWartezeitAus(errTxt);
+        try { if (opt && typeof opt.beiWarten === 'function') opt.beiWarten(Math.round(warte/1000)); } catch(e){}
+        await new Promise(function(r){ setTimeout(r, warte); });
+        return await window.callAI(prompt, maxTokens,
+          Object.assign({}, opt || {}, { schonGewartet: true }));
+      }
+      if (resp.status === 429) {
+        /* Verstaendlich statt woertlich. Die englische Meldung samt Links
+           half im Restaurant niemandem. */
+        throw new Error('Google-Kontingent ersch\u00f6pft (kostenloser Tarif: '
+          + '20 Anfragen je Minute). Bitte kurz warten \u2013 oder in den '
+          + 'Firmendaten ein anderes Modell bzw. einen bezahlten Schl\u00fcssel '
+          + 'hinterlegen.');
+      }
       throw new Error('Gemini Fehler (' + resp.status + '): ' + errTxt);
     }
     var data = await resp.json();
@@ -24566,7 +24601,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v410"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v411"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -32273,6 +32308,11 @@ function AiTelefonistinView() {
   /* v410: Wann ist zuletzt irgendetwas passiert? Der Wachhund unten
      vergleicht damit. */
   const regungRef = React.useRef(Date.now());
+  /* v411: Das Betriebswissen wird EINMAL je Gespraech gebaut. Vorher entstand
+     es bei jedem Satz neu - mehrere tausend Zeichen, die sich waehrend eines
+     Anrufs ohnehin nicht aendern. Das kostete Zeit und Kontingent. */
+  const wissenRef = React.useRef('');
+  const leerRundenRef = React.useRef(0);
   React.useEffect(function(){ aktivRef.current = active; }, [active]);
 
   /* ═══ v410: DER WACHHUND ═══
@@ -32341,7 +32381,8 @@ function AiTelefonistinView() {
     /* v403: Sie kannte nur Name und Oeffnungszeiten. Jetzt weiss sie, was
        gerade wichtig ist - meldet der Betriebsleiter wenig Getraenkeumsatz,
        fragt sie bei der Bestellung danach. */
-    const prompt = window.belksBetriebsWissen(
+    /* v411: gebautes Wissen wiederverwenden */
+    if (!wissenRef.current) wissenRef.current = window.belksBetriebsWissen(
         'Du nimmst Anrufe entgegen. Antworte kurz und freundlich, hoechstens '
       + 'zwei Saetze auf Deutsch, professionell. Wenn es zur Frage passt, weise '
       + 'auf etwas hin, das dem Haus gerade hilft - aber draenge nicht.\n\n'
@@ -32377,7 +32418,9 @@ function AiTelefonistinView() {
       + 'ohne Namen kann nicht gespeichert werden.\n\n'
       + 'GROSSE GRUPPEN: Ab 10 Personen sage NICHT einfach zu. Sage, dass du '
       + 'es notierst und ein Kollege die Bestaetigung uebernimmt. Der Grund: '
-      + 'du kennst weder die Tischgroessen noch die Kueche an diesem Abend.')
+      + 'du kennst weder die Tischgroessen noch die Kueche an diesem Abend.');
+
+    const prompt = wissenRef.current
       /* v409: Abdullahs zweite Frage - "hat sie aktuelle Infos ueber schon
          bestehende Reservierungen?". Seit v404 bekam sie eine TAGESSUMME.
          Die sagt nichts darueber, ob um 18 Uhr noch dreissig Leute Platz
@@ -32410,7 +32453,14 @@ function AiTelefonistinView() {
           : '')
       + '\n\nDER ANRUFER SAGT GERADE: "' + (customerText) + '"';
     try {
-      const roh = (await window.callAI(prompt, 200)) || 'Einen Moment bitte.';
+      const roh = (await window.callAI(prompt, 200, {
+        /* v411: Wartet callAI auf ein freies Kontingent, soll der Anrufer
+           nicht ins Leere hoeren. Ein Satz, und die Ansage laeuft weiter. */
+        beiWarten: function(sek){
+          addLog('\u23f3 Kontingent voll \u2013 warte ' + sek + ' Sekunden.','info');
+          speak('Einen kleinen Moment bitte.');
+        }
+      })) || 'Einen Moment bitte.';
       /* v407: Den versteckten Block herausziehen und ablegen, BEVOR der Text
          vorgelesen wird - sonst spricht sie geschweifte Klammern. */
       var rfEintrag = null;
@@ -32449,8 +32499,26 @@ function AiTelefonistinView() {
       });
     } catch(e) {
       addLog('❌ Fehler: '+e.message,'err');
-      /* Auch nach einem Fehler weiterhoeren - ein einzelner Aussetzer darf
-         das Gespraech nicht beenden. */
+      /* ═══ v411: DEN SATZ NICHT VERLIEREN ═══
+         Bei einem Kontingentfehler hat der Gast bereits gesprochen. Wuerde
+         sein Satz einfach im Verlauf stehenbleiben, ohne dass die AI je
+         geantwortet hat, wuerde sie beim naechsten Mal auf den FALSCHEN Satz
+         antworten - oder gar nicht. Deshalb wird der letzte Gastbeitrag
+         wieder herausgenommen und dem Anrufer gesagt, dass er es
+         wiederholen soll. */
+      var wiederholen = false;
+      try { wiederholen = window.belksIstKontingent(e); } catch(x){}
+      if (wiederholen) {
+        verlaufRef.current = verlaufRef.current.filter(function(z, i){
+          return !(i === verlaufRef.current.length - 1 && z.wer === 'gast'); });
+        speak('Entschuldigung, das habe ich nicht mitbekommen. '
+          + 'K\u00f6nnten Sie das bitte wiederholen?', function(){
+            if (aktivRef.current) setTimeout(startListening, 300);
+          });
+        return;
+      }
+      /* Auch nach einem sonstigen Fehler weiterhoeren - ein einzelner
+         Aussetzer darf das Gespraech nicht beenden. */
       if (aktivRef.current) setTimeout(startListening, 1200);
     }
   };
@@ -32496,7 +32564,17 @@ function AiTelefonistinView() {
         /* v410: Sichtbar machen, dass eine Runde ohne Ergebnis zu Ende ging.
            Vorher sah man nur "Hoert zu..." und danach nichts - man konnte
            nicht unterscheiden, ob sie noch hoert oder haengt. */
-        if (!fertig) addLog('\u2026 nichts verstanden, h\u00f6re weiter.','info');
+        /* v411: Nicht mehr bei JEDER leeren Runde. Der Wecker von v410 greift
+           alle 12 Sekunden; bei Stille waren das fuenf Zeilen je Minute und
+           die echten Ereignisse gingen unter (Bild 1). Jede fuenfte Runde
+           genuegt, um zu zeigen, dass sie noch lebt. */
+        if (!fertig) {
+          leerRundenRef.current++;
+          if (leerRundenRef.current % 5 === 1)
+            addLog('\u2026 h\u00f6re zu, noch nichts verstanden.','info');
+        } else {
+          leerRundenRef.current = 0;
+        }
         /* v408: aktivRef statt active. Der eingefrorene Zustand war beim
            ersten Start noch false - die Kette brach nach einem Satz ab und
            es sah aus, als hoere sie einfach auf.
@@ -32509,7 +32587,9 @@ function AiTelefonistinView() {
       }
     });
     setRecognition(d);
-    addLog('\ud83c\udfa4 H\u00f6rt zu...','info');
+    /* v411: Nur beim ERSTEN Zuhoeren melden. Bei jedem der zwoelf-Sekunden-
+       Neustarts eine Zeile zu schreiben, macht das Protokoll unlesbar. */
+    if (leerRundenRef.current === 0) addLog('\ud83c\udfa4 H\u00f6rt zu...','info');
   };
 
   const toggle = () => {
@@ -32522,6 +32602,8 @@ function AiTelefonistinView() {
       /* Neues Gespraech, neuer Anrufer - der alte Verlauf gehoert weg,
          sonst antwortet sie dem naechsten auf die Fragen des vorigen. */
       verlaufRef.current = [];
+      wissenRef.current = '';       /* v411: neu bauen, der Betrieb hat sich bewegt */
+      leerRundenRef.current = 0;
       var gruss = 'Willkommen bei ' + firma.name + '. Wie kann ich Ihnen helfen?';
       verlaufRef.current = [{ wer:'ai', text: gruss }];
       /* Zuhoeren beginnt, wenn die Begruessung ZU ENDE ist - nicht nach
