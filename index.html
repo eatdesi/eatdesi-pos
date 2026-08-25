@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v407</title>
+<title>eatDeSi POS v408</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -24555,7 +24555,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v407"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v408"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -28961,6 +28961,70 @@ window.maybeOpenDrawer=maybeOpenDrawer;
    Ein Weg fuer beide Welten: in der App das native Plugin, im Browser die
    eingebaute Spracherkennung. Gibt ein Objekt mit stop() zurueck.
    beiText(text, fertig) wird laufend gerufen - fertig=true beim letzten Wort. */
+
+/* ═══ v408: SPRECHEN - EIN WEG FUER BEIDE WELTEN ═══
+   Gegenstueck zu belksDiktat (Zuhoeren). In der APK das native
+   TextToSpeech-Plugin, im Browser die eingebaute Sprachausgabe.
+
+   WARUM: window.speechSynthesis gibt es in der Android-WebView NICHT. Die
+   Telefonistin rief es direkt auf und stieg still aus - im Protokoll vom
+   25.08. steht deshalb keine einzige Ansage.
+
+   fertig() wird IMMER gerufen, egal ob gesprochen wurde oder nicht. Wer
+   danach wieder zuhoeren will, haengt sich dort ein - sonst bleibt ein
+   Gespraech stehen, sobald einmal nichts zu hoeren war. */
+window.belksSprechen = function(text, opt){
+  opt = opt || {};
+  var fertig = opt.fertig || function(){};
+  var beiFehler = opt.beiFehler || function(){};
+  var sprache = opt.sprache || 'de-DE';
+  /* Versteckte Bloecke ({"order":...}) nie vorlesen. */
+  var rein = String(text || '').replace(/\{[\s\S]*?\}/g, '').trim().slice(0, 400);
+  if (!rein) { fertig(); return; }
+
+  var cap = window.Capacitor;
+  var nativ = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
+  var TTS = cap && cap.Plugins && cap.Plugins.TextToSpeech;
+
+  if (nativ && TTS){
+    (async function(){
+      try { await TTS.stop(); } catch(e){}
+      try {
+        await TTS.speak({ text: rein, lang: sprache, rate: 1.0, pitch: 1.05,
+                          volume: 1.0, category: 'playback' });
+      } catch(err){ beiFehler((err && err.message) || String(err)); }
+      fertig();
+    })();
+    return;
+  }
+
+  if (!window.speechSynthesis){
+    /* Kein Ausstieg im Stillen - das war der Fehler. Wer aufruft, erfaehrt,
+       dass nichts gesprochen wurde, und kann es dem Benutzer sagen. */
+    beiFehler('Dieses Ger\u00e4t kann nicht sprechen. In der App fehlt das '
+      + 'TextToSpeech-Plugin (Diagnose pr\u00fcfen).');
+    fertig();
+    return;
+  }
+  try {
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(rein);
+    u.lang = sprache; u.rate = 0.95; u.pitch = 1.05;
+    u.onend = function(){ fertig(); };
+    u.onerror = function(){ beiFehler('Sprachausgabe abgebrochen.'); fertig(); };
+    window.speechSynthesis.speak(u);
+  } catch(e){ beiFehler('Sprachausgabe nicht m\u00f6glich.'); fertig(); }
+};
+
+window.belksSprechenStop = function(){
+  try {
+    var cap = window.Capacitor;
+    var TTS = cap && cap.Plugins && cap.Plugins.TextToSpeech;
+    if (TTS) { try { TTS.stop(); } catch(e){} }
+  } catch(e){}
+  try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch(e){}
+};
+
 window.belksDiktat = function(opt){
   opt = opt || {};
   var sprache = opt.sprache || 'de-DE';
@@ -32046,20 +32110,46 @@ function AiTelefonistinView() {
   const [log, setLog] = React.useState([]);
   const [synth, setSynth] = React.useState(null);
   const [recognition, setRecognition] = React.useState(null);
+  /* ═══ v408: DER GESPRAECHSVERLAUF ═══
+     Ohne ihn fragte die AI nach Dingen, die gerade gesagt wurden - sie bekam
+     jedes Mal nur den letzten Satz. Ein Ref und kein Zustand: der Verlauf
+     wird in Rueckruf-Funktionen gelesen und geschrieben, dort waere ein
+     Zustand immer der von vorhin. */
+  const verlaufRef = React.useRef([]);
+  /* Ebenso "active": startListening laeuft 2 Sekunden nach dem Antippen an,
+     zu dem Zeitpunkt stand im eingefrorenen Zustand noch false. Damit brach
+     die Kette nach dem ersten Satz ab. */
+  const aktivRef = React.useRef(false);
+  const sprichtRef = React.useRef(false);
+  React.useEffect(function(){ aktivRef.current = active; }, [active]);
   const firma = LS.get('eatdesi_firma', {name:'eatDeSi Restaurant', oeffnung:'11:30-22:00'});
 
   const addLog = (msg, type) => setLog(l => [{msg,type,t:new Date().toLocaleTimeString('de-DE')},...l.slice(0,29)]);
 
-  const speak = (text) => {
-    if (!window.speechSynthesis) return;
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang = 'de-DE'; utt.rate = 0.9; utt.pitch = 1.1;
-    window.speechSynthesis.speak(utt);
+  /* v408: Ueber belksSprechen - in der APK das native Plugin, im Browser die
+     eingebaute Ausgabe. Vorher stand hier "if (!window.speechSynthesis)
+     return;" und die Telefonistin schwieg in der App, ohne es zu sagen.
+     danach() wird IMMER gerufen, auch wenn nichts gesprochen wurde - sonst
+     bliebe das Gespraech stehen. */
+  const speak = (text, danach) => {
+    var fertig = danach || function(){};
+    if (typeof window.belksSprechen !== 'function') { fertig(); return; }
+    sprichtRef.current = true;
     addLog('🔊 '+text, 'speak');
+    window.belksSprechen(text, {
+      sprache: 'de-DE',
+      beiFehler: function(m){ addLog('\u274c ' + m, 'err'); },
+      fertig: function(){ sprichtRef.current = false; fertig(); }
+    });
   };
 
   const handleCall = async (customerText) => {
     addLog('👤 Gast: '+customerText, 'user');
+    /* v408: Der Satz gehoert in den Verlauf, BEVOR der Auftrag gebaut wird -
+       sonst fehlt der AI ausgerechnet das, was gerade gesagt wurde.
+       Zwoelf Beitraege reichen fuer eine Reservierung und halten den Auftrag
+       klein; aeltere fallen vorne weg. */
+    verlaufRef.current = verlaufRef.current.concat([{ wer:'gast', text: customerText }]).slice(-12);
     /* v403: Sie kannte nur Name und Oeffnungszeiten. Jetzt weiss sie, was
        gerade wichtig ist - meldet der Betriebsleiter wenig Getraenkeumsatz,
        fragt sie bei der Bestellung danach. */
@@ -32072,8 +32162,24 @@ function AiTelefonistinView() {
       + 'WENN DU ETWAS NICHT SICHER WEISST: erfinde nichts. Sage, dass ein '
       + 'Kollege sich meldet, frage nach der Telefonnummer, und gib '
       + 'ZUSAETZLICH diesen Block aus (er wird dem Anrufer nicht vorgelesen):\n'
-      + '{"rueckfrage":{"frage":"WORUM ES GING","name":"NAME falls genannt","phone":"NUMMER falls genannt"}}')
-      + '\n\nDER ANRUFER SAGT: "' + (customerText) + '"';
+      + '{"rueckfrage":{"frage":"WORUM ES GING","name":"NAME falls genannt","phone":"NUMMER falls genannt"}}\n\n'
+      /* v408: Das Wichtigste. Ohne diese Regel bestaetigt die AI nichts und
+         fragt Bekanntes noch einmal ab - genau das stand im Protokoll. */
+      + 'FUEHRE EIN GESPRAECH, keine Einzelfragen:\n'
+      + '- Der bisherige Verlauf steht unten. Frage NIEMALS nach etwas, das '
+      + 'dort schon gesagt wurde.\n'
+      + '- Bestaetige kurz, was du verstanden hast, und frage dann nur nach '
+      + 'dem, was noch FEHLT. Beispiel: "Vier Personen, gerne. An welchem Tag?"\n'
+      + '- Fuer eine Reservierung brauchst du: Tag, Uhrzeit, Personenzahl, '
+      + 'Name, Telefonnummer. Sind alle da, fasse einmal zusammen und frage, '
+      + 'ob es so stimmt.\n'
+      + '- Sprich in ganzen, kurzen Saetzen. Keine Listen, keine Aufzaehlungen '
+      + '- das wird vorgelesen.')
+      + (verlaufRef.current.length
+          ? '\n\nBISHERIGES GESPRAECH:\n' + verlaufRef.current.map(function(z){
+              return (z.wer === 'gast' ? 'Anrufer: ' : 'Du: ') + z.text; }).join('\n')
+          : '')
+      + '\n\nDER ANRUFER SAGT GERADE: "' + (customerText) + '"';
     try {
       const roh = (await window.callAI(prompt, 200)) || 'Einen Moment bitte.';
       /* v407: Den versteckten Block herausziehen und ablegen, BEVOR der Text
@@ -32084,13 +32190,23 @@ function AiTelefonistinView() {
         || 'Einen Moment bitte.';
       addLog('🤖 AI: '+text, 'ai');
       if (rfEintrag) addLog('\uD83D\uDCCB F\u00fcr das Team notiert: ' + rfEintrag.frage, 'info');
-      speak(text);
-      /* v406: Nach der Antwort wieder zuhoeren. Frueher machte das rec.onend;
-         seit das Diktat nach einem Ergebnis absichtlich beendet wird, muss
-         der naechste Durchgang hier angestossen werden. Die Wartezeit laesst
-         die Ansage ausklingen, sonst hoert die Erkennung sich selbst. */
-      if (active) setTimeout(startListening, 2500);
-    } catch(e) { addLog('❌ Fehler: '+e.message,'err'); }
+      /* v408: Die eigene Antwort gehoert ebenfalls in den Verlauf - sonst
+         weiss die AI beim naechsten Satz nicht, was sie selbst gefragt hat. */
+      verlaufRef.current = verlaufRef.current.concat([{ wer:'ai', text: text }]).slice(-12);
+      /* v408: Erst sprechen, DANN wieder zuhoeren. Vorher lief beides
+         gleichzeitig mit einer festen Wartezeit von 2,5 Sekunden - bei einer
+         laengeren Ansage hoerte die Erkennung sich selbst zu, bei einer
+         kurzen entstand eine unnoetige Pause. Jetzt gibt das Ende der Ansage
+         den Takt vor, wie in einem echten Gespraech. */
+      speak(text, function(){
+        if (aktivRef.current) setTimeout(startListening, 300);
+      });
+    } catch(e) {
+      addLog('❌ Fehler: '+e.message,'err');
+      /* Auch nach einem Fehler weiterhoeren - ein einzelner Aussetzer darf
+         das Gespraech nicht beenden. */
+      if (aktivRef.current) setTimeout(startListening, 1200);
+    }
   };
 
   const startListening = () => {
@@ -32117,22 +32233,29 @@ function AiTelefonistinView() {
         handleCall(t);
       },
       beiFehler: function(meldung){
-        addLog('\u274c ' + meldung, 'err');
-        /* Bei verweigertem Mikrofon hat ein neuer Versuch keinen Sinn - das
-           Zuhoeren wird beendet, statt im Sekundentakt denselben Fehler in
-           das Protokoll zu schreiben (so sah es im Bild aus). */
-        if (/nicht erlaubt|nicht verf|nicht diktieren|nicht m\u00f6glich/i.test(meldung)) {
+        /* v408: "Kein Wort verstanden" ist im Gespraech normal - eine Pause,
+           ein Rascheln. Das darf nicht als Fehler im Protokoll stehen und
+           schon gar nicht das Gespraech beenden. Nur echte Hindernisse
+           werden gemeldet. */
+        var ernst = /nicht erlaubt|nicht verf|nicht diktieren|nicht m\u00f6glich/i.test(meldung);
+        if (ernst) {
           fertig = true;
-          setActive(false);
+          addLog('\u274c ' + meldung, 'err');
+          setActive(false); aktivRef.current = false;
           addLog('\u2139\ufe0f Mikrofon freigeben: Android-Einstellungen \u2192 Apps \u2192 '
             + 'Belks POS \u2192 Berechtigungen \u2192 Mikrofon erlauben. Danach die App neu starten.','info');
         }
       },
       beiEnde: function(){
-        /* Nur weiterhoeren, wenn nichts verstanden wurde UND die Telefonistin
-           noch aktiv ist. Nach einer Antwort startet handleCall den naechsten
-           Durchgang. */
-        if (!fertig && active) setTimeout(startListening, 1000);
+        /* v408: aktivRef statt active. Der eingefrorene Zustand war beim
+           ersten Start noch false - die Kette brach nach einem Satz ab und
+           es sah aus, als hoere sie einfach auf.
+           Nicht neu starten, solange gesprochen wird: sonst hoert sie sich
+           selbst zu und antwortet auf die eigene Ansage. */
+        if (!fertig && aktivRef.current && !sprichtRef.current)
+          setTimeout(function(){
+            if (aktivRef.current && !sprichtRef.current) startListening();
+          }, 600);
       }
     });
     setRecognition(d);
@@ -32142,12 +32265,25 @@ function AiTelefonistinView() {
   const toggle = () => {
     if (!active) {
       setActive(true);
-      speak('Willkommen bei '+firma.name+'. Wie kann ich Ihnen helfen?');
-      setTimeout(startListening, 2000);
+      /* v408: Der Ref SOFORT - nicht erst beim naechsten Aufbau. Genau hier
+         lag der Abbruch: die Begruessung laeuft, und wenn sie fertig ist,
+         stand im eingefrorenen Zustand noch false. */
+      aktivRef.current = true;
+      /* Neues Gespraech, neuer Anrufer - der alte Verlauf gehoert weg,
+         sonst antwortet sie dem naechsten auf die Fragen des vorigen. */
+      verlaufRef.current = [];
+      var gruss = 'Willkommen bei ' + firma.name + '. Wie kann ich Ihnen helfen?';
+      verlaufRef.current = [{ wer:'ai', text: gruss }];
+      /* Zuhoeren beginnt, wenn die Begruessung ZU ENDE ist - nicht nach
+         einer geratenen Wartezeit. */
+      speak(gruss, function(){
+        if (aktivRef.current) setTimeout(startListening, 300);
+      });
     } else {
       setActive(false);
-      window.speechSynthesis && window.speechSynthesis.cancel();
-      (recognition && recognition.stop)();
+      aktivRef.current = false;
+      try { if (window.belksSprechenStop) window.belksSprechenStop(); } catch(e){}
+      try { if (recognition && recognition.stop) recognition.stop(); } catch(e){}
       addLog('📵 Telefonistin deaktiviert','info');
     }
   };
