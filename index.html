@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v394</title>
+<title>eatDeSi POS v396</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -22623,12 +22623,18 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
   const iS = { width:"100%", padding:"9px 10px", borderRadius:8, border:"2px solid #ddd", fontSize:13, fontFamily:"inherit", boxSizing:"border-box", marginBottom:6 };
 
   return /*#__PURE__*/React.createElement("div", {
-    style: { position: "fixed", inset: 0, background: "#000a", zIndex: 4000, display: "flex", alignItems: "flex-end", justifyContent: "center" }
+    /* v396: "stretch" statt "flex-end" - das Fenster fuellt die Hoehe,
+       statt nur so gross zu werden wie sein Inhalt. */
+    style: { position: "fixed", inset: 0, background: "#000a", zIndex: 4000, display: "flex", alignItems: "stretch", justifyContent: "center" }
   }, /*#__PURE__*/React.createElement("div", {
-    style: { background: "#fff", borderRadius: "16px 16px 0 0", width: "100%", maxWidth: 520, maxHeight: "92vh", display: "flex", flexDirection: "column" }
+    /* height 100% statt maxHeight 92vh: die Trefferliste (flex:1) bekommt
+       damit allen Platz, der nach Kopf und Suchfeld uebrig bleibt - auch
+       wenn die Tastatur offen steht. Keine runden Ecken mehr, weil das
+       Fenster jetzt oben am Bildschirmrand steht. */
+    style: { background: "#fff", borderRadius: 0, width: "100%", maxWidth: 520, height: "100%", maxHeight: "100%", display: "flex", flexDirection: "column" }
   },
     // Header
-    /*#__PURE__*/React.createElement("div", { style: { background: "linear-gradient(135deg,#C84B31,#8B2500)", padding: "13px 16px", borderRadius: "16px 16px 0 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink:0 } },
+    /*#__PURE__*/React.createElement("div", { style: { background: "linear-gradient(135deg,#C84B31,#8B2500)", padding: "13px 16px", borderRadius: 0, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink:0 } },
       /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: "#fff", fontSize: 15 } }, "🥡 Takeaway — Kunden suchen"),
       /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", color: "#fff", cursor: "pointer", fontSize: 20, padding: 0 } }, "✕")
     ),
@@ -24418,7 +24424,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v394"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v396"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24428,11 +24434,28 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       )
     ),
     // 🏪 EINRICHTUNGS-CHECKLISTE (v154): erscheint nur bei frischen Töchtern (keine Firmendaten gespeichert)
-    (LOCATION_ID !== "eatdesi-bw" && (function(){
+    ((function(){
       try{
         if(localStorage.getItem("eatdesi_setup_hide_"+LOCATION_ID)==="1") return false;
-        var p=JSON.parse(localStorage.getItem("eatdesi_printer")||"null")||{};
-        return !p.firmaStNr && !p.firmaName;
+        /* v395: Firmendaten kommen aus belksFirmaLesen() - seit v214 die einzige
+           gueltige Quelle. Vorher stand hier eatdesi_printer; den Schluessel
+           beschreibt niemand mehr, also meldete der Kasten ewig. */
+        var f = (typeof window.belksFirmaLesen === "function" ? window.belksFirmaLesen() : null) || {};
+        var firmaDa = !!(String(f.firmaName || f.name || "").trim()
+                      && String(f.firmaStNr || f.stNr || "").trim());
+        /* Menue: eine frische Tochter bekommt die Platzhalter-Kategorie
+           { "Menue importieren": [] }. Deshalb zaehlt nicht, ob Kategorien da
+           sind, sondern ob in irgendeiner davon ein Artikel steht. */
+        var menueDa = false;
+        try{
+          var m = JSON.parse(localStorage.getItem("eatdesi_menu") || "null");
+          if(m && typeof m === "object"){
+            menueDa = Object.keys(m).some(function(k){
+              return Array.isArray(m[k]) && m[k].length > 0;
+            });
+          }
+        }catch(e){}
+        return !(firmaDa && menueDa);
       }catch(e){ return false; }
     })()) ? React.createElement("div", { style:{ background:"#fff8e1", border:"2px solid #f5c542", borderRadius:16, padding:"14px 16px", marginBottom:16 } },
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 } },
