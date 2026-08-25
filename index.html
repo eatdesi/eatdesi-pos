@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v393</title>
+<title>eatDeSi POS v394</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -14248,6 +14248,7 @@ function OrderView({
   onNotiz,          // v385
   tischNotiz,       // v385
   onArtikelStorno,  // v392
+  users,            // v394: fuer die PIN-Pruefung
   onPay,
   onClear,
   optionGroups,
@@ -14266,6 +14267,8 @@ function OrderView({
   const loeschTipp = React.useRef({ n: 0, zeit: 0 });   // v393: drei Tipper auf die Summe
   const [azTarget, setAzTarget] = useState(null);   // v392: Artikel-Storno
   const [azGrund, setAzGrund]   = useState("");
+  const [azPin, setAzPin]             = useState("");   // v394
+  const [azPinFehler, setAzPinFehler] = useState("");   // v394
   /* ═══ v312: ZEILE BEARBEITEN ═══
      Bisher konnte der Stift nur eine Kuechennotiz. Preis und Rabatt gingen
      erst an der Kasse - beim Aufnehmen der Bestellung ging das nicht.
@@ -14683,9 +14686,34 @@ function OrderView({
                   fontFamily:"inherit", fontWeight:700, fontSize:13.5, textAlign:"left" }
         }, g);
       }),
+      /* ═══ v394: WER WAR ES? MIT PIN, NICHT NUR AUS DER SITZUNG ═══
+         Bisher stand im Journal der Name aus der laufenden Anmeldung. Wer
+         sich an einem fremden Geraet bedient, storniert damit unter fremdem
+         Namen - fuer eine Nachschau ist das wertlos.
+         Die PIN wird gegen die Mitarbeiterliste geprueft, und im Journal
+         steht der GEPRUEFTE Name. Nur wenn niemand eine PIN gesetzt hat,
+         bleibt es beim angemeldeten Benutzer - sonst waere die Kasse in
+         einem frisch eingerichteten Haus blockiert. */
+      (function(){
+        var mitPin = (users||[]).filter(function(u){ return u && u.pin; });
+        if (!mitPin.length) return null;
+        return /*#__PURE__*/React.createElement("div", { style:{ marginTop:4, marginBottom:6 } },
+          /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#888", marginBottom:3 } },
+            "PIN des Mitarbeiters"),
+          /*#__PURE__*/React.createElement("input", {
+            type:"password", inputMode:"numeric", value:azPin,
+            onChange: function(e){ setAzPin(e.target.value); setAzPinFehler(""); },
+            placeholder:"••••",
+            style:{ width:"100%", padding:10, borderRadius:9, border:"2px solid #eee",
+                    fontFamily:"inherit", fontSize:15, boxSizing:"border-box", letterSpacing:4 }
+          }),
+          azPinFehler ? /*#__PURE__*/React.createElement("div", {
+            style:{ color:C.red, fontSize:11.5, fontWeight:700, marginTop:4 }
+          }, azPinFehler) : null);
+      })(),
       /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8, marginTop:4 } },
         /*#__PURE__*/React.createElement("button", {
-          onClick: () => setAzTarget(null),
+          onClick: () => { setAzTarget(null); setAzPin(""); setAzPinFehler(""); },
           style:{ flex:1, padding:12, borderRadius:10, border:"2px solid #ddd", background:"#fff",
                   color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:13.5 }
         }, "Abbrechen"),
@@ -14693,7 +14721,14 @@ function OrderView({
           disabled: !azGrund,
           onClick: () => {
             if (!azGrund) return;
-            onArtikelStorno(tableId, azTarget, azGrund);
+            var mitPin = (users||[]).filter(function(u){ return u && u.pin; });
+            var wer = null;
+            if (mitPin.length) {
+              wer = mitPin.find(function(u){ return String(u.pin) === String(azPin).trim(); });
+              if (!wer) { setAzPinFehler("PIN stimmt nicht \u2013 Storno nicht gebucht."); return; }
+            }
+            onArtikelStorno(tableId, azTarget, azGrund, wer ? wer.name : null);
+            setAzPin(""); setAzPinFehler("");
             mengeSetzen(azTarget._key, -1);
             setAzTarget(null); setAzGrund("");
           },
@@ -24383,7 +24418,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v393"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v394"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25381,7 +25416,7 @@ function App() {
      Belegkreis wieder aufblaehen, den wir in v372 auf eine Reihe gebracht
      haben. Festgehalten wird trotzdem alles, was eine Nachschau braucht:
      Zeit, Tisch, Artikel, Menge, Betrag, Grund, Mitarbeiter, TSE. */
-  const artikelStorno = async (tid, zeile, grund) => {
+  const artikelStorno = async (tid, zeile, grund, wer) => {
     if (!zeile) return;
     const istTa = String(tid).startsWith('ta_');
     const quelle = istTa
@@ -25405,7 +25440,10 @@ function App() {
       menge: Number(zeile.qty) || 1,
       betrag: betrag,
       grund: grund || 'ohne Angabe',
-      mitarbeiter: (loggedInUser && loggedInUser.name) || '—',
+      /* v394: der per PIN gepruefte Name gewinnt - nur wenn keine PIN
+         vergeben ist, bleibt es beim angemeldeten Benutzer. */
+      mitarbeiter: wer || (loggedInUser && loggedInUser.name) || '—',
+      pinGeprueft: !!wer,
       bonNr: null,                          // absichtlich keine - siehe oben
       bestellNr: quelle.bestellNr || null,  // zu welchem Vorgang es gehoert
       tse: _tse
@@ -27325,6 +27363,7 @@ function App() {
     onWechseln: setWechselVon,     // v351
     onNotiz: setTischNotiz,        // v385
     onArtikelStorno: artikelStorno,   // v392
+    users: users,                     // v394
     tischNotiz: (getCurrentOrder() || {}).tischNote || "",
     onPay: startPay,
     onClear: clearTable,
@@ -29810,9 +29849,36 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
            Getraenk nicht als solches meldet, greift die Wortliste. Sicherer
            zu viel geprueft als zu wenig - falsch kassierte Steuer faellt
            erst beim Steuerberater auf. */
+        /* v394: Zuerst die EIGENE Karte fragen. Sie weiss besser als jede
+           feste Liste, was in diesem Haus ein Getraenk ist - "Mango Lassi",
+           "Ayran", "Bembel" stehen dort, in keiner Wortliste. Und bei jedem
+           SaaS-Kunden stimmt es automatisch, ohne Pflege.
+           Die feste Liste darunter bleibt als Rueckfall, falls der Partner
+           den Namen anders schreibt als wir. */
         var wort = String(it.name||'').toLowerCase();
+        var ausKarte = null;
+        try {
+          if (!window.__belksTrinkNamen) {
+            var setz = {};
+            Object.keys(menuData||{}).forEach(function(cat){
+              (menuData[cat]||[]).forEach(function(a){
+                if (a && a.name && istBar(a)) setz[String(a.name).toLowerCase().trim()] = 1;
+              });
+            });
+            window.__belksTrinkNamen = setz;
+          }
+          var k = window.__belksTrinkNamen;
+          if (k[wort.trim()]) ausKarte = true;
+          else {
+            /* Teiltreffer: "LONG ISLAND ICED TEA" gegen "Long Island Iced Tea 0,4l" */
+            ausKarte = Object.keys(k).some(function(n){
+              return n.length > 4 && (wort.indexOf(n) >= 0 || n.indexOf(wort.trim()) >= 0);
+            }) || null;
+            if (ausKarte === false) ausKarte = null;
+          }
+        } catch(e) {}
         var trinkWort = /\b(cola|fanta|sprite|spezi|bier|pils|weizen|radler|wein|schorle|saft|limo|limonade|wasser|kaffee|espresso|cappuccino|latte|tee|cocktail|longdrink|iced tea|gin|vodka|whisky|rum|aperol|prosecco|sekt|shot|likoer|lik\u00f6r|diesel|bembel|apfelwein)\b/.test(wort);
-        var istTrink = (it.getraenk === true) || trinkWort;
+        var istTrink = (ausKarte === true) || (it.getraenk === true) || trinkWort;
         return {
           nr: null,                                   // bewusst keine: es ist NICHT unsere Karte
           name: String(it.name||'').trim() + (it.partnerArtikelNr ? ' (#'+it.partnerArtikelNr+')' : ''),
