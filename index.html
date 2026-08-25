@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v408</title>
+<title>eatDeSi POS v409</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -12354,6 +12354,17 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
      gestern oder ohne Uhrzeit ist schlimmer als gar keine, weil sich
      niemand mehr darum kuemmert. Rueckgabe: Hinweistext oder null. */
   const belksReservierungAnlegen = (r) => {
+    /* v409: Die Pruefungen und das Speichern stehen jetzt in
+       window.belksReservierungSpeichern - dieselbe Funktion, die auch die
+       Telefonistin benutzt. Vorher gab es sie nur hier, weshalb die
+       Telefonistin Tische zusagen konnte, die nirgends ankamen.
+       Der alte Weg ueber onReservierung bleibt als Rueckfall stehen: er
+       aktualisiert Reacts Zustand unmittelbar, was sich in dieser Ansicht
+       bewaehrt hat. */
+    if (typeof window.belksReservierungSpeichern === "function") {
+      var erg = window.belksReservierungSpeichern(r, "per KI-Kellnerin");
+      return erg.text;
+    }
     if (typeof onReservierung !== "function") return "\u26a0\uFE0F Reservierungen sind in dieser Ansicht nicht verf\u00fcgbar.";
     var name = String((r && r.name) || "").trim();
     var datum = String((r && r.date) || "").trim();
@@ -24555,7 +24566,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v408"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v409"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -28973,14 +28984,126 @@ window.maybeOpenDrawer=maybeOpenDrawer;
    fertig() wird IMMER gerufen, egal ob gesprochen wurde oder nicht. Wer
    danach wieder zuhoeren will, haengt sich dort ein - sonst bleibt ein
    Gespraech stehen, sobald einmal nichts zu hoeren war. */
+
+/* ═══ v409: RESERVIERUNG SPEICHERN - VON UEBERALL ═══
+   Bis v408 konnte nur Priya eine Reservierung anlegen: die Pruef- und
+   Speicherfunktion stand in ihrer Ansicht und brauchte die Eigenschaft
+   onReservierung. Die Telefonistin sagte deshalb Tische zu, die nirgends
+   ankamen - im Protokoll vom 25.08. ein Tisch fuer 30 Personen.
+
+   Diese Funktion schreibt in den Speicher UND meldet es der App ueber das
+   Ereignis, auf das sie ohnehin schon hoert ('eatdesi_reservations_synced').
+   Dadurch bleibt es EIN Weg: der Zustand in React und der Speicher laufen
+   nicht auseinander. */
+window.belksReservierungSpeichern = function(r, herkunft){
+  try {
+    r = r || {};
+    var name  = String(r.name || '').trim();
+    var datum = String(r.date || '').trim();
+    var zeit  = String(r.time || '').trim();
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(datum))
+      return { ok:false, text:'\u26a0\ufe0f Nicht gespeichert: Datum unklar.' };
+    if (!/^\d{1,2}:\d{2}$/.test(zeit))
+      return { ok:false, text:'\u26a0\ufe0f Nicht gespeichert: Uhrzeit unklar.' };
+    if (zeit.length === 4) zeit = '0' + zeit;
+    if (!name) return { ok:false, text:'\u26a0\ufe0f Nicht gespeichert: Name fehlt.' };
+
+    var heute = new Date(); heute.setHours(0,0,0,0);
+    var d = new Date(datum + 'T00:00:00');
+    if (isNaN(d.getTime())) return { ok:false, text:'\u26a0\ufe0f Nicht gespeichert: Datum ungueltig.' };
+    if (d < heute) return { ok:false, text:'\u26a0\ufe0f Nicht gespeichert: ' + datum + ' liegt in der Vergangenheit.' };
+
+    var personen = parseInt(r.persons, 10);
+    if (!(personen > 0)) personen = 2;
+
+    var liste = [];
+    try { liste = JSON.parse(localStorage.getItem('eatdesi_reservations') || '[]'); } catch(e){}
+    if (!Array.isArray(liste)) liste = [];
+
+    /* Doppelte verhindern: dieselbe Nummer, derselbe Tag, dieselbe Uhrzeit.
+       Am Telefon wird eine Reservierung gern zweimal bestaetigt. */
+    var tel = String(r.phone || '').replace(/[^0-9]/g,'');
+    var schonDa = liste.some(function(x){
+      return x && String(x.date||'').slice(0,10) === datum && String(x.time||'') === zeit
+        && (tel ? String(x.phone||'').replace(/[^0-9]/g,'') === tel
+                : String(x.name||'').toLowerCase() === name.toLowerCase());
+    });
+    if (schonDa) return { ok:false, text:'\u2139\ufe0f Diese Reservierung steht bereits.' };
+
+    var neu = {
+      id: Date.now(), date: datum, time: zeit, name: name,
+      phone: String(r.phone || '').trim(), persons: personen, tableId: '',
+      note: String(r.note || '').trim() + (r.note ? ' \u00b7 ' : '') + (herkunft || 'per KI')
+    };
+    liste.push(neu);
+    localStorage.setItem('eatdesi_reservations', JSON.stringify(liste));
+    /* Die App hoert auf dieses Ereignis und zieht ihren Zustand nach -
+       sonst ueberschreibt sie den Speicher beim naechsten Aufbau wieder. */
+    try { window.dispatchEvent(new CustomEvent('eatdesi_reservations_synced', { detail: liste })); } catch(e){}
+    try { if (window.runSync) window.runSync(); } catch(e){}
+    return { ok:true, eintrag:neu,
+             text:'\uD83D\uDCC5 Reservierung gespeichert: ' + datum + ' um ' + zeit
+                  + ' \u00b7 ' + personen + ' Personen \u00b7 ' + name };
+  } catch(e){
+    return { ok:false, text:'\u26a0\ufe0f Nicht gespeichert: ' + ((e && e.message) || e) };
+  }
+};
+
+/* Wie voll ist ein bestimmter Tag - je Uhrzeit?
+   Eine Tagessumme reicht nicht: "morgen 34 Gaeste" sagt nichts darueber, ob
+   um 18 Uhr noch dreissig Leute Platz finden. */
+window.belksBelegungAm = function(datumIso){
+  try {
+    var liste = [];
+    try { liste = JSON.parse(localStorage.getItem('eatdesi_reservations') || '[]'); } catch(e){}
+    var drauf = (liste||[]).filter(function(r){
+      return r && String(r.date||'').slice(0,10) === datumIso; });
+    var proZeit = {};
+    drauf.forEach(function(r){
+      var t = String(r.time || '?');
+      proZeit[t] = (proZeit[t] || 0) + (Number(r.persons) || 0);
+    });
+    return {
+      gaeste: drauf.reduce(function(s,r){ return s + (Number(r.persons)||0); }, 0),
+      tische: drauf.length,
+      proZeit: proZeit
+    };
+  } catch(e){ return { gaeste:0, tische:0, proZeit:{} }; }
+};
+
 window.belksSprechen = function(text, opt){
   opt = opt || {};
-  var fertig = opt.fertig || function(){};
+  var fertigRoh = opt.fertig || function(){};
   var beiFehler = opt.beiFehler || function(){};
   var sprache = opt.sprache || 'de-DE';
+
+  /* ═══ v409: DIE ZEITGRENZE ═══
+     fertig() darf genau EINMAL laufen - und es MUSS laufen. Blieb das
+     Versprechen des Plugins aus, stand das Gespraech fuer immer: es wurde
+     weder gesprochen noch zugehoert. Im Protokoll vom 25.08. lief es vier
+     Runden gut und blieb dann stehen.
+     Geschaetzt wird mit rund 14 Zeichen je Sekunde plus vier Sekunden
+     Zuschlag - grosszuegig genug, dass die Grenze im Normalfall nie greift. */
+  var schonFertig = false;
+  var wecker = null;
+  var fertig = function(){
+    if (schonFertig) return;
+    schonFertig = true;
+    if (wecker) { clearTimeout(wecker); wecker = null; }
+    try { fertigRoh(); } catch(e){}
+  };
   /* Versteckte Bloecke ({"order":...}) nie vorlesen. */
   var rein = String(text || '').replace(/\{[\s\S]*?\}/g, '').trim().slice(0, 400);
   if (!rein) { fertig(); return; }
+
+  var grenzeMs = Math.min(60000, 4000 + Math.ceil(rein.length / 14) * 1000);
+  wecker = setTimeout(function(){
+    /* Kein Fehler fuer den Benutzer - meistens wurde gesprochen und nur die
+       Rueckmeldung blieb aus. Nur ins Protokoll der Entwicklung. */
+    try { console.warn('belksSprechen: keine Rueckmeldung nach ' + grenzeMs + ' ms'); } catch(e){}
+    fertig();
+  }, grenzeMs);
 
   var cap = window.Capacitor;
   var nativ = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
@@ -32134,12 +32257,22 @@ function AiTelefonistinView() {
   const speak = (text, danach) => {
     var fertig = danach || function(){};
     if (typeof window.belksSprechen !== 'function') { fertig(); return; }
+    /* v409: Zweite Sicherung. Selbst wenn belksSprechen einmal nicht
+       zurueckkaeme, gibt dieser Wecker den Ref wieder frei - sonst wuerde
+       weder gesprochen noch zugehoert (sprichtRef blockiert beides). */
+    var notaus = setTimeout(function(){
+      if (sprichtRef.current) {
+        sprichtRef.current = false;
+        addLog('\u2139\ufe0f Ansage ohne R\u00fcckmeldung \u2013 h\u00f6re weiter zu.','info');
+        if (aktivRef.current) startListening();
+      }
+    }, 65000);
     sprichtRef.current = true;
     addLog('🔊 '+text, 'speak');
     window.belksSprechen(text, {
       sprache: 'de-DE',
       beiFehler: function(m){ addLog('\u274c ' + m, 'err'); },
-      fertig: function(){ sprichtRef.current = false; fertig(); }
+      fertig: function(){ clearTimeout(notaus); sprichtRef.current = false; fertig(); }
     });
   };
 
@@ -32174,7 +32307,48 @@ function AiTelefonistinView() {
       + 'Name, Telefonnummer. Sind alle da, fasse einmal zusammen und frage, '
       + 'ob es so stimmt.\n'
       + '- Sprich in ganzen, kurzen Saetzen. Keine Listen, keine Aufzaehlungen '
-      + '- das wird vorgelesen.')
+      + '- das wird vorgelesen.\n\n'
+      /* v409: Ohne diesen Block sagte sie Tische zu, die nirgends ankamen -
+         im Protokoll vom 25.08. ein Tisch fuer 30 Personen, von dem niemand
+         etwas erfuhr. */
+      + 'RESERVIERUNG SPEICHERN:\n'
+      + 'Sobald du Tag, Uhrzeit, Personenzahl UND Namen hast, gib diesen '
+      + 'versteckten Block aus (er wird nicht vorgelesen):\n'
+      + '{"reservierung":{"name":"NAME","phone":"NUMMER","persons":4,"date":"JJJJ-MM-TT","time":"HH:MM","note":""}}\n'
+      + 'Das Datum IMMER als JJJJ-MM-TT ausrechnen - "morgen" ist kein Datum. '
+      + 'Heute ist ' + new Date().toLocaleDateString('de-DE',{weekday:'long'})
+      + ', der ' + new Date().toISOString().slice(0,10) + '.\n'
+      + 'Erst NACH dem Block bestaetigen. Fehlt der Name, frage danach - '
+      + 'ohne Namen kann nicht gespeichert werden.\n\n'
+      + 'GROSSE GRUPPEN: Ab 10 Personen sage NICHT einfach zu. Sage, dass du '
+      + 'es notierst und ein Kollege die Bestaetigung uebernimmt. Der Grund: '
+      + 'du kennst weder die Tischgroessen noch die Kueche an diesem Abend.')
+      /* v409: Abdullahs zweite Frage - "hat sie aktuelle Infos ueber schon
+         bestehende Reservierungen?". Seit v404 bekam sie eine TAGESSUMME.
+         Die sagt nichts darueber, ob um 18 Uhr noch dreissig Leute Platz
+         finden. Jetzt steht die Belegung JE UHRZEIT fuer die naechsten vier
+         Tage dabei. */
+      + (function(){
+          try {
+            var t = [];
+            for (var i = 0; i <= 3; i++){
+              var d = new Date(Date.now() + i * 86400000);
+              var iso = d.toISOString().slice(0,10);
+              var b = window.belksBelegungAm(iso);
+              if (!b.gaeste) continue;
+              var zeiten = Object.keys(b.proZeit).sort().map(function(z){
+                return z + ' Uhr: ' + b.proZeit[z] + ' Gaeste'; }).join(', ');
+              t.push('  ' + iso + ' (' + (i === 0 ? 'heute' : i === 1 ? 'morgen'
+                : d.toLocaleDateString('de-DE',{weekday:'long'})) + '): '
+                + b.gaeste + ' Gaeste an ' + b.tische + ' Tischen \u2013 ' + zeiten);
+            }
+            return t.length
+              ? '\n\nSCHON RESERVIERT:\n' + t.join('\n')
+                + '\nNimm darauf Ruecksicht: ist eine Uhrzeit schon stark belegt, '
+                + 'biete von dir aus eine andere an.'
+              : '\n\nSCHON RESERVIERT: fuer die naechsten Tage liegt nichts vor.';
+          } catch(e){ return ''; }
+        })()
       + (verlaufRef.current.length
           ? '\n\nBISHERIGES GESPRAECH:\n' + verlaufRef.current.map(function(z){
               return (z.wer === 'gast' ? 'Anrufer: ' : 'Du: ') + z.text; }).join('\n')
@@ -32186,8 +32360,25 @@ function AiTelefonistinView() {
          vorgelesen wird - sonst spricht sie geschweifte Klammern. */
       var rfEintrag = null;
       try { rfEintrag = window.belksRueckfrageAusText(roh, { quelle:'Telefonistin' }); } catch(e){}
-      const text = String(roh).replace(/\{"rueckfrage":\s*\{[\s\S]*?\}\s*\}/g, '').trim()
-        || 'Einen Moment bitte.';
+      /* v409: Die Reservierung wirklich speichern. Ohne diese Zeilen bleibt
+         die Zusage ein Satz - genau wie vor v407 die Rueckfrage. */
+      try {
+        var rm = String(roh).match(/\{"reservierung":\s*\{[\s\S]*?\}\s*\}/);
+        if (rm) {
+          var erg = window.belksReservierungSpeichern(
+            JSON.parse(rm[0]).reservierung || {}, 'per KI-Telefonistin');
+          addLog(erg.text, erg.ok ? 'info' : 'err');
+          /* Ging es schief, MUSS die AI es im naechsten Zug wissen - sonst
+             bestaetigt sie dem Gast etwas, das nicht gespeichert wurde. */
+          if (!erg.ok) verlaufRef.current = verlaufRef.current.concat([
+            { wer:'ai', text:'(Hinweis an dich: ' + erg.text
+              + ' Sage dem Anrufer, dass ein Kollege sich zur Bestaetigung meldet.)' }]);
+        }
+      } catch(e) { addLog('\u274c Reservierung: ' + e.message, 'err'); }
+      const text = String(roh)
+        .replace(/\{"rueckfrage":\s*\{[\s\S]*?\}\s*\}/g, '')
+        .replace(/\{"reservierung":\s*\{[\s\S]*?\}\s*\}/g, '')   /* v409 */
+        .trim() || 'Einen Moment bitte.';
       addLog('🤖 AI: '+text, 'ai');
       if (rfEintrag) addLog('\uD83D\uDCCB F\u00fcr das Team notiert: ' + rfEintrag.frage, 'info');
       /* v408: Die eigene Antwort gehoert ebenfalls in den Verlauf - sonst
