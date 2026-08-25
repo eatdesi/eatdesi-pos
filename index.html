@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v405</title>
+<title>eatDeSi POS v407</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -12518,6 +12518,13 @@ ${_tel ? `- Telefon: ${_tel}` : ""}
 - WICHTIG: Was du nicht sicher weisst, erfindest du NICHT. Sage dann:
   "Das kann ich Ihnen nicht sicher sagen \u2013 ein Kollege ruft Sie gleich zur\u00fcck."
   Das gilt besonders bei Allergien: verspreche NIE, dass etwas allergenfrei ist.
+- v407: Wenn du das sagst, MUSST du zusaetzlich diesen versteckten Block
+  ausgeben \u2013 sonst erfaehrt niemand von der Frage und der Gast wartet
+  vergeblich auf einen Rueckruf:
+  {"rueckfrage":{"frage":"WORUM ES GING, in einem Satz","name":"NAME falls bekannt","phone":"NUMMER falls bekannt"}}
+  Frage IMMER nach der Telefonnummer, bevor du einen Rueckruf zusagst \u2013
+  ohne Nummer kann niemand zurueckrufen. Sagt der Gast sie nicht, gib den
+  Block trotzdem aus.
 
 TISCH RESERVIEREN:
 - Heute ist ${new Date().toLocaleDateString("de-DE",{weekday:"long",day:"2-digit",month:"2-digit",year:"numeric"})} (${new Date().toISOString().slice(0,10)}).
@@ -12864,6 +12871,22 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
         if (meldung) setMsgs(function(p){ return [...p, {role:"assistant", text: meldung}]; });
       } catch(e) { console.warn("Reservierung aus dem Gespraech:", e); }
     }
+    /* v407: RUECKFRAGE - was die AI nicht beantworten konnte.
+       Ohne diese Zeilen bliebe das Versprechen "ein Kollege meldet sich"
+       folgenlos: der Gast wartet, und niemand weiss davon. */
+    try {
+      var rf = window.belksRueckfrageAusText(raw, {
+        quelle: 'Kellnerin',
+        /* taKundeRef, nicht custRef - den Namen hatte ich abgetippt statt
+           nachgesehen. Der Ref wird bei jeder Aenderung nachgefuehrt
+           (Zeile ~12316) und ist deshalb auch in dieser Rueckruf-Funktion
+           aktuell, anders als der Zustand selbst. */
+        name: (taKundeRef && taKundeRef.current && taKundeRef.current.name) || '',
+        phone: (taKundeRef && taKundeRef.current && taKundeRef.current.phone) || ''
+      });
+      if (rf) setMsgs(function(p){ return [...p, {role:"assistant",
+        text:"\uD83D\uDCCB Notiert f\u00fcr das Team: " + rf.frage}]; });
+    } catch(e) { console.warn("Rueckfrage aus dem Gespraech:", e); }
     // REMOVE (Artikel aus Bestellung entfernen)
     var rem = raw.match(/\{"remove":\s*"([^"]+)"\}/);
     if (rem) {
@@ -12885,6 +12908,7 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
       .replace(/\{"kunde":\s*\{[\s\S]*?\}\s*\}/g,"")
       .replace(/\{"reservierung":\s*\{[\s\S]*?\}\s*\}/g,"")
       .replace(/\{"confirm":\s*true\}/g,"")
+      .replace(/\{"rueckfrage":\s*\{[\s\S]*?\}\s*\}/g,"")   /* v407 */
       .trim();
     return text;
   };
@@ -20060,7 +20084,21 @@ function LoyaltyView({ customers, onUpdate, loyaltySettings, setLoyaltySettings 
    Ansichten selbst bleiben unveraendert. */
 function KundenHub(p) {
   const [tab, setTab] = useState(p.startTab || "liste");
-  const offen = (p.anfragen || []).filter(r => r && (!r.status || r.status === "neu")).length;
+  /* v407: Der Punkt am Reiter zaehlt beide Herkuenfte. Zwei Quellen, aber
+     EIN Zaehler und EINE Ansicht - sonst uebersieht man die eine Haelfte. */
+  const [rueckfragen, setRueckfragen] = React.useState(function(){
+    try { return window.belksRueckfragenLesen(); } catch(e){ return []; }
+  });
+  React.useEffect(function(){
+    var neu = function(){ try { setRueckfragen(window.belksRueckfragenLesen()); } catch(e){} };
+    window.addEventListener('belks_rueckfrage_neu', neu);
+    /* Auch dann nachsehen, wenn die Rueckfrage von einem ANDEREN Geraet kam -
+       dort loest kein Ereignis hier aus. */
+    var t = setInterval(neu, 10000);
+    return function(){ window.removeEventListener('belks_rueckfrage_neu', neu); clearInterval(t); };
+  }, []);
+  const offenRf = (rueckfragen || []).filter(r => r && (!r.status || r.status === "neu")).length;
+  const offen = (p.anfragen || []).filter(r => r && (!r.status || r.status === "neu")).length + offenRf;
   const reiter = [
     ["liste",    "\uD83D\uDC65 Kunden"],
     ["treue",    "\u2B50 Treue"],
@@ -20092,6 +20130,19 @@ function KundenHub(p) {
       printerSettings: p.printerSettings
     }),
     tab === "anfragen" && /*#__PURE__*/React.createElement(AnfragenView, {
+      rueckfragen: rueckfragen,
+      onRueckfrageErledigt: function(id){
+        /* Den angemeldeten Benutzer aus der Sitzung lesen statt ihn durch
+           vier Komponenten zu reichen - er liegt ohnehin in eatdesi_session
+           (geraetelokal, siehe SYNC_BLACKLIST). Wer erledigt hat, gehoert in
+           den Eintrag: sonst weiss nachher niemand, ob wirklich jemand
+           zurueckgerufen hat. */
+        var _wer = '';
+        try { var _s = JSON.parse(localStorage.getItem('eatdesi_session') || 'null');
+              _wer = (_s && (_s.name || _s.user)) || ''; } catch(e){}
+        try { window.belksRueckfrageErledigen(id, _wer); } catch(e){}
+        try { setRueckfragen(window.belksRueckfragenLesen()); } catch(e){}
+      },
       anfragen: p.anfragen, onStatus: p.onStatus, onPrint: p.onPrint
     })
   );
@@ -20100,7 +20151,7 @@ function KundenHub(p) {
 /* ===== \uD83D\uDCE9 WEB-ANFRAGEN (Catering / Buffet / Feier / Reservierung) =====
    Kommen von der Website in pos_state <code>_webrequests.
    Frueher nur als Pop-up sichtbar - hier ist die dauerhafte Liste. */
-function AnfragenView({ anfragen, onStatus, onPrint }) {
+function AnfragenView({ anfragen, onStatus, onPrint, rueckfragen, onRueckfrageErledigt }) {
   const [filter, setFilter] = useState("offen");   // offen | alle | erledigt
   const [busy, setBusy] = useState(null);
 
@@ -20111,7 +20162,10 @@ function AnfragenView({ anfragen, onStatus, onPrint }) {
   // Nach Veranstaltungsdatum sortieren - was zuerst stattfindet, steht oben.
   const sortiert = [...(anfragen || [])].sort((a, b) => String(a.date || "9999").localeCompare(String(b.date || "9999")));
   const liste = sortiert.filter(r => filter === "alle" ? true : (filter === "offen" ? !istFertig(r) : istFertig(r)));
-  const offen = (anfragen || []).filter(istOffen).length;
+  /* v407: auch hier beide Herkuenfte, sonst steht am Filter "Offen (1)",
+     waehrend darueber zwei Eintraege stehen. */
+  const offen = (anfragen || []).filter(istOffen).length
+    + (rueckfragen || []).filter(istOffen).length;
 
   const setz = async (r, status) => {
     setBusy(r.id + status);
@@ -20134,7 +20188,64 @@ function AnfragenView({ anfragen, onStatus, onPrint }) {
                    fontWeight: 700, fontSize: 13, background: filter === v ? "#333" : "#eee", color: filter === v ? "#fff" : "#555" }
         }, l))
     ),
-    liste.length === 0
+    /* ═══ v407: WAS DIE AI NICHT BEANTWORTEN KONNTE ═══
+       Steht bewusst GANZ OBEN und vor den Website-Anfragen: hier wartet ein
+       Gast auf einen Rueckruf, der ihm zugesagt wurde. Das ist dringender
+       als eine Catering-Anfrage von gestern. */
+    (function(){
+      var rf = (rueckfragen || []).filter(function(r){
+        if (!r) return false;
+        var fertig = r.status && r.status !== 'neu';
+        return filter === 'alle' ? true : (filter === 'offen' ? !fertig : fertig);
+      }).sort(function(a,b){ return (b.zeit||0) - (a.zeit||0); });
+      if (!rf.length) return null;
+      return /*#__PURE__*/React.createElement("div", { style:{ marginBottom:18 } },
+        /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:14, marginBottom:8, color:"#333" } },
+          "\uD83E\uDD16 Von der AI weitergegeben"),
+        rf.map(function(r, i){
+          var offen2 = !r.status || r.status === 'neu';
+          return /*#__PURE__*/React.createElement("div", { key:'rf'+i,
+            style:{ background: offen2 ? "#fff8e1" : "#fafafa",
+                    border:"1px solid " + (offen2 ? "#f5c542" : "#eee"),
+                    borderLeft:"4px solid " + (offen2 ? "#f5c542" : "#ddd"),
+                    borderRadius:10, padding:"11px 13px", marginBottom:8 } },
+            /*#__PURE__*/React.createElement("div", { style:{ display:"flex", justifyContent:"space-between",
+              fontSize:11, color:"#888", marginBottom:5 } },
+              /*#__PURE__*/React.createElement("span", null, r.quelle || "AI"),
+              /*#__PURE__*/React.createElement("span", null,
+                new Date(r.zeit || 0).toLocaleString("de-DE", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }))
+            ),
+            /*#__PURE__*/React.createElement("div", { style:{ fontSize:14, fontWeight:600, color:"#333", lineHeight:1.5 } }, r.frage),
+            (r.name || r.phone) && /*#__PURE__*/React.createElement("div", { style:{ fontSize:13, marginTop:6, color:"#555" } },
+              (r.name || "Ohne Namen") + (r.phone ? " \u00b7 " + r.phone : "")),
+            /* Ohne Nummer kann niemand zurueckrufen - das muss man sofort sehen. */
+            !r.phone && /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, marginTop:6, color:"#c62828", fontWeight:700 } },
+              "\u26A0\uFE0F Keine Telefonnummer \u2013 R\u00fcckruf nicht m\u00f6glich"),
+            offen2
+              ? /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8, marginTop:10 } },
+                  r.phone && /*#__PURE__*/React.createElement("a", {
+                    href: "tel:" + String(r.phone).replace(/[^0-9+]/g,''),
+                    style:{ padding:"8px 12px", borderRadius:9, background:"#2e7d32", color:"#fff",
+                            fontWeight:700, fontSize:12.5, textDecoration:"none" } }, "\uD83D\uDCDE Anrufen"),
+                  /*#__PURE__*/React.createElement("button", {
+                    onClick: function(){ if (onRueckfrageErledigt) onRueckfrageErledigt(r.id); },
+                    style:{ padding:"8px 12px", borderRadius:9, border:"none", background:"#eee",
+                            color:"#555", fontFamily:"inherit", fontWeight:700, fontSize:12.5, cursor:"pointer" } },
+                    "\u2714\uFE0F Erledigt")
+                )
+              : /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, marginTop:8, color:"#2e7d32", fontWeight:700 } },
+                  "\u2714\uFE0F Erledigt" + (r.erledigtVon ? " von " + r.erledigtVon : "")
+                  + (r.erledigtAm ? " \u00b7 " + new Date(r.erledigtAm).toLocaleString("de-DE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : ""))
+          );
+        })
+      );
+    })(),
+
+    liste.length === 0 && !(rueckfragen || []).some(function(r){
+      if (!r) return false;
+      var fertig = r.status && r.status !== 'neu';
+      return filter === 'alle' ? true : (filter === 'offen' ? !fertig : fertig);
+    })
       ? /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", color: "#999", padding: "50px 20px", fontSize: 14 } },
           "Keine Anfragen in dieser Ansicht.")
       : liste.map((r, i) => /*#__PURE__*/React.createElement("div", {
@@ -24444,7 +24555,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v405"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v407"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -30952,6 +31063,106 @@ window.belksKanalVon = function(o){
   return 'abholung';
 };
 
+
+/* ═══ v407: WAS DIE AI NICHT BEANTWORTEN KONNTE ═══
+   Sagt eine AI "das kann ich Ihnen nicht sicher sagen, ein Kollege meldet
+   sich" - dann MUSS daraus ein Eintrag werden, den jemand sieht. Sonst ist
+   es ein Versprechen ins Leere, und der Gast wartet auf einen Rueckruf, von
+   dem niemand weiss.
+
+   Der Schluessel steht NICHT in der SYNC_BLACKLIST: eine Rueckfrage gehoert
+   dem Restaurant, nicht dem Geraet. Der Chef soll sie auf seinem Handy sehen,
+   auch wenn sie am Kassengeraet entstanden ist. */
+window.BELKS_RUECKFRAGEN = 'eatdesi_rueckfragen';
+
+window.belksRueckfragenLesen = function(){
+  try {
+    var l = JSON.parse(localStorage.getItem(window.BELKS_RUECKFRAGEN) || '[]');
+    return Array.isArray(l) ? l : [];
+  } catch(e){ return []; }
+};
+
+window.belksRueckfrageAnlegen = function(daten){
+  try {
+    daten = daten || {};
+    var frage = String(daten.frage || '').trim();
+    if (!frage) return null;
+
+    var liste = window.belksRueckfragenLesen();
+
+    /* Doppelte vermeiden: fragt derselbe Gast dasselbe zweimal in einer
+       Viertelstunde - was am Telefon staendig vorkommt, weil man sich
+       wiederholt - soll daraus EIN Eintrag werden, nicht drei. */
+    var jetzt = Date.now();
+    var schonDa = liste.some(function(r){
+      return r && (!r.status || r.status === 'neu')
+        && String(r.frage||'').toLowerCase() === frage.toLowerCase()
+        && (jetzt - (r.zeit||0)) < 15 * 60 * 1000;
+    });
+    if (schonDa) return null;
+
+    var eintrag = {
+      id: 'rf' + jetzt + '_' + Math.floor(Math.random()*1000),
+      zeit: jetzt,
+      quelle: daten.quelle || 'AI',          // Kellnerin / Telefonistin / WhatsApp
+      name: daten.name || '',
+      phone: daten.phone || '',
+      frage: frage,
+      antwort: String(daten.antwort || '').trim(),   // was die AI gesagt hat
+      status: 'neu',
+      erledigtVon: '', erledigtAm: 0
+    };
+    liste.push(eintrag);
+    /* Nicht unbegrenzt wachsen lassen. 200 offene und erledigte zusammen
+       reichen weit; aeltere ERLEDIGTE fallen zuerst weg, offene nie. */
+    if (liste.length > 200){
+      var offen = liste.filter(function(r){ return !r.status || r.status === 'neu'; });
+      var fertig = liste.filter(function(r){ return r.status && r.status !== 'neu'; });
+      liste = fertig.slice(-(Math.max(0, 200 - offen.length))).concat(offen);
+    }
+    localStorage.setItem(window.BELKS_RUECKFRAGEN, JSON.stringify(liste));
+    try { if (window.runSync) window.runSync(); } catch(e){}
+    try { window.dispatchEvent(new Event('belks_rueckfrage_neu')); } catch(e){}
+    return eintrag;
+  } catch(e){ console.warn('Rueckfrage:', e); return null; }
+};
+
+window.belksRueckfrageErledigen = function(id, benutzer){
+  try {
+    var liste = window.belksRueckfragenLesen().map(function(r){
+      if (r && r.id === id)
+        return Object.assign({}, r, { status:'erledigt', erledigtVon: benutzer || '', erledigtAm: Date.now() });
+      return r;
+    });
+    localStorage.setItem(window.BELKS_RUECKFRAGEN, JSON.stringify(liste));
+    try { if (window.runSync) window.runSync(); } catch(e){}
+    try { window.dispatchEvent(new Event('belks_rueckfrage_neu')); } catch(e){}
+    return true;
+  } catch(e){ return false; }
+};
+
+window.belksRueckfragenOffen = function(){
+  return window.belksRueckfragenLesen().filter(function(r){
+    return r && (!r.status || r.status === 'neu'); }).length;
+};
+
+/* Aus einer AI-Antwort den versteckten Block herausziehen.
+   Die AI schreibt {"rueckfrage":{"frage":"...","name":"...","phone":"..."}}
+   - genau wie sie es bei Bestellung und Reservierung schon tut. Kein Raten
+   an Formulierungen: "ein Kollege meldet sich" laesst sich in zwanzig
+   Varianten sagen, ein Block nicht. */
+window.belksRueckfrageAusText = function(rohtext, zusatz){
+  try {
+    var m = String(rohtext||'').match(/\{"rueckfrage":\s*\{[\s\S]*?\}\s*\}/);
+    if (!m) return null;
+    var d = JSON.parse(m[0]).rueckfrage || {};
+    return window.belksRueckfrageAnlegen(Object.assign({}, zusatz || {}, {
+      frage: d.frage || '', name: d.name || (zusatz||{}).name || '',
+      phone: d.phone || (zusatz||{}).phone || ''
+    }));
+  } catch(e){ return null; }
+};
+
 window.BELKS_BL_JOURNAL = 'eatdesi_bl_journal';
 window.belksBlJournalLesen = function(){
   try {
@@ -31855,28 +32066,77 @@ function AiTelefonistinView() {
     const prompt = window.belksBetriebsWissen(
         'Du nimmst Anrufe entgegen. Antworte kurz und freundlich, hoechstens '
       + 'zwei Saetze auf Deutsch, professionell. Wenn es zur Frage passt, weise '
-      + 'auf etwas hin, das dem Haus gerade hilft - aber draenge nicht.')
+      + 'auf etwas hin, das dem Haus gerade hilft - aber draenge nicht.\n\n'
+      /* v407: Ohne diese Regel verspricht sie einen Rueckruf, von dem
+         niemand erfaehrt. */
+      + 'WENN DU ETWAS NICHT SICHER WEISST: erfinde nichts. Sage, dass ein '
+      + 'Kollege sich meldet, frage nach der Telefonnummer, und gib '
+      + 'ZUSAETZLICH diesen Block aus (er wird dem Anrufer nicht vorgelesen):\n'
+      + '{"rueckfrage":{"frage":"WORUM ES GING","name":"NAME falls genannt","phone":"NUMMER falls genannt"}}')
       + '\n\nDER ANRUFER SAGT: "' + (customerText) + '"';
     try {
-      const text = (await window.callAI(prompt, 200)) || 'Einen Moment bitte.';
+      const roh = (await window.callAI(prompt, 200)) || 'Einen Moment bitte.';
+      /* v407: Den versteckten Block herausziehen und ablegen, BEVOR der Text
+         vorgelesen wird - sonst spricht sie geschweifte Klammern. */
+      var rfEintrag = null;
+      try { rfEintrag = window.belksRueckfrageAusText(roh, { quelle:'Telefonistin' }); } catch(e){}
+      const text = String(roh).replace(/\{"rueckfrage":\s*\{[\s\S]*?\}\s*\}/g, '').trim()
+        || 'Einen Moment bitte.';
       addLog('🤖 AI: '+text, 'ai');
+      if (rfEintrag) addLog('\uD83D\uDCCB F\u00fcr das Team notiert: ' + rfEintrag.frage, 'info');
       speak(text);
+      /* v406: Nach der Antwort wieder zuhoeren. Frueher machte das rec.onend;
+         seit das Diktat nach einem Ergebnis absichtlich beendet wird, muss
+         der naechste Durchgang hier angestossen werden. Die Wartezeit laesst
+         die Ansage ausklingen, sonst hoert die Erkennung sich selbst. */
+      if (active) setTimeout(startListening, 2500);
     } catch(e) { addLog('❌ Fehler: '+e.message,'err'); }
   };
 
   const startListening = () => {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      addLog('❌ Spracherkennung nicht unterstützt. Chrome/Edge verwenden.','err'); return;
+    /* v406: Frueher stand hier "new webkitSpeechRecognition()" - direkt und
+       ohne Umweg. In der APK antwortet die WebView darauf mit "not-allowed":
+       sie bringt keine Spracherkennung mit und fragt auch nicht nach dem
+       Mikrofon. Genau das stand im Protokoll vom 25.08.
+       belksDiktat kennt beide Welten: in der App das native Plugin samt
+       Berechtigungsabfrage, im Browser die eingebaute Erkennung. */
+    if (typeof window.belksDiktat !== 'function') {
+      addLog('\u274c Diktat steht nicht zur Verf\u00fcgung.','err'); return;
     }
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const rec = new SR();
-    rec.lang = 'de-DE'; rec.continuous = false; rec.interimResults = false;
-    rec.onresult = e => { const txt = e.results[0][0].transcript; handleCall(txt); };
-    rec.onerror = e => addLog('❌ Sprachfehler: '+e.error,'err');
-    rec.onend = () => { if (active) setTimeout(startListening, 1000); };
-    rec.start();
-    setRecognition(rec);
-    addLog('🎤 Hört zu...','info');
+    var fertig = false;
+    var d = window.belksDiktat({
+      sprache: 'de-DE',
+      beiText: function(text, endgueltig){
+        /* Zwischenergebnisse laufen durch; erst das endgueltige Wort geht an
+           die AI, sonst antwortet sie auf halbe Saetze. */
+        if (!endgueltig || fertig) return;
+        var t = String(text || '').trim();
+        if (!t) return;
+        fertig = true;
+        try { d.stop(); } catch(e){}
+        handleCall(t);
+      },
+      beiFehler: function(meldung){
+        addLog('\u274c ' + meldung, 'err');
+        /* Bei verweigertem Mikrofon hat ein neuer Versuch keinen Sinn - das
+           Zuhoeren wird beendet, statt im Sekundentakt denselben Fehler in
+           das Protokoll zu schreiben (so sah es im Bild aus). */
+        if (/nicht erlaubt|nicht verf|nicht diktieren|nicht m\u00f6glich/i.test(meldung)) {
+          fertig = true;
+          setActive(false);
+          addLog('\u2139\ufe0f Mikrofon freigeben: Android-Einstellungen \u2192 Apps \u2192 '
+            + 'Belks POS \u2192 Berechtigungen \u2192 Mikrofon erlauben. Danach die App neu starten.','info');
+        }
+      },
+      beiEnde: function(){
+        /* Nur weiterhoeren, wenn nichts verstanden wurde UND die Telefonistin
+           noch aktiv ist. Nach einer Antwort startet handleCall den naechsten
+           Durchgang. */
+        if (!fertig && active) setTimeout(startListening, 1000);
+      }
+    });
+    setRecognition(d);
+    addLog('\ud83c\udfa4 H\u00f6rt zu...','info');
   };
 
   const toggle = () => {
@@ -31946,11 +32206,19 @@ function AiWhatsAppView({ menuData }) {
         'Du beantwortest WhatsApp-Nachrichten von Gaesten. Kurz, freundlich, '
       + 'mit Emojis, auf Deutsch. Empfiehl bevorzugt, was dem Haus gerade hilft '
       + '(z.B. Getraenke bei niedrigem Getraenkeanteil oder Artikel, die schlecht '
-      + 'laufen) - aber nur, wenn es zur Nachricht passt.')
+      + 'laufen) - aber nur, wenn es zur Nachricht passt.\n\n'
+      /* v407: gleiche Regel wie bei Priya und der Telefonistin. */
+      + 'WENN DU ETWAS NICHT SICHER WEISST: erfinde nichts, sage dass sich '
+      + 'jemand meldet, und gib ZUSAETZLICH diesen Block aus (er wird dem '
+      + 'Gast nicht angezeigt):\n'
+      + '{"rueckfrage":{"frage":"WORUM ES GING","name":"NAME falls bekannt","phone":"NUMMER falls bekannt"}}')
       + '\n\nSPEISEKARTE (Auszug):\n' + (menuStr)
       + '\n\nDIE NACHRICHT: "' + (userMsg) + '"';
     try {
-      const text = (await window.callAI(prompt, 300)) || 'Einen Moment...';
+      const rohWA = (await window.callAI(prompt, 300)) || 'Einen Moment...';
+      try { window.belksRueckfrageAusText(rohWA, { quelle:'WhatsApp' }); } catch(e){}
+      const text = String(rohWA).replace(/\{"rueckfrage":\s*\{[\s\S]*?\}\s*\}/g, '').trim()
+        || 'Einen Moment...';
       setMessages(m => [...m, {from:'bot', text:text}]);
     } catch(e) { setMessages(m => [...m, {from:'bot', text:'❌ Verbindungsfehler'}]); }
     setLoading(false);
