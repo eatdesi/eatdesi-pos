@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v418</title>
+<title>eatDeSi POS v419</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7430,7 +7430,12 @@ function belksGrabsteineWeg(){
        es gab keine Marke mehr, die das verhindert haette.
        Weggeraeumt werden nur noch die kurzen (Entwuerfe). Die fiskalischen
        verschwinden allein durch Zeitablauf. */
+    /* v419: 'idel' war beim Umbau auf zwei Klassen (v405) herausgefallen.
+       Damit verlor ein Tagesabschluss ALLE Marken gestrichener Artikelzeilen -
+       auch die des laufenden Betriebs, wenn er mitten am Tag ausgeloest wird.
+       Geleert werden nur die kurzen Tisch-Marken; alles andere bleibt. */
     var sauber = { ts: (m && m.ts) || {}, del: {},
+                   idel: (m && m.idel) || {},
                    delF: (m && m.delF) || {}, idelF: (m && m.idelF) || {} };
     try{ window._syncWriting = true; }catch(e){}
     localStorage.setItem('eatdesi_to_meta', JSON.stringify(sauber));
@@ -24602,7 +24607,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v418"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v419"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27386,6 +27391,38 @@ function App() {
                    ist und welcher nicht mehr. */
                 if (_lm.delF && Object.keys(_lm.delF).length)
                   _dg.push('  davon fiskalisch: ' + _liste(_lm.delF));
+
+                /* ═══ v419: TISCH OFFEN, OBWOHL WOANDERS GESCHLOSSEN? ═══
+                   Genau der Fall vom 26.08.: Geraet A storniert, Geraet B
+                   zeigt den Tisch weiter. Die drei moeglichen Ursachen
+                   unterscheiden sich in drei Zahlen - und die stehen hier.
+                   Ohne sie bleibt nur Raten. */
+                try {
+                  var _offen = Object.keys(JSON.parse(localStorage.getItem('eatdesi_tableorders') || '{}'));
+                  if (_offen.length) {
+                    _dg.push('Tische lokal offen: ' + _offen.join(', '));
+                    var _ohneStempel = _offen.filter(function(t){ return !(_lm.ts && _lm.ts[t]); });
+                    if (_ohneStempel.length)
+                      _dg.push('  \u26a0\ufe0f OHNE Zeitstempel: ' + _ohneStempel.join(', ')
+                        + '  (wird nie hochgeladen)');
+                    var _auchBegraben = _offen.filter(function(t){
+                      return (_lm.del && _lm.del[t]) || (_lm.delF && _lm.delF[t]); });
+                    if (_auchBegraben.length)
+                      _dg.push('  \u26a0\ufe0f offen UND begraben: ' + _auchBegraben.join(', ')
+                        + '  (Marke und Tisch widersprechen sich)');
+                  }
+                  /* Geht die Uhr dieses Geraets vor oder nach? Ein Geraet mit
+                     vorgehender Uhr schlaegt mit seinem Zeitstempel jede
+                     fremde Loeschmarke - der Tisch kommt immer wieder. */
+                  var _uSrv = window.__belksServerZeit;
+                  if (_uSrv) {
+                    var _diff = Math.round((Date.now() - _uSrv) / 1000);
+                    _dg.push('Uhr gegen Server: ' + (_diff > 0 ? '+' : '') + _diff + ' s'
+                      + (Math.abs(_diff) > 120 ? '  \u26a0\ufe0f zu gross' : ''));
+                  }
+                  _dg.push('Letzter Tisch-Abgleich: '
+                    + (window.__belksToSync ? _uhr(window.__belksToSync) : 'noch keiner'));
+                } catch(e){}
                 /* v276: Warteschlange und letzter Push-Fehler. Damit trennt sich
                    endlich "es wurde nie gesendet" von "es wurde abgelehnt". */
                 var _wq = [];
@@ -36319,7 +36356,15 @@ function toMetaStampChanges(neu, alt){
   var m = toMetaRead(), now = Date.now();
   neu = neu || {}; alt = alt || {};
   Object.keys(neu).forEach(function(k){
-    if (JSON.stringify(neu[k]) !== JSON.stringify(alt[k])) { m.ts[k] = now; delete m.del[k]; }
+    if (JSON.stringify(neu[k]) !== JSON.stringify(alt[k])) {
+      m.ts[k] = now;
+      delete m.del[k];
+      /* v419: Auch die LANGE Marke aufheben. v405 hat sie eingefuehrt, aber
+         hier nicht mit entfernt - ein wieder geoeffneter Tisch schleppte
+         seine alte Marke bis zu 14 Tage mit. Eine Loeschmarke fuer etwas,
+         das wieder da ist, ist schlicht falsch. */
+      if (m.delF) delete m.delF[k];
+    }
   });
   Object.keys(alt).forEach(function(k){
     if (!(k in neu)) {
@@ -36748,6 +36793,10 @@ async function syncTableOrders() {
           if (!row || !row.value) return;
           var _obj = null;
           try { _obj = { value: JSON.parse(row.value), updated_at: new Date(row.updated_at).getTime() }; } catch(e){ return; }
+          /* v419: Die Cloud liefert updated_at - daraus laesst sich ablesen,
+             ob die Uhr dieses Geraets vorgeht. Ein Geraet mit vorgehender Uhr
+             schlaegt mit seinem Zeitstempel jede fremde Loeschmarke. */
+          try { if (_obj.updated_at) window.__belksServerZeit = _obj.updated_at; } catch(e){}
           if (row.key === LOCATION_ID + '_tableOrders') remote = _obj;
           else if (row.key === LOCATION_ID + '_tableordersmeta') rmetaRow = _obj;
         });
@@ -36795,6 +36844,10 @@ async function syncTableOrders() {
     // v190: Tisch fuer Tisch zusammenfuehren statt den ganzen Block zu ersetzen.
     // So geht die Arbeit eines zweiten Kellners nicht mehr verloren, und ein
     // frisch gestartetes Geraet loescht keine offenen Tische mehr.
+    /* v419: Wann lief der Abgleich zuletzt WIRKLICH durch? "Online" oben
+       heisst nur, dass das Netz da ist - nicht, dass die Tische geholt
+       wurden. Genau diese Unterscheidung fehlte bei der Suche am 26.08. */
+    try { window.__belksToSync = Date.now(); } catch(e){}
     var lmeta = toMetaRead();
     var rmeta = (rmetaRow && rmetaRow.value) || { ts:{}, del:{} };
     var res   = toMerge(local, lmeta, (remote && remote.value) || {}, rmeta);
