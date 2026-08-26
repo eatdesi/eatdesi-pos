@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v411</title>
+<title>eatDeSi POS v412</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -21321,6 +21321,7 @@ var ALL_PERMISSION_VIEWS = [
   { id:"kds_pro", l:"KDS Pro", i:"🍳" },
   { id:"kiosk", l:"Kiosk", i:"🖥️" },
   { id:"users", l:"User Management", i:"🔑" },
+  { id:"haccp", l:"HACCP", i:"🌡️" },
   { id:"ai_kellnerin", l:"AI Kellnerin", i:"🤖" },
   { id:"ai_betriebsleiter", l:"AI Betriebsleiter", i:"📊" },
   { id:"ai_whatsapp", l:"AI WhatsApp", i:"💬" },
@@ -24601,7 +24602,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v411"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v412"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26470,6 +26471,8 @@ function App() {
   }, {
     id: "test_center", l: "Test-Center", i: "🧪"
   }, {
+    id: "haccp", l: "HACCP", i: "🌡️"
+  }, {
     id: "ai_betriebsleiter", l: "AI Betriebsleiter", i: "📊"
   }, {
     id: "ai_whatsapp", l: "AI WhatsApp", i: "💬"
@@ -27910,7 +27913,26 @@ function App() {
   ), view === "firmendaten" && React.createElement(FirmendatenView, null
   ), view === "menu_import" && React.createElement(MenuImportExportView, {menuData:menuData,onUpdate:setMenuData}
   ), view === "test_center" && React.createElement(TestCenterView, {menuData:menuData,printerSettings:printerSettings,completedOrders:completedOrders}
-  ), view === "ai_betriebsleiter" && React.createElement(AiBetriebsleiterView, {completedOrders:completedOrders, expenses:expenses, customers:customers}
+  ), view === "haccp" && React.createElement(window.HACCPModul, {
+    /* v412: Betriebsname aus den Firmendaten - nie fest im Code, sonst
+       traegt die Tochter-App eines fremden Restaurants unseren Namen. */
+    betrieb: (function(){
+      try {
+        var f = (window.belksFirmaLesen && window.belksFirmaLesen()) || {};
+        return f.firmaName || f.name
+          || (typeof tenantDisplayName === "function" ? tenantDisplayName() : "Mein Betrieb");
+      } catch(e){ return "Mein Betrieb"; }
+    })(),
+    benutzer: (loggedInUser && loggedInUser.name) || "",
+    /* Farbwelt passend zum Haus: die Kneipe ist rot, eatDeSi blau-gold. */
+    theme: (function(){
+      try {
+        var rot = /kneipe|kk/i.test(String(LOCATION_ID || ""));
+        return rot ? window.HACCP_THEMES.kneipe : window.HACCP_THEMES.eatdesi;
+      } catch(e){ return undefined; }
+    })(),
+    onClose: function(){ setView("home"); }
+  }), view === "ai_betriebsleiter" && React.createElement(AiBetriebsleiterView, {completedOrders:completedOrders, expenses:expenses, customers:customers}
   ), view === "ai_telefonistin" && React.createElement(AiTelefonistinView, {}
   ), view === "ai_whatsapp" && React.createElement(AiWhatsAppView, {menuData:menuData}
   ), view === "ai_marketing" && React.createElement(AiMarketingView, {completedOrders:completedOrders}
@@ -31880,6 +31902,1258 @@ window.belksBetriebsBriefing = function(z){
   t.push('ROHERTRAG (7 Tage, Umsatz minus erfasste Ausgaben): ' + e(z.rohertrag));
   return t.join('\n');
 };
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   v412: HACCP - BETRIEBSKONTROLLE
+   Temperaturen, Zapfanlage, Reinigung, Wareneingang, Fritteusenoel, Personal,
+   Schaedlinge, Monatsbericht.
+
+   HERKUNFT: aus haccp-modul.jsx uebersetzt. Die index.html hat kein Babel,
+   also wurde das JSX mit React.createElement vorkompiliert - genau wie der
+   uebrige Code der Datei. Wer hier etwas aendert, aendert es HIER; die
+   JSX-Fassung ist ab jetzt nur noch Herkunftsnachweis, keine zweite Quelle.
+
+   GEKAPSELT, weil das Modul heute(), de(), tage() und uid() auf oberster
+   Ebene mitbringt und die App eigene Funktionen dieser Namen hat. Nach
+   aussen geht nur window.HACCPModul.
+   ═══════════════════════════════════════════════════════════════════════ */
+(function(){
+const {
+  useState,
+  useEffect,
+  useMemo
+} = React;
+
+/* --- Farbwelten: passend zu den beiden bestehenden POS-Oberflächen --- */
+const THEME_EATDESI = {
+  bg: '#0f1725',
+  card: '#172134',
+  row: '#1e2a41',
+  line: '#2f3f5c',
+  text: '#eef3fa',
+  muted: '#8fa3bf',
+  accent: '#d4af37',
+  accentText: '#141a25',
+  ok: '#3ecf8e',
+  warn: '#ffb020',
+  alarm: '#ff5a4d'
+};
+const THEME_KNEIPE = {
+  bg: '#180f10',
+  card: '#241416',
+  row: '#2f1a1d',
+  line: '#4a2a2e',
+  text: '#f6ecec',
+  muted: '#c09a9a',
+  accent: '#a51c25',
+  accentText: '#fff5f5',
+  ok: '#3ecf8e',
+  warn: '#ffb020',
+  alarm: '#ff7a6d'
+};
+
+/* --- Standard-Kühlgeräte und Reinigungspunkte --- */
+const GERAETE_STD = [{
+  id: 'g1',
+  name: 'Kühlhaus 1',
+  min: 0,
+  max: 7
+}, {
+  id: 'g2',
+  name: 'Kühlhaus 2',
+  min: 0,
+  max: 7
+}, {
+  id: 'g3',
+  name: 'Kühlhaus 3',
+  min: 0,
+  max: 4
+}, {
+  id: 'g4',
+  name: 'Tiefkühler 4',
+  min: -30,
+  max: -18
+}, {
+  id: 'g5',
+  name: 'Tiefkühler 5',
+  min: -30,
+  max: -18
+}, {
+  id: 'g6',
+  name: 'Tiefkühler 6',
+  min: -30,
+  max: -18
+}];
+const REINIGUNG = [{
+  id: 'c1',
+  t: 'Arbeitsflächen & Schneidebretter desinfiziert',
+  f: 'täglich'
+}, {
+  id: 'c2',
+  t: 'Böden Küche gewischt',
+  f: 'täglich'
+}, {
+  id: 'c3',
+  t: 'Abfallbehälter geleert & gereinigt',
+  f: 'täglich'
+}, {
+  id: 'c4',
+  t: 'Gästetoiletten gereinigt & kontrolliert',
+  f: 'täglich'
+}, {
+  id: 'c5',
+  t: 'Theke, Gläserspüler, Eiswürfelbereiter',
+  f: 'täglich'
+}, {
+  id: 'c6',
+  t: 'Fritteuse gefiltert / Öl geprüft',
+  f: 'täglich'
+}, {
+  id: 'c7',
+  t: 'Dunstabzugsfilter gereinigt',
+  f: 'wöchentlich'
+}, {
+  id: 'c8',
+  t: 'Kühlgeräte innen ausgewischt',
+  f: 'wöchentlich'
+}, {
+  id: 'c9',
+  t: 'Kombidämpfer / Ofen Grundreinigung',
+  f: 'wöchentlich'
+}, {
+  id: 'c10',
+  t: 'Lager & Regale ausgeräumt, MHD geprüft',
+  f: 'wöchentlich'
+}, {
+  id: 'c11',
+  t: 'Abflüsse & Fettabscheider kontrolliert',
+  f: 'monatlich'
+}, {
+  id: 'c12',
+  t: 'Schädlingsmonitoring Fallen kontrolliert',
+  f: 'monatlich'
+}];
+
+/* --- Listen-Module: eine Definition steuert Formular, Tabelle und Export --- */
+const LISTEN = {
+  zapf: {
+    titel: 'Zapfanlage',
+    sub: 'Reinigungsnachweis nach DIN 6650-6',
+    felder: [{
+      k: 'art',
+      l: 'Art',
+      typ: 'select',
+      opt: ['Komplettreinigung (chemisch)', 'Zwischenreinigung (Wasser)', 'Kopfstücke / Zapfhähne zerlegt', 'Fachfirma / Wartung']
+    }, {
+      k: 'leit',
+      l: 'Leitungen',
+      ph: 'Pils, Weizen, Alkoholfrei'
+    }, {
+      k: 'mittel',
+      l: 'Reinigungsmittel',
+      ph: 'z. B. alkalisch, 2 %'
+    }, {
+      k: 'von',
+      l: 'Durchgeführt von',
+      auto: 'benutzer'
+    }],
+    spalten: ['datum', 'art', 'leit', 'von']
+  },
+  ware: {
+    titel: 'Wareneingang',
+    sub: 'Kühlware bei Annahme messen',
+    felder: [{
+      k: 'lief',
+      l: 'Lieferant',
+      ph: 'z. B. Metro'
+    }, {
+      k: 'ware',
+      l: 'Ware',
+      ph: 'z. B. Hähnchenbrust'
+    }, {
+      k: 'temp',
+      l: 'Temperatur °C',
+      typ: 'zahl'
+    }, {
+      k: 'zust',
+      l: 'Zustand',
+      typ: 'select',
+      opt: ['i. O. – angenommen', 'Mangel – angenommen mit Vermerk', 'Zurückgewiesen']
+    }, {
+      k: 'von',
+      l: 'Angenommen von',
+      auto: 'benutzer'
+    }, {
+      k: 'bem',
+      l: 'Bemerkung',
+      ph: 'MHD, Verpackung, Maßnahme'
+    }],
+    spalten: ['datum', 'lief', 'ware', 'temp', 'zust']
+  },
+  oil: {
+    titel: 'Fritteusenöl',
+    sub: 'Sichtprüfung oder TPM-Messung',
+    felder: [{
+      k: 'frit',
+      l: 'Fritteuse',
+      ph: 'z. B. Fritteuse 1'
+    }, {
+      k: 'tpm',
+      l: 'TPM %',
+      typ: 'zahl',
+      ph: 'z. B. 18'
+    }, {
+      k: 'bew',
+      l: 'Bewertung',
+      typ: 'select',
+      opt: ['i. O. – weiter nutzbar', 'Gefiltert', 'Öl gewechselt']
+    }, {
+      k: 'von',
+      l: 'Geprüft von',
+      auto: 'benutzer'
+    }],
+    spalten: ['datum', 'frit', 'tpm', 'bew', 'von'],
+    hinweis: 'Faustregel: ab etwa 24 % polaren Anteilen ist das Öl auszutauschen. Maßgeblich bleibt die Vorgabe deiner Lebensmittelüberwachung.'
+  },
+  pest: {
+    titel: 'Schädlingsmonitoring',
+    sub: 'Kontrollen und Befunde',
+    felder: [{
+      k: 'ort',
+      l: 'Bereich',
+      ph: 'z. B. Lager, Küche'
+    }, {
+      k: 'bef',
+      l: 'Befund',
+      typ: 'select',
+      opt: ['Kein Befund', 'Befund – Maßnahme eingeleitet', 'Schädlingsbekämpfer beauftragt']
+    }, {
+      k: 'von',
+      l: 'Geprüft von',
+      auto: 'benutzer'
+    }, {
+      k: 'bem',
+      l: 'Bemerkung'
+    }],
+    spalten: ['datum', 'ort', 'bef', 'von']
+  },
+  staff: {
+    titel: 'Personal',
+    sub: 'Belehrung §43 IfSG und Hygieneschulung',
+    felder: [{
+      k: 'name',
+      l: 'Name',
+      ph: 'Vor- und Nachname'
+    }, {
+      k: 'funk',
+      l: 'Funktion',
+      ph: 'z. B. Küche, Service'
+    }, {
+      k: 'belehrung',
+      l: 'Belehrung §43 IfSG',
+      typ: 'datum'
+    }, {
+      k: 'schulung',
+      l: 'Letzte Hygieneschulung',
+      typ: 'datum'
+    }],
+    spalten: ['name', 'funk', 'belehrung', 'schulung'],
+    ohneDatum: true
+  }
+};
+
+/* --- Hilfsfunktionen --- */
+const heute = () => new Date().toISOString().slice(0, 10);
+const de = s => s ? s.split('-').reverse().join('.') : '–';
+const tage = (a, b) => Math.round((new Date(b) - new Date(a)) / 864e5);
+const uid = () => Math.random().toString(36).slice(2, 9);
+const MONATE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+const monatName = m => m ? MONATE[+m.slice(5, 7) - 1] + ' ' + m.slice(0, 4) : 'Alle Monate';
+function ladeLokal(key, standard) {
+  try {
+    const v = localStorage.getItem(key);
+    return v ? JSON.parse(v) : standard;
+  } catch (e) {
+    return standard;
+  }
+}
+function useGespeichert(key, standard) {
+  const [wert, setWert] = useState(() => ladeLokal(key, standard));
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(wert));
+    } catch (e) {}
+  }, [key, wert]);
+  return [wert, setWert];
+}
+
+/* ==========================================================================
+   Hauptkomponente
+   ========================================================================== */
+function HACCPModul({
+  benutzer = '',
+  betrieb = 'Mein Betrieb',
+  theme = THEME_EATDESI,
+  /* v412: 'eatdesi_haccp_' statt 'haccp_'. Nur Schluessel mit diesem
+     Anfang werden abgeglichen und nach Standort getrennt. HACCP ist
+     Pflichtdokumentation - sie darf nicht auf EINEM Geraet liegen. */
+  prefix = 'eatdesi_haccp_',
+  onClose
+}) {
+  const T = theme;
+  const K = n => prefix + n;
+  const [reiter, setReiter] = useState('heute');
+  const [monat, setMonat] = useState(heute().slice(0, 7));
+  const [tagDatum, setTag] = useState(heute());
+  const [hinweis, setHinweis] = useState('');
+  const [cfg, setCfg] = useGespeichert(K('cfg'), {
+    geraete: GERAETE_STD,
+    zapfIntervall: 14,
+    telTechnik: ''
+  });
+  const [temp, setTemp] = useGespeichert(K('temp'), {});
+  const [clean, setClean] = useGespeichert(K('clean'), {});
+  const [daten, setDaten] = useGespeichert(K('listen'), {
+    zapf: [],
+    ware: [],
+    oil: [],
+    pest: [],
+    staff: []
+  });
+  const melden = t => {
+    setHinweis(t);
+    setTimeout(() => setHinweis(''), 1800);
+  };
+
+  /* ---- Status ---- */
+  const zapfStatus = useMemo(() => {
+    const alle = daten.zapf.map(z => z.datum).filter(Boolean).sort();
+    const letzte = alle.length ? alle[alle.length - 1] : null;
+    if (!letzte) return {
+      letzte: null,
+      stufe: 'alarm',
+      text: 'Noch keine Reinigung erfasst'
+    };
+    const rest = (+cfg.zapfIntervall || 14) - tage(letzte, heute());
+    return {
+      letzte,
+      rest,
+      stufe: rest < 0 ? 'alarm' : rest <= 2 ? 'warn' : 'ok',
+      text: rest < 0 ? `${-rest} Tage überfällig` : rest === 0 ? 'Heute fällig' : `Noch ${rest} Tage`
+    };
+  }, [daten.zapf, cfg.zapfIntervall]);
+  const heuteTemp = temp[heute()] || {};
+  const offeneTemp = cfg.geraete.filter(g => !heuteTemp[g.id] && heuteTemp[g.id] !== 0).length;
+  const heuteClean = clean[heute()] || {};
+  const offeneClean = REINIGUNG.filter(x => x.f === 'täglich' && !heuteClean[x.id]).length;
+  const abweichungen = cfg.geraete.filter(g => {
+    const v = heuteTemp[g.id];
+    return v !== undefined && v !== '' && (+v > g.max || +v < g.min);
+  });
+
+  /* ---- Schreiben ---- */
+  const setzeTemp = (d, feld, wert) => setTemp(p => ({
+    ...p,
+    [d]: {
+      ...(p[d] || {}),
+      [feld]: wert
+    }
+  }));
+  const setzeClean = (d, feld, wert) => setClean(p => ({
+    ...p,
+    [d]: {
+      ...(p[d] || {}),
+      [feld]: wert
+    }
+  }));
+  const fuegeHinzu = (modul, satz) => setDaten(p => ({
+    ...p,
+    [modul]: [...p[modul], {
+      id: uid(),
+      ...satz
+    }]
+  }));
+  const loesche = (modul, id) => setDaten(p => ({
+    ...p,
+    [modul]: p[modul].filter(r => r.id !== id)
+  }));
+
+  /* ---- Export ---- */
+  const csvDatei = (name, zeilen) => {
+    const text = zeilen.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + text], {
+      type: 'text/csv;charset=utf-8'
+    }));
+    a.download = name;
+    a.click();
+    melden('CSV heruntergeladen');
+  };
+  const exportTemp = () => {
+    const z = [['Datum', ...cfg.geraete.map(g => g.name), 'Maßnahmen', 'Kontrolliert von']];
+    Object.keys(temp).filter(d => d.startsWith(monat)).sort().forEach(d => {
+      const t = temp[d];
+      z.push([de(d), ...cfg.geraete.map(g => t[g.id] ?? ''), t._note || '', t._by || '']);
+    });
+    csvDatei(`temperatur_${monat}.csv`, z);
+  };
+  const exportListe = modul => {
+    const def = LISTEN[modul];
+    const rows = daten[modul].filter(r => def.ohneDatum || (r.datum || '').startsWith(monat));
+    const kopf = def.ohneDatum ? def.felder.map(f => f.l) : ['Datum', ...def.felder.map(f => f.l)];
+    const z = [kopf, ...rows.map(r => def.ohneDatum ? def.felder.map(f => r[f.k] ?? '') : [de(r.datum), ...def.felder.map(f => r[f.k] ?? '')])];
+    csvDatei(`${modul}_${monat}.csv`, z);
+  };
+  const sicherung = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify({
+      cfg,
+      temp,
+      clean,
+      daten
+    }, null, 2)], {
+      type: 'application/json'
+    }));
+    a.download = `haccp_sicherung_${heute()}.json`;
+    a.click();
+    melden('Sicherung erstellt');
+  };
+
+  /* ---- Bausteine ---- */
+  const st = {
+    wrap: {
+      background: T.bg,
+      color: T.text,
+      minHeight: '100%',
+      fontFamily: 'inherit',
+      paddingBottom: 24
+    },
+    kopf: {
+      position: 'sticky',
+      top: 0,
+      zIndex: 5,
+      background: T.card,
+      borderBottom: `1px solid ${T.line}`,
+      padding: '12px 14px'
+    },
+    karte: {
+      background: T.card,
+      border: `1px solid ${T.line}`,
+      borderRadius: 12,
+      padding: 14,
+      margin: '12px 14px'
+    },
+    label: {
+      display: 'block',
+      fontSize: 12,
+      color: T.muted,
+      marginBottom: 4,
+      fontWeight: 600
+    },
+    input: {
+      width: '100%',
+      background: T.row,
+      border: `1px solid ${T.line}`,
+      color: T.text,
+      borderRadius: 8,
+      padding: '11px 10px',
+      fontSize: 16,
+      boxSizing: 'border-box'
+    },
+    btn: {
+      background: T.accent,
+      color: T.accentText,
+      border: 'none',
+      borderRadius: 8,
+      padding: '12px 16px',
+      fontWeight: 700,
+      cursor: 'pointer',
+      fontSize: 15
+    },
+    btnAlt: {
+      background: 'transparent',
+      color: T.text,
+      border: `1px solid ${T.line}`,
+      borderRadius: 8,
+      padding: '9px 13px',
+      fontWeight: 600,
+      cursor: 'pointer',
+      fontSize: 13
+    },
+    reiter: aktiv => ({
+      flex: '0 0 auto',
+      background: aktiv ? T.accent : T.row,
+      color: aktiv ? T.accentText : T.muted,
+      border: 'none',
+      borderRadius: 999,
+      padding: '7px 13px',
+      fontSize: 13,
+      fontWeight: 600,
+      cursor: 'pointer',
+      whiteSpace: 'nowrap'
+    }),
+    zeile: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+      padding: 12,
+      background: T.row,
+      border: `1px solid ${T.line}`,
+      borderRadius: 9,
+      marginBottom: 8
+    },
+    th: {
+      textAlign: 'left',
+      padding: '8px 6px',
+      color: T.muted,
+      fontSize: 11,
+      textTransform: 'uppercase',
+      letterSpacing: '.05em',
+      borderBottom: `1px solid ${T.line}`
+    },
+    td: {
+      padding: '8px 6px',
+      borderBottom: `1px solid ${T.line}`,
+      fontSize: 13
+    },
+    sub: {
+      color: T.muted,
+      fontSize: 12.5,
+      marginBottom: 12
+    }
+  };
+  const Feld = ({
+    label,
+    children
+  }) => /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: 'block',
+      flex: '1 1 150px',
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: st.label
+  }, label), children);
+  const Karte = ({
+    titel,
+    sub,
+    children
+  }) => /*#__PURE__*/React.createElement("div", {
+    style: st.karte
+  }, titel && /*#__PURE__*/React.createElement("h2", {
+    style: {
+      margin: 0,
+      fontSize: 15,
+      fontWeight: 700
+    }
+  }, titel), sub && /*#__PURE__*/React.createElement("div", {
+    style: st.sub
+  }, sub), children);
+  const Ampel = ({
+    stufe
+  }) => /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 10,
+      height: 10,
+      borderRadius: '50%',
+      flex: '0 0 auto',
+      background: stufe === 'ok' ? T.ok : stufe === 'warn' ? T.warn : stufe === 'alarm' ? T.alarm : T.muted
+    }
+  });
+
+  /* ---- Ansicht: Heute ---- */
+  const Heute = () => /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Karte, {
+    titel: "Heute zu erledigen",
+    sub: `${de(heute())} · ${betrieb}`
+  }, /*#__PURE__*/React.createElement("div", {
+    style: st.zeile,
+    onClick: () => setReiter('temp')
+  }, /*#__PURE__*/React.createElement(Ampel, {
+    stufe: offeneTemp ? 'warn' : 'ok'
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Temperaturen erfassen"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: T.muted,
+      fontSize: 12
+    }
+  }, offeneTemp ? `${offeneTemp} von ${cfg.geraete.length} Geräten offen` : 'Alle Geräte erfasst'))), /*#__PURE__*/React.createElement("div", {
+    style: st.zeile,
+    onClick: () => setReiter('zapf')
+  }, /*#__PURE__*/React.createElement(Ampel, {
+    stufe: zapfStatus.stufe
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Zapfanlage reinigen"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: T.muted,
+      fontSize: 12
+    }
+  }, "Letzte Reinigung: ", de(zapfStatus.letzte), " · ", zapfStatus.text))), /*#__PURE__*/React.createElement("div", {
+    style: st.zeile,
+    onClick: () => setReiter('clean')
+  }, /*#__PURE__*/React.createElement(Ampel, {
+    stufe: offeneClean ? 'warn' : 'ok'
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Reinigungsplan (täglich)"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: T.muted,
+      fontSize: 12
+    }
+  }, offeneClean ? `${offeneClean} Punkte offen` : 'Alle Punkte abgehakt'))), abweichungen.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...st.zeile,
+      borderColor: T.alarm
+    }
+  }, /*#__PURE__*/React.createElement(Ampel, {
+    stufe: "alarm"
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("b", null, abweichungen.length, " Temperaturabweichung", abweichungen.length > 1 ? 'en' : ''), /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: T.muted,
+      fontSize: 12
+    }
+  }, abweichungen.map(g => g.name).join(', '), " – Ware prüfen, Maßnahme eintragen", cfg.telTechnik ? `, Technik: ${cfg.telTechnik}` : '')))), /*#__PURE__*/React.createElement(Karte, {
+    titel: "Schnellzugriff",
+    sub: "Was zwischendurch anfällt"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    style: st.btnAlt,
+    onClick: () => setReiter('ware')
+  }, "Lieferung annehmen"), /*#__PURE__*/React.createElement("button", {
+    style: st.btnAlt,
+    onClick: () => setReiter('oil')
+  }, "Öl kontrollieren"), /*#__PURE__*/React.createElement("button", {
+    style: st.btnAlt,
+    onClick: () => setReiter('pest')
+  }, "Schädlingsbefund"), /*#__PURE__*/React.createElement("button", {
+    style: st.btnAlt,
+    onClick: () => setReiter('report')
+  }, "Monatsbericht"))));
+
+  /* ---- Ansicht: Temperatur ---- */
+  const Temperatur = () => {
+    const t = temp[tagDatum] || {};
+    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Karte, {
+      titel: "Temperaturkontrolle",
+      sub: "Kühl- und Tiefkühlgeräte, einmal pro Tag"
+    }, /*#__PURE__*/React.createElement(Feld, {
+      label: "Datum"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "date",
+      style: st.input,
+      value: tagDatum,
+      onChange: e => setTag(e.target.value)
+    })), cfg.geraete.map(g => {
+      const v = t[g.id];
+      const da = v !== undefined && v !== '';
+      const schlecht = da && (+v > g.max || +v < g.min);
+      return /*#__PURE__*/React.createElement("div", {
+        key: g.id,
+        style: {
+          display: 'grid',
+          gridTemplateColumns: '1fr 104px 88px',
+          gap: 8,
+          alignItems: 'center',
+          marginBottom: 8
+        }
+      }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("b", {
+        style: {
+          fontSize: 14
+        }
+      }, g.name), /*#__PURE__*/React.createElement("div", {
+        style: {
+          color: T.muted,
+          fontSize: 11.5
+        }
+      }, "Soll ", g.min, " bis ", g.max, " °C")), /*#__PURE__*/React.createElement("input", {
+        type: "number",
+        step: "0.1",
+        inputMode: "decimal",
+        placeholder: "–",
+        style: {
+          ...st.input,
+          textAlign: 'center',
+          fontWeight: 700,
+          fontSize: 18
+        },
+        value: da ? v : '',
+        onChange: e => setzeTemp(tagDatum, g.id, e.target.value)
+      }), /*#__PURE__*/React.createElement("div", {
+        style: {
+          textAlign: 'center',
+          fontSize: 12,
+          fontWeight: 700,
+          padding: '9px 4px',
+          borderRadius: 7,
+          background: da ? schlecht ? '#3d2320' : '#1c3a2c' : T.row,
+          color: da ? schlecht ? T.alarm : T.ok : T.muted,
+          border: `1px solid ${da ? schlecht ? T.alarm : T.ok : T.line}`
+        }
+      }, da ? schlecht ? 'außerhalb' : 'i. O.' : 'offen'));
+    }), /*#__PURE__*/React.createElement(Feld, {
+      label: "Eingeleitete Maßnahmen / Bemerkung"
+    }, /*#__PURE__*/React.createElement("textarea", {
+      style: {
+        ...st.input,
+        minHeight: 64
+      },
+      value: t._note || '',
+      placeholder: "z. B. Tür stand offen, Ware geprüft, Technik informiert",
+      onChange: e => setzeTemp(tagDatum, '_note', e.target.value)
+    })), /*#__PURE__*/React.createElement(Feld, {
+      label: "Kontrolliert von"
+    }, /*#__PURE__*/React.createElement("input", {
+      style: st.input,
+      value: t._by ?? benutzer,
+      onChange: e => setzeTemp(tagDatum, '_by', e.target.value)
+    }))), /*#__PURE__*/React.createElement(Karte, {
+      titel: "Erfasste Tage",
+      sub: monatName(monat)
+    }, /*#__PURE__*/React.createElement(Feld, {
+      label: "Monat"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "month",
+      style: st.input,
+      value: monat,
+      onChange: e => setMonat(e.target.value)
+    })), Object.keys(temp).filter(d => d.startsWith(monat)).sort().reverse().map(d => /*#__PURE__*/React.createElement("div", {
+      key: d,
+      style: {
+        ...st.zeile,
+        cursor: 'pointer'
+      },
+      onClick: () => setTag(d)
+    }, /*#__PURE__*/React.createElement(Ampel, {
+      stufe: "ok"
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1
+      }
+    }, /*#__PURE__*/React.createElement("b", null, de(d)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: T.muted,
+        fontSize: 12
+      }
+    }, cfg.geraete.filter(g => temp[d][g.id] !== undefined && temp[d][g.id] !== '').length, " Werte", temp[d]._by ? ` · ${temp[d]._by}` : '')))), !Object.keys(temp).some(d => d.startsWith(monat)) && /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: T.muted,
+        fontSize: 13.5
+      }
+    }, "Für ", monatName(monat), " ist nichts gespeichert."), /*#__PURE__*/React.createElement("button", {
+      style: {
+        ...st.btn,
+        width: '100%',
+        marginTop: 10
+      },
+      onClick: exportTemp
+    }, "CSV für ", monatName(monat))));
+  };
+
+  /* ---- Ansicht: Reinigung ---- */
+  const Reinigung = () => {
+    const c = clean[tagDatum] || {};
+    const gruppe = f => REINIGUNG.filter(x => x.f === f).map(x => /*#__PURE__*/React.createElement("label", {
+      key: x.id,
+      style: {
+        ...st.zeile,
+        cursor: 'pointer',
+        borderColor: c[x.id] ? T.ok : T.line
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "checkbox",
+      style: {
+        width: 22,
+        height: 22,
+        accentColor: T.ok
+      },
+      checked: !!c[x.id],
+      onChange: e => setzeClean(tagDatum, x.id, e.target.checked)
+    }), /*#__PURE__*/React.createElement("span", {
+      style: {
+        flex: 1,
+        fontSize: 14.5
+      }
+    }, x.t)));
+    const kopf = {
+      fontSize: 12,
+      color: T.muted,
+      margin: '14px 0 8px',
+      textTransform: 'uppercase',
+      letterSpacing: '.05em',
+      fontWeight: 700
+    };
+    return /*#__PURE__*/React.createElement(Karte, {
+      titel: "Reinigungsplan",
+      sub: "Abhaken, sobald erledigt"
+    }, /*#__PURE__*/React.createElement(Feld, {
+      label: "Datum"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "date",
+      style: st.input,
+      value: tagDatum,
+      onChange: e => setTag(e.target.value)
+    })), /*#__PURE__*/React.createElement("div", {
+      style: kopf
+    }, "Täglich"), gruppe('täglich'), /*#__PURE__*/React.createElement("div", {
+      style: kopf
+    }, "Wöchentlich"), gruppe('wöchentlich'), /*#__PURE__*/React.createElement("div", {
+      style: kopf
+    }, "Monatlich"), gruppe('monatlich'), /*#__PURE__*/React.createElement(Feld, {
+      label: "Erledigt von"
+    }, /*#__PURE__*/React.createElement("input", {
+      style: st.input,
+      value: c._by ?? benutzer,
+      onChange: e => setzeClean(tagDatum, '_by', e.target.value)
+    })));
+  };
+
+  /* ---- Ansicht: generische Liste (Zapf, Ware, Öl, Schädlinge, Personal) ---- */
+  const Liste = ({
+    modul
+  }) => {
+    const def = LISTEN[modul];
+    const leer = () => {
+      const o = def.ohneDatum ? {} : {
+        datum: heute()
+      };
+      def.felder.forEach(f => {
+        o[f.k] = f.auto === 'benutzer' ? benutzer : f.typ === 'select' ? f.opt[0] : '';
+      });
+      return o;
+    };
+    const [entwurf, setEntwurf] = useState(leer);
+    const rows = daten[modul].filter(r => def.ohneDatum || (r.datum || '').startsWith(monat)).sort((a, b) => (b.datum || '').localeCompare(a.datum || ''));
+    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Karte, {
+      titel: def.titel,
+      sub: def.sub
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 10
+      }
+    }, !def.ohneDatum && /*#__PURE__*/React.createElement(Feld, {
+      label: "Datum"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "date",
+      style: st.input,
+      value: entwurf.datum,
+      onChange: e => setEntwurf({
+        ...entwurf,
+        datum: e.target.value
+      })
+    })), def.felder.map(f => /*#__PURE__*/React.createElement(Feld, {
+      key: f.k,
+      label: f.l
+    }, f.typ === 'select' ? /*#__PURE__*/React.createElement("select", {
+      style: st.input,
+      value: entwurf[f.k],
+      onChange: e => setEntwurf({
+        ...entwurf,
+        [f.k]: e.target.value
+      })
+    }, f.opt.map(o => /*#__PURE__*/React.createElement("option", {
+      key: o
+    }, o))) : /*#__PURE__*/React.createElement("input", {
+      style: st.input,
+      placeholder: f.ph || '',
+      type: f.typ === 'zahl' ? 'number' : f.typ === 'datum' ? 'date' : 'text',
+      step: f.typ === 'zahl' ? '0.1' : undefined,
+      value: entwurf[f.k],
+      onChange: e => setEntwurf({
+        ...entwurf,
+        [f.k]: e.target.value
+      })
+    })))), /*#__PURE__*/React.createElement("button", {
+      style: {
+        ...st.btn,
+        width: '100%'
+      },
+      onClick: () => {
+        fuegeHinzu(modul, entwurf);
+        setEntwurf(leer());
+        melden('Gespeichert');
+      }
+    }, "Eintrag speichern"), def.hinweis && /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: T.muted,
+        fontSize: 12,
+        marginTop: 8
+      }
+    }, def.hinweis)), /*#__PURE__*/React.createElement(Karte, {
+      titel: "Nachweis",
+      sub: def.ohneDatum ? 'Übersicht' : monatName(monat)
+    }, !def.ohneDatum && /*#__PURE__*/React.createElement(Feld, {
+      label: "Monat"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "month",
+      style: st.input,
+      value: monat,
+      onChange: e => setMonat(e.target.value)
+    })), /*#__PURE__*/React.createElement("div", {
+      style: {
+        overflowX: 'auto'
+      }
+    }, /*#__PURE__*/React.createElement("table", {
+      style: {
+        width: '100%',
+        borderCollapse: 'collapse'
+      }
+    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, def.spalten.map(s => /*#__PURE__*/React.createElement("th", {
+      key: s,
+      style: st.th
+    }, s === 'datum' ? 'Datum' : def.felder.find(f => f.k === s)?.l || s)), /*#__PURE__*/React.createElement("th", {
+      style: st.th
+    }))), /*#__PURE__*/React.createElement("tbody", null, rows.map(r => /*#__PURE__*/React.createElement("tr", {
+      key: r.id
+    }, def.spalten.map(s => /*#__PURE__*/React.createElement("td", {
+      key: s,
+      style: st.td
+    }, s === 'datum' ? de(r.datum) : s === 'belehrung' || s === 'schulung' ? de(r[s]) : r[s] || '')), /*#__PURE__*/React.createElement("td", {
+      style: st.td
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => loesche(modul, r.id),
+      style: {
+        background: 'none',
+        border: 'none',
+        color: T.muted,
+        fontSize: 20,
+        cursor: 'pointer'
+      }
+    }, "×")))), rows.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+      colSpan: def.spalten.length + 1,
+      style: {
+        ...st.td,
+        color: T.muted
+      }
+    }, "Kein Eintrag."))))), /*#__PURE__*/React.createElement("button", {
+      style: {
+        ...st.btnAlt,
+        width: '100%',
+        marginTop: 10
+      },
+      onClick: () => exportListe(modul)
+    }, "Als CSV exportieren")));
+  };
+
+  /* ---- Ansicht: Monatsbericht ---- */
+  const Bericht = () => {
+    const jahr = +monat.slice(0, 4),
+      mm = +monat.slice(5, 7);
+    const anzahlTage = new Date(jahr, mm, 0).getDate();
+    let abw = 0,
+      erfasst = 0;
+    const zeilen = [];
+    for (let d = 1; d <= anzahlTage; d++) {
+      const key = `${monat}-${String(d).padStart(2, '0')}`;
+      const t = temp[key] || {};
+      if (cfg.geraete.some(g => t[g.id] !== undefined && t[g.id] !== '')) erfasst++;
+      zeilen.push(/*#__PURE__*/React.createElement("tr", {
+        key: d
+      }, /*#__PURE__*/React.createElement("td", {
+        style: st.td
+      }, /*#__PURE__*/React.createElement("b", null, d)), cfg.geraete.map(g => {
+        const v = t[g.id];
+        const da = v !== undefined && v !== '';
+        const schlecht = da && (+v > g.max || +v < g.min);
+        if (schlecht) abw++;
+        return /*#__PURE__*/React.createElement("td", {
+          key: g.id,
+          style: {
+            ...st.td,
+            color: da ? schlecht ? T.alarm : T.text : T.muted,
+            fontWeight: schlecht ? 700 : 400
+          }
+        }, da ? v : '–');
+      }), /*#__PURE__*/React.createElement("td", {
+        style: {
+          ...st.td,
+          fontSize: 11.5
+        }
+      }, t._note || ''), /*#__PURE__*/React.createElement("td", {
+        style: {
+          ...st.td,
+          fontSize: 11.5
+        }
+      }, t._by || '')));
+    }
+    const imMonat = m => daten[m].filter(r => (r.datum || '').startsWith(monat));
+    const kachel = (wert, label, farbe) => /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: '1 1 96px',
+        background: T.row,
+        border: `1px solid ${T.line}`,
+        borderRadius: 9,
+        padding: '10px 8px',
+        textAlign: 'center'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 22,
+        fontWeight: 800,
+        color: farbe || T.text
+      }
+    }, wert), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: T.muted,
+        lineHeight: 1.25
+      }
+    }, label));
+    const rueck = imMonat('ware').filter(r => (r.zust || '').startsWith('Zurück')).length;
+    const befund = imMonat('pest').filter(r => !(r.bef || '').startsWith('Kein')).length;
+    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Karte, {
+      titel: "Monatsbericht",
+      sub: `${betrieb} · ${monatName(monat)}`
+    }, /*#__PURE__*/React.createElement(Feld, {
+      label: "Monat wählen"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "month",
+      style: st.input,
+      value: monat,
+      onChange: e => setMonat(e.target.value)
+    })), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 8
+      }
+    }, kachel(`${erfasst} / ${anzahlTage}`, 'Tage mit Temperaturen', erfasst < anzahlTage ? T.warn : T.ok), kachel(abw, 'Temperatur­abweichungen', abw ? T.alarm : T.ok), kachel(imMonat('zapf').length, 'Zapfanlagen­reinigungen', imMonat('zapf').length ? T.ok : T.alarm), kachel(Object.keys(clean).filter(d => d.startsWith(monat)).length, 'Tage mit Reinigungsplan')), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginTop: 8
+      }
+    }, kachel(imMonat('ware').length, 'Waren­annahmen'), kachel(rueck, 'Zurück­gewiesen', rueck ? T.warn : T.text), kachel(imMonat('oil').length, 'Öl­kontrollen'), kachel(befund, 'Schädlings­befunde', befund ? T.alarm : T.ok))), /*#__PURE__*/React.createElement(Karte, {
+      titel: "Temperaturübersicht",
+      sub: "Ganzer Monat, rot = außerhalb des Sollbereichs"
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        overflowX: 'auto'
+      }
+    }, /*#__PURE__*/React.createElement("table", {
+      style: {
+        width: '100%',
+        borderCollapse: 'collapse',
+        fontSize: 12
+      }
+    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+      style: st.th
+    }, "Tag"), cfg.geraete.map(g => /*#__PURE__*/React.createElement("th", {
+      key: g.id,
+      style: st.th
+    }, g.name)), /*#__PURE__*/React.createElement("th", {
+      style: st.th
+    }, "Maßnahme"), /*#__PURE__*/React.createElement("th", {
+      style: st.th
+    }, "Von"))), /*#__PURE__*/React.createElement("tbody", null, zeilen))), /*#__PURE__*/React.createElement("button", {
+      style: {
+        ...st.btn,
+        width: '100%',
+        marginTop: 12
+      },
+      onClick: () => window.print()
+    }, "Monat drucken")));
+  };
+
+  /* ---- Ansicht: Einstellungen ---- */
+  const Einstellungen = () => /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Karte, {
+    titel: "Kühlgeräte",
+    sub: "Name und Sollbereich je Gerät"
+  }, cfg.geraete.map((g, i) => /*#__PURE__*/React.createElement("div", {
+    key: g.id,
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    style: {
+      ...st.input,
+      flex: 2
+    },
+    value: g.name,
+    onChange: e => setCfg({
+      ...cfg,
+      geraete: cfg.geraete.map((x, j) => j === i ? {
+        ...x,
+        name: e.target.value
+      } : x)
+    })
+  }), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    style: {
+      ...st.input,
+      flex: 1
+    },
+    value: g.min,
+    onChange: e => setCfg({
+      ...cfg,
+      geraete: cfg.geraete.map((x, j) => j === i ? {
+        ...x,
+        min: +e.target.value
+      } : x)
+    })
+  }), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    style: {
+      ...st.input,
+      flex: 1
+    },
+    value: g.max,
+    onChange: e => setCfg({
+      ...cfg,
+      geraete: cfg.geraete.map((x, j) => j === i ? {
+        ...x,
+        max: +e.target.value
+      } : x)
+    })
+  }), /*#__PURE__*/React.createElement("button", {
+    style: {
+      background: 'none',
+      border: 'none',
+      color: T.muted,
+      fontSize: 20,
+      cursor: 'pointer'
+    },
+    onClick: () => setCfg({
+      ...cfg,
+      geraete: cfg.geraete.filter((_, j) => j !== i)
+    })
+  }, "×"))), /*#__PURE__*/React.createElement("button", {
+    style: {
+      ...st.btnAlt,
+      width: '100%'
+    },
+    onClick: () => setCfg({
+      ...cfg,
+      geraete: [...cfg.geraete, {
+        id: uid(),
+        name: 'Neues Gerät',
+        min: 0,
+        max: 7
+      }]
+    })
+  }, "Gerät hinzufügen")), /*#__PURE__*/React.createElement(Karte, {
+    titel: "Zapfanlage & Technik"
+  }, /*#__PURE__*/React.createElement(Feld, {
+    label: "Reinigungsintervall in Tagen"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    style: st.input,
+    value: cfg.zapfIntervall,
+    onChange: e => setCfg({
+      ...cfg,
+      zapfIntervall: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement(Feld, {
+    label: "Telefon Technik / Kundendienst"
+  }, /*#__PURE__*/React.createElement("input", {
+    style: st.input,
+    value: cfg.telTechnik,
+    onChange: e => setCfg({
+      ...cfg,
+      telTechnik: e.target.value
+    })
+  }))), /*#__PURE__*/React.createElement(Karte, {
+    titel: "Daten sichern",
+    sub: "Empfehlung: einmal im Monat, zusammen mit dem Z-Bon-Export"
+  }, /*#__PURE__*/React.createElement("button", {
+    style: {
+      ...st.btn,
+      width: '100%'
+    },
+    onClick: sicherung
+  }, "Alle HACCP-Daten als JSON sichern")));
+  const REITER = [['heute', 'Heute'], ['temp', 'Temperatur'], ['zapf', 'Zapfanlage'], ['clean', 'Reinigung'], ['ware', 'Wareneingang'], ['oil', 'Fritteusenöl'], ['staff', 'Personal'], ['pest', 'Schädlinge'], ['report', 'Monatsbericht'], ['set', 'Einstellungen']];
+  const inhalt = () => {
+    if (reiter === 'heute') return /*#__PURE__*/React.createElement(Heute, null);
+    if (reiter === 'temp') return /*#__PURE__*/React.createElement(Temperatur, null);
+    if (reiter === 'clean') return /*#__PURE__*/React.createElement(Reinigung, null);
+    if (reiter === 'report') return /*#__PURE__*/React.createElement(Bericht, null);
+    if (reiter === 'set') return /*#__PURE__*/React.createElement(Einstellungen, null);
+    return /*#__PURE__*/React.createElement(Liste, {
+      modul: reiter,
+      key: reiter
+    });
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: st.wrap
+  }, /*#__PURE__*/React.createElement("div", {
+    style: st.kopf
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h1", {
+    style: {
+      margin: 0,
+      fontSize: 18,
+      fontWeight: 800
+    }
+  }, "HACCP – Betriebskontrolle"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: T.muted,
+      fontSize: 12
+    }
+  }, betrieb, benutzer ? ` · angemeldet: ${benutzer}` : '')), onClose && /*#__PURE__*/React.createElement("button", {
+    style: {
+      ...st.btnAlt,
+      marginLeft: 'auto'
+    },
+    onClick: onClose
+  }, "Zurück zur Kasse")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      overflowX: 'auto',
+      marginTop: 10
+    }
+  }, REITER.map(([id, n]) => /*#__PURE__*/React.createElement("button", {
+    key: id,
+    style: st.reiter(reiter === id),
+    onClick: () => setReiter(id)
+  }, n, id === 'temp' && offeneTemp > 0 && ' •', id === 'zapf' && zapfStatus.stufe === 'alarm' && ' •', id === 'clean' && offeneClean > 0 && ' •')))), inhalt(), hinweis && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'fixed',
+      left: '50%',
+      bottom: 22,
+      transform: 'translateX(-50%)',
+      background: T.ok,
+      color: '#10251c',
+      fontWeight: 700,
+      padding: '12px 20px',
+      borderRadius: 999,
+      zIndex: 99
+    }
+  }, hinweis));
+}
+
+/* Diese letzte Zeile beim Einbau in die POS-Datei löschen: */
+  window.HACCPModul = HACCPModul;
+  /* Die Farbwelten werden von aussen gewaehlt (eatDeSi oder Kneipe). */
+  window.HACCP_THEMES = { eatdesi: THEME_EATDESI, kneipe: THEME_KNEIPE };
+})();
 
 function AiBetriebsleiterView({ completedOrders, expenses, customers }) {
   var R = React;
