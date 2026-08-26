@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v412</title>
+<title>eatDeSi POS v415</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -24602,7 +24602,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v412"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v415"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -24674,6 +24674,9 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
           { icon:"🍺", label:"Bar", id:"bar" },
           { icon:"🍳", label:"KDS Pro", id:"kds_pro" },
           { icon:"📅", label:"Reservierung", id:"reservations" },
+          /* v413: HACCP gehoert dorthin, wo die Kueche hinschaut - nicht ins
+             Menue. Der Zusatz zeigt, ob heute noch etwas fehlt. */
+          { icon:"🌡️", label:"HACCP", id:"haccp" },
           { icon:"\uD83D\uDC69\u200D\uD83C\uDF73", label:"AI Kellnerin", id:"ai_kellnerin" },
           { icon:"📊", label:"Tagesbericht", id:"summary" },
           { icon:"⏱️", label:"Zeiterfassung", id:"zeiterfassung" },
@@ -24687,9 +24690,24 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
         }).map(item => React.createElement("button", {
           key: item.id,
           onClick: () => item.id === "takeaway_new" ? setShowTaCustomerSearch(true) : setView(item.id),
-          style:{ padding:"14px 8px", borderRadius:12, border:"2px solid #f0f0f0", background:"#fafafa", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:600, color:"#333", display:"flex", flexDirection:"column", alignItems:"center", gap:6 }
+          style:{ position:"relative", padding:"14px 8px", borderRadius:12, border:"2px solid #f0f0f0", background:"#fafafa", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:600, color:"#333", display:"flex", flexDirection:"column", alignItems:"center", gap:6 }
         },
           React.createElement("span", { style:{ fontSize:22 } }, item.icon),
+          /* v413: Zustandspunkt fuer HACCP. Rot, wenn ein Wert ausserhalb
+             liegt; gelb, wenn heute noch Geraete offen sind. */
+          item.id === "haccp" && (function(){
+            try {
+              var h = window.belksHaccpOffen && window.belksHaccpOffen();
+              if (!h || !h.gesamt) return null;
+              if (h.ausserhalb > 0) return React.createElement("span", {
+                style:{ position:"absolute", top:6, right:8, width:9, height:9,
+                        borderRadius:"50%", background:"#c62828" } });
+              if (h.offen > 0) return React.createElement("span", {
+                style:{ position:"absolute", top:6, right:8, width:9, height:9,
+                        borderRadius:"50%", background:"#f5c542" } });
+              return null;
+            } catch(e){ return null; }
+          })(),
           item.label
         ))
       )
@@ -27913,7 +27931,20 @@ function App() {
   ), view === "firmendaten" && React.createElement(FirmendatenView, null
   ), view === "menu_import" && React.createElement(MenuImportExportView, {menuData:menuData,onUpdate:setMenuData}
   ), view === "test_center" && React.createElement(TestCenterView, {menuData:menuData,printerSettings:printerSettings,completedOrders:completedOrders}
-  ), view === "haccp" && React.createElement(window.HACCPModul, {
+  ),
+  /* v414: Das Pop-up nur auf der Startseite. Mitten in einer Bestellung oder
+     an der Kasse waere es im Weg - dort wird gearbeitet. Wer morgens die App
+     aufmacht, landet ohnehin hier. */
+  view === "home" && React.createElement(HaccpPopup, {
+    benutzer: (loggedInUser && loggedInUser.name) || "",
+    /* v415: Der Reiter wird gemerkt, damit "Selbst eintragen" bei der
+       Zapfanlage nicht auf "Heute" landet. */
+    onOeffnen: function(reiter){
+      try { if (reiter) localStorage.setItem("eatdesi_haccp_starttab", reiter); } catch(e){}
+      setView("haccp");
+    }
+  }),
+  view === "haccp" && React.createElement(window.HACCPModul, {
     /* v412: Betriebsname aus den Firmendaten - nie fest im Code, sonst
        traegt die Tochter-App eines fremden Restaurants unseren Namen. */
     betrieb: (function(){
@@ -32203,14 +32234,34 @@ function HACCPModul({
 }) {
   const T = theme;
   const K = n => prefix + n;
-  const [reiter, setReiter] = useState('heute');
+  /* v415: Kommt man ueber "Selbst eintragen" aus dem Zapf-Pop-up, soll der
+     richtige Reiter offen sein - nicht "Heute". Die Marke wird sofort
+     geloescht, sonst landet man beim naechsten Oeffnen wieder dort. */
+  const [reiter, setReiter] = useState(function(){
+    try {
+      var t = localStorage.getItem('eatdesi_haccp_starttab');
+      if (t) { localStorage.removeItem('eatdesi_haccp_starttab'); return t; }
+    } catch(e){}
+    return 'heute';
+  });
   const [monat, setMonat] = useState(heute().slice(0, 7));
   const [tagDatum, setTag] = useState(heute());
   const [hinweis, setHinweis] = useState('');
   const [cfg, setCfg] = useGespeichert(K('cfg'), {
     geraete: GERAETE_STD,
     zapfIntervall: 14,
-    telTechnik: ''
+    telTechnik: '',
+    /* v413: ab dieser Uhrzeit wird an die Temperaturkontrolle erinnert und
+       der Uebernahme-Vorschlag angeboten. */
+    tempErinnerung: '10:00',
+    /* Wochentag der Zapfanlagenreinigung: 0 = Sonntag ... 6 = Samstag.
+       v415: Vorgabe Freitag (5). Am 26.08. hiess es noch Montag - deshalb
+       einstellbar und nicht fest im Code. */
+    zapfWochentag: 5,
+    /* v414: feste Ruhetage (0 = Sonntag ... 6 = Samstag). An diesen Tagen
+       kommt keine Meldung - es wird ja nicht gearbeitet. Einzelne
+       Ausnahmetage markiert man am Pop-up selbst. */
+    ruhetage: []
   });
   const [temp, setTemp] = useGespeichert(K('temp'), {});
   const [clean, setClean] = useGespeichert(K('clean'), {});
@@ -32548,8 +32599,47 @@ function HACCPModul({
   }, "Monatsbericht"))));
 
   /* ---- Ansicht: Temperatur ---- */
+  /* ═══ v413: WERTE VON GESTERN UEBERNEHMEN ═══
+     Sucht den letzten Tag VOR dem gewaehlten, an dem gemessen wurde. Nicht
+     stur "gestern": war Ruhetag oder hat jemand vergessen einzutragen, waere
+     sonst nichts zu uebernehmen. */
+  const letzteMessung = (vorTag) => {
+    try {
+      const tage = Object.keys(temp).filter(d =>
+        d < vorTag && cfg.geraete.some(g => {
+          const v = (temp[d] || {})[g.id];
+          return v !== undefined && v !== '';
+        })).sort();
+      return tage.length ? tage[tage.length - 1] : null;
+    } catch (e) { return null; }
+  };
+
+  const uebernehmen = (vonTag, aufTag) => {
+    const alt = temp[vonTag] || {};
+    const neu = { ...(temp[aufTag] || {}) };
+    cfg.geraete.forEach(g => {
+      /* Bereits eingetragene Werte NICHT ueberschreiben - wer schon gemessen
+         hat, soll seine Zahl behalten. */
+      const schon = neu[g.id];
+      if (schon === undefined || schon === '') neu[g.id] = alt[g.id];
+    });
+    /* Die Bemerkung wird bewusst NICHT uebernommen: "Tuer stand offen" von
+       gestern hat mit heute nichts zu tun. */
+    neu._uebernommenVon = vonTag;
+    setTemp({ ...temp, [aufTag]: neu });
+    melden('\u00dcbernommen \u2013 bitte pr\u00fcfen und abweichende Werte korrigieren.');
+  };
+
   const Temperatur = () => {
     const t = temp[tagDatum] || {};
+    /* Vorschlag nur, wenn heute noch nichts steht, es einen Vortag gibt und
+       die eingestellte Uhrzeit erreicht ist. */
+    const nochLeer = !cfg.geraete.some(g => {
+      const v = t[g.id]; return v !== undefined && v !== '';
+    });
+    const vortag = nochLeer ? letzteMessung(tagDatum) : null;
+    const jetztUhr = new Date().toTimeString().slice(0, 5);
+    const faellig = tagDatum !== heute() || jetztUhr >= (cfg.tempErinnerung || '10:00');
     return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Karte, {
       titel: "Temperaturkontrolle",
       sub: "Kühl- und Tiefkühlgeräte, einmal pro Tag"
@@ -32560,7 +32650,39 @@ function HACCPModul({
       style: st.input,
       value: tagDatum,
       onChange: e => setTag(e.target.value)
-    })), cfg.geraete.map(g => {
+    })),
+
+    /* ═══ v413: DER VORSCHLAG ═══
+       Ein Antippen statt sechs Eingaben. Bewusst ein Knopf und keine
+       automatische Eintragung: der Eintrag traegt einen Namen und ist ein
+       Nachweis ueber eine durchgefuehrte Kontrolle. Wer nicht nachgesehen
+       hat, soll auch nichts unterschreiben. */
+    vortag && faellig && /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: T.row, border: '1px solid ' + T.warn, borderLeft: '4px solid ' + T.warn,
+        borderRadius: 9, padding: '11px 13px', marginBottom: 12
+      }
+    },
+      /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 13.5, color: T.warn, marginBottom: 4 } },
+        '\u23f0 Temperaturkontrolle offen'),
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: T.muted, lineHeight: 1.5, marginBottom: 10 } },
+        'Vom ', de(vortag), ' liegen Werte vor: ',
+        cfg.geraete.map(g => (temp[vortag] || {})[g.id]).filter(v => v !== undefined && v !== '').join(' \u00b7 '),
+        ' \u00b0C. \u00dcbernehmen und dann pr\u00fcfen \u2013 abweichende Werte einfach \u00fcberschreiben.'),
+      /*#__PURE__*/React.createElement("button", {
+        style: { ...st.btn, width: '100%' },
+        onClick: () => uebernehmen(vortag, tagDatum)
+      }, 'Werte vom ' + de(vortag) + ' \u00fcbernehmen')
+    ),
+
+    /* Wurde uebernommen, muss das im Nachweis stehen - sonst sieht ein
+       Pruefer sechs gleiche Tage und kann nicht unterscheiden, ob gemessen
+       oder uebernommen wurde. */
+    t._uebernommenVon && /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 11.5, color: T.muted, marginBottom: 10 }
+    }, '\u2139\ufe0f Werte vom ', de(t._uebernommenVon), ' \u00fcbernommen und best\u00e4tigt.'),
+
+    cfg.geraete.map(g => {
       const v = t[g.id];
       const da = v !== undefined && v !== '';
       const schlecht = da && (+v > g.max || +v < g.min);
@@ -32733,8 +32855,26 @@ function HACCPModul({
       const o = def.ohneDatum ? {} : {
         datum: heute()
       };
+      /* v413: Aus dem letzten Eintrag vorbelegen. Bei der Zapfanlage sind
+         Leitungen, Reinigungsmittel und Art jede Woche dieselben - sie jedes
+         Mal neu zu tippen ist reine Arbeit ohne Ertrag.
+         WICHTIG: Das DATUM wird nie uebernommen, es bleibt heute. Und
+         gespeichert wird erst auf Knopfdruck - vorbelegen ist eine Hilfe,
+         keine Aufzeichnung. */
+      const frueher = (daten[modul] || []).slice()
+        .sort((a, b) => (a.datum || '').localeCompare(b.datum || ''));
+      const letzter = frueher.length ? frueher[frueher.length - 1] : null;
       def.felder.forEach(f => {
-        o[f.k] = f.auto === 'benutzer' ? benutzer : f.typ === 'select' ? f.opt[0] : '';
+        if (f.auto === 'benutzer') { o[f.k] = benutzer; return; }
+        /* Mengen, Temperaturen und Bemerkungen NICHT vorbelegen - das waeren
+           Messwerte bzw. Angaben zum einzelnen Vorgang. Vorbelegt wird nur,
+           was sich betrieblich nicht aendert. */
+        const istMesswert = /menge|temp|wert|bemerk|note|charge|mhd|lief/i.test(f.k);
+        if (letzter && !istMesswert && letzter[f.k] !== undefined && letzter[f.k] !== '') {
+          o[f.k] = letzter[f.k];
+        } else {
+          o[f.k] = f.typ === 'select' ? f.opt[0] : '';
+        }
       });
       return o;
     };
@@ -32975,7 +33115,45 @@ function HACCPModul({
   };
 
   /* ---- Ansicht: Einstellungen ---- */
-  const Einstellungen = () => /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Karte, {
+  const Einstellungen = () => /*#__PURE__*/React.createElement(React.Fragment, null,
+
+  /* ═══ v414: ERINNERUNG UND RUHETAGE ═══
+     Beides gehoert dem Restaurant und wird abgeglichen - an einem Ruhetag
+     soll kein Geraet im Haus melden. */
+  /*#__PURE__*/React.createElement(Karte, {
+    titel: "Erinnerung",
+    sub: "Wann das Pop-up auf der Startseite erscheint"
+  }, /*#__PURE__*/React.createElement(Feld, {
+    label: "T\u00e4glich ab"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "time",
+    style: st.input,
+    value: cfg.tempErinnerung || '10:00',
+    onChange: e => setCfg({ ...cfg, tempErinnerung: e.target.value })
+  })), /*#__PURE__*/React.createElement(Feld, {
+    label: "Ruhetage \u2013 an diesen Tagen keine Meldung"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { display: 'flex', gap: 6, flexWrap: 'wrap' }
+  }, [[1,'Mo'],[2,'Di'],[3,'Mi'],[4,'Do'],[5,'Fr'],[6,'Sa'],[0,'So']].map(([nr, kurz]) => {
+    const an = (cfg.ruhetage || []).indexOf(nr) >= 0;
+    return /*#__PURE__*/React.createElement("button", {
+      key: nr,
+      onClick: () => setCfg({ ...cfg, ruhetage: an
+        ? (cfg.ruhetage || []).filter(x => x !== nr)
+        : (cfg.ruhetage || []).concat([nr]) }),
+      style: { padding: '9px 13px', borderRadius: 9, cursor: 'pointer',
+               fontFamily: 'inherit', fontWeight: 700, fontSize: 13,
+               background: an ? T.accent : T.row,
+               color: an ? T.accentText : T.muted,
+               border: '1px solid ' + (an ? T.accent : T.line) }
+    }, kurz);
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 11.5, color: T.muted, lineHeight: 1.5 }
+  }, "Einzelne Ausnahmetage markiert man direkt am Pop-up \u00fcber "
+   + "\u201eHeute Ruhetag\u201c. Der Tag wird festgehalten, damit im "
+   + "Monatsbericht ein Grund f\u00fcr die L\u00fccke steht.")),
+
+  /*#__PURE__*/React.createElement(Karte, {
     titel: "Kühlgeräte",
     sub: "Name und Sollbereich je Gerät"
   }, cfg.geraete.map((g, i) => /*#__PURE__*/React.createElement("div", {
@@ -33150,10 +33328,406 @@ function HACCPModul({
 }
 
 /* Diese letzte Zeile beim Einbau in die POS-Datei löschen: */
+  /* ═══ v413: IST HEUTE ETWAS OFFEN? ═══
+     Fuer den Schnellzugriff auf der Startseite. Bewusst hier drin, damit die
+     Startseite dieselbe Rechnung benutzt wie das Modul selbst und nicht eine
+     zweite, eigene - das Muster, das uns diese Sitzung ueber begleitet hat. */
+  window.belksHaccpOffen = function(prefix){
+    try {
+      var p = prefix || 'eatdesi_haccp_';
+      var cfg = ladeLokal(p + 'cfg', null) || { geraete: GERAETE_STD };
+      var temp = ladeLokal(p + 'temp', {}) || {};
+      var heuteStr = heute();
+      var t = temp[heuteStr] || {};
+      var geraete = cfg.geraete || GERAETE_STD;
+      var offen = geraete.filter(function(g){
+        var v = t[g.id]; return v === undefined || v === '';
+      }).length;
+      var ausserhalb = geraete.filter(function(g){
+        var v = t[g.id];
+        return v !== undefined && v !== '' && (+v > g.max || +v < g.min);
+      }).length;
+      return { offen: offen, gesamt: geraete.length, ausserhalb: ausserhalb };
+    } catch(e){ return { offen: 0, gesamt: 0, ausserhalb: 0 }; }
+  };
+
+
+  /* ═══ v414: FUER DAS POP-UP AUF DER STARTSEITE ═══ */
+
+  /* Ist heute Ruhetag? Zwei Quellen: fest eingestellte Wochentage und
+     einzelne Tage, die jemand am Pop-up als Ruhetag markiert hat. */
+  window.belksHaccpRuhetag = function(datum, prefix){
+    try {
+      var p = prefix || 'eatdesi_haccp_';
+      var cfg = ladeLokal(p + 'cfg', {}) || {};
+      var d = datum || heute();
+      var wt = new Date(d + 'T12:00:00').getDay();      // 0 = Sonntag
+      if ((cfg.ruhetage || []).indexOf(wt) >= 0) return true;
+      return (ladeLokal(p + 'ruhetage', []) || []).indexOf(d) >= 0;
+    } catch(e){ return false; }
+  };
+
+  window.belksHaccpRuhetagSetzen = function(datum, prefix){
+    try {
+      var p = prefix || 'eatdesi_haccp_';
+      var liste = ladeLokal(p + 'ruhetage', []) || [];
+      var d = datum || heute();
+      if (liste.indexOf(d) < 0) liste.push(d);
+      /* Nicht endlos wachsen lassen - ein Jahr reicht fuer den Nachweis. */
+      if (liste.length > 400) liste = liste.slice(-400);
+      localStorage.setItem(p + 'ruhetage', JSON.stringify(liste));
+      return true;
+    } catch(e){ return false; }
+  };
+
+  /* Was koennte uebernommen werden? Liefert den letzten Tag mit Messung und
+     die Werte - fuer den Text im Pop-up. */
+  window.belksHaccpVorschlag = function(prefix){
+    try {
+      var p = prefix || 'eatdesi_haccp_';
+      var cfg = ladeLokal(p + 'cfg', null) || { geraete: GERAETE_STD };
+      var geraete = cfg.geraete || GERAETE_STD;
+      var temp = ladeLokal(p + 'temp', {}) || {};
+      var heuteStr = heute();
+      var tage = Object.keys(temp).filter(function(d){
+        return d < heuteStr && geraete.some(function(g){
+          var v = (temp[d] || {})[g.id]; return v !== undefined && v !== '';
+        });
+      }).sort();
+      if (!tage.length) return null;
+      var vortag = tage[tage.length - 1];
+      return {
+        vortag: vortag,
+        werte: geraete.map(function(g){
+          return { id: g.id, name: g.name, wert: (temp[vortag] || {})[g.id] };
+        }).filter(function(x){ return x.wert !== undefined && x.wert !== ''; })
+      };
+    } catch(e){ return null; }
+  };
+
+  /* Uebernehmen - genau dieselbe Regel wie im Modul: nichts ueberschreiben,
+     keine Bemerkung mitnehmen, Herkunft festhalten. */
+  window.belksHaccpUebernehmen = function(vonTag, prefix, wer){
+    try {
+      var p = prefix || 'eatdesi_haccp_';
+      var cfg = ladeLokal(p + 'cfg', null) || { geraete: GERAETE_STD };
+      var geraete = cfg.geraete || GERAETE_STD;
+      var temp = ladeLokal(p + 'temp', {}) || {};
+      var heuteStr = heute();
+      var alt = temp[vonTag] || {};
+      var neu = Object.assign({}, temp[heuteStr] || {});
+      geraete.forEach(function(g){
+        if (neu[g.id] === undefined || neu[g.id] === '') neu[g.id] = alt[g.id];
+      });
+      neu._uebernommenVon = vonTag;
+      if (wer) neu._pruefer = wer;
+      temp[heuteStr] = neu;
+      localStorage.setItem(p + 'temp', JSON.stringify(temp));
+      try { if (window.runSync) window.runSync(); } catch(e){}
+      return true;
+    } catch(e){ return false; }
+  };
+
+  /* Soll das Pop-up erscheinen? Eine Stelle, die alle Bedingungen kennt. */
+  window.belksHaccpPopupNoetig = function(prefix){
+    try {
+      var p = prefix || 'eatdesi_haccp_';
+      var heuteStr = heute();
+      if (window.belksHaccpRuhetag(heuteStr, p)) return null;   // Ruhetag: nie
+      var cfg = ladeLokal(p + 'cfg', null) || {};
+      var ab = cfg.tempErinnerung || '10:00';
+      if (new Date().toTimeString().slice(0,5) < ab) return null;
+      var stand = window.belksHaccpOffen(p);
+      if (!stand.gesamt || stand.offen === 0) return null;       // schon erledigt
+      /* "Spaeter" ist geraetelokal und gilt zwei Stunden - danach meldet es
+         sich wieder, damit es nicht vergessen wird. */
+      try {
+        var bis = parseInt(localStorage.getItem(p + 'spaeter_' + heuteStr) || '0', 10);
+        if (bis && Date.now() < bis) return null;
+      } catch(e){}
+      return { offen: stand.offen, gesamt: stand.gesamt, vorschlag: window.belksHaccpVorschlag(p) };
+    } catch(e){ return null; }
+  };
+
+  window.belksHaccpSpaeter = function(prefix){
+    try {
+      var p = prefix || 'eatdesi_haccp_';
+      localStorage.setItem(p + 'spaeter_' + heute(), String(Date.now() + 2*60*60*1000));
+    } catch(e){}
+  };
+
+
+  /* ═══ v415: ZAPFANLAGE - WOCHENTAG-ERINNERUNG ═══ */
+
+  /* Wann wurde zuletzt gereinigt, und was stand damals im Formular? */
+  window.belksZapfLetzte = function(prefix){
+    try {
+      var p = prefix || 'eatdesi_haccp_';
+      var listen = ladeLokal(p + 'listen', {}) || {};
+      var zapf = (listen.zapf || []).slice()
+        .sort(function(a,b){ return String(a.datum||'').localeCompare(String(b.datum||'')); });
+      return zapf.length ? zapf[zapf.length - 1] : null;
+    } catch(e){ return null; }
+  };
+
+  window.belksZapfPopupNoetig = function(prefix){
+    try {
+      var p = prefix || 'eatdesi_haccp_';
+      var heuteStr = heute();
+      if (window.belksHaccpRuhetag(heuteStr, p)) return null;
+
+      var cfg = ladeLokal(p + 'cfg', {}) || {};
+      var tag = (cfg.zapfWochentag === undefined || cfg.zapfWochentag === null)
+        ? 5 : cfg.zapfWochentag;                      /* 5 = Freitag */
+      if (new Date(heuteStr + 'T12:00:00').getDay() !== tag) return null;
+
+      var ab = cfg.tempErinnerung || '10:00';
+      if (new Date().toTimeString().slice(0,5) < ab) return null;
+
+      /* Schon in dieser Woche gereinigt? Gemessen an sieben Tagen zurueck,
+         nicht am Kalenderwochenanfang: wer Donnerstag reinigt, soll am
+         Freitag nicht schon wieder gefragt werden. */
+      var letzte = window.belksZapfLetzte(p);
+      if (letzte && letzte.datum && tage(letzte.datum, heuteStr) < 7) return null;
+
+      try {
+        var bis = parseInt(localStorage.getItem(p + 'spaeter_zapf_' + heuteStr) || '0', 10);
+        if (bis && Date.now() < bis) return null;
+      } catch(e){}
+
+      return {
+        letzte: letzte || null,
+        seitTagen: (letzte && letzte.datum) ? tage(letzte.datum, heuteStr) : null,
+        /* Vorbelegung aus der letzten Reinigung - keine Messwerte, nur
+           betriebliche Angaben. */
+        art: (letzte && letzte.art) || LISTEN.zapf.felder[0].opt[0],
+        leit: (letzte && letzte.leit) || cfg.zapfLeitungen || '',
+        mittel: (letzte && letzte.mittel) || ''
+      };
+    } catch(e){ return null; }
+  };
+
+  /* Erledigt eintragen. Das Datum ist IMMER heute. */
+  window.belksZapfEintragen = function(daten, prefix, wer){
+    try {
+      var p = prefix || 'eatdesi_haccp_';
+      var listen = ladeLokal(p + 'listen', {}) || {};
+      if (!listen.zapf) listen.zapf = [];
+      listen.zapf.push({
+        id: uid(),
+        datum: heute(),
+        art: (daten && daten.art) || LISTEN.zapf.felder[0].opt[0],
+        leit: (daten && daten.leit) || '',
+        mittel: (daten && daten.mittel) || '',
+        von: wer || ''
+      });
+      localStorage.setItem(p + 'listen', JSON.stringify(listen));
+      try { if (window.runSync) window.runSync(); } catch(e){}
+      return true;
+    } catch(e){ return false; }
+  };
+
+  window.belksZapfSpaeter = function(prefix){
+    try {
+      var p = prefix || 'eatdesi_haccp_';
+      localStorage.setItem(p + 'spaeter_zapf_' + heute(), String(Date.now() + 2*60*60*1000));
+    } catch(e){}
+  };
+
   window.HACCPModul = HACCPModul;
   /* Die Farbwelten werden von aussen gewaehlt (eatDeSi oder Kneipe). */
   window.HACCP_THEMES = { eatdesi: THEME_EATDESI, kneipe: THEME_KNEIPE };
 })();
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   v414: DAS HACCP-POP-UP AUF DER STARTSEITE
+   Abdullah: "um 10 Uhr taeglich Pop-Up, Mitarbeiter drueckt uebernehmen und
+   erledigt, damit es nie vergessen wird. Ruhetag keine Nachricht."
+
+   Es erscheint nur, wenn ALLES zutrifft:
+     - die eingestellte Uhrzeit ist erreicht (Vorgabe 10:00)
+     - heute ist kein Ruhetag
+     - heute steht noch nicht alles drin
+     - auf diesem Geraet wurde nicht "spaeter" getippt (gilt 2 Stunden)
+
+   Die Bedingungen stehen NICHT hier, sondern in belksHaccpPopupNoetig() im
+   Modul - dieselbe Rechnung, die auch die Ansicht benutzt.
+   ═══════════════════════════════════════════════════════════════════════ */
+function HaccpPopup({ benutzer, onOeffnen }) {
+  const R = React;
+  /* de() liegt gekapselt im HACCP-Modul (v412) und ist hier nicht sichtbar.
+     Bewusst eine eigene, winzige Fassung statt die Kapsel zu oeffnen. */
+  const de = s => s ? String(s).split('-').reverse().join('.') : '\u2013';
+  const [noetig, setNoetig] = R.useState(null);
+  const [zapf, setZapf] = R.useState(null);        /* v415 */
+  const [zu, setZu] = R.useState(false);
+  const [zapfZu, setZapfZu] = R.useState(false);   /* v415 */
+
+  R.useEffect(function(){
+    var pruefen = function(){
+      try {
+        if (!zu) setNoetig(window.belksHaccpPopupNoetig ? window.belksHaccpPopupNoetig() : null);
+        if (!zapfZu) setZapf(window.belksZapfPopupNoetig ? window.belksZapfPopupNoetig() : null);
+      } catch(e){ setNoetig(null); setZapf(null); }
+    };
+    pruefen();
+    /* Jede Minute nachsehen. Wer um 9:55 auf der Startseite steht, soll um
+       10:00 die Meldung bekommen, ohne die App neu zu starten. */
+    var t = setInterval(pruefen, 60000);
+    return function(){ clearInterval(t); };
+  }, [zu, zapfZu]);
+
+  /* v415: Vorrang hat die Temperatur - taeglich und verderbliche Ware.
+     Erst wenn die erledigt (oder weggetippt) ist, kommt die Zapfanlage.
+     Zwei Fenster uebereinander waere ein Stapel, den niemand mag. */
+  var zeigeTemp = noetig && !zu;
+  var zeigeZapf = !zeigeTemp && zapf && !zapfZu;
+  if (!zeigeTemp && !zeigeZapf) return null;
+  var v = noetig && noetig.vorschlag;
+
+  var knopf = function(text, farbe, weiss, fn){
+    return R.createElement("button", {
+      onClick: fn,
+      style: { flex:1, padding:"13px 10px", borderRadius:11, border:"none",
+               background:farbe, color: weiss ? "#fff" : "#555",
+               fontFamily:"inherit", fontWeight:800, fontSize:13.5, cursor:"pointer" }
+    }, text);
+  };
+
+  var huelle = function(kinder){
+    return R.createElement("div", {
+      style: { position:"fixed", inset:0, background:"#0009", zIndex:5000,
+               display:"flex", alignItems:"center", justifyContent:"center", padding:16 }
+    },
+      R.createElement("div", {
+        style: { background:"#fff", borderRadius:16, width:"100%", maxWidth:440,
+                 overflow:"hidden", boxShadow:"0 8px 30px #0005" }
+      }, kinder)
+    );
+  };
+
+  /* ═══ v415: ZAPFANLAGE ═══
+     Der Knopf heisst "Reinigung erledigt" und nicht "uebernehmen": Art,
+     Leitungen und Mittel sind betriebliche Vorgaben, bestaetigt wird die
+     DURCHFUEHRUNG. Wer drueckt, sagt aus, dass gereinigt wurde. */
+  if (zeigeZapf) return huelle([
+    R.createElement("div", { key:"k",
+      style: { background:"linear-gradient(135deg,#5bb8ff,#2f7fbf)", padding:"14px 16px" } },
+      R.createElement("div", { style:{ fontWeight:800, fontSize:16, color:"#08243b" } },
+        "\uD83C\uDF7A Zapfanlage reinigen"),
+      R.createElement("div", { style:{ fontSize:12.5, color:"#0d3a5c", marginTop:2 } },
+        zapf.seitTagen === null
+          ? "Noch kein Reinigungsnachweis vorhanden"
+          : "Letzte Reinigung vor " + zapf.seitTagen + " Tagen ("
+            + de(zapf.letzte.datum) + ")")
+    ),
+    R.createElement("div", { key:"b", style:{ padding:16 } },
+      R.createElement("div", { style:{ fontSize:13.5, color:"#555", lineHeight:1.6, marginBottom:10 } },
+        "Nachweis nach DIN 6650-6. Eingetragen wird:"),
+      R.createElement("div", {
+        style:{ background:"#f7f7f7", borderRadius:10, padding:"11px 13px",
+                fontSize:13, color:"#333", marginBottom:12, lineHeight:1.7 } },
+        R.createElement("div", null, R.createElement("b", null, zapf.art)),
+        zapf.leit && R.createElement("div", null, "Leitungen: ", zapf.leit),
+        zapf.mittel && R.createElement("div", null, "Mittel: ", zapf.mittel),
+        R.createElement("div", { style:{ color:"#777" } }, "Heute \u00b7 ", benutzer || "\u2013")
+      ),
+      R.createElement("div", { style:{ fontSize:12, color:"#777", lineHeight:1.55, marginBottom:14 } },
+        "Nur best\u00e4tigen, wenn die Reinigung wirklich durchgef\u00fchrt wurde. "
+        + "Abweichende Angaben (anderes Mittel, Fachfirma) bitte \u00fcber "
+        + "\u201eSelbst eintragen\u201c erfassen."),
+      R.createElement("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
+        knopf("\u2714\uFE0F Reinigung erledigt", "#2f7fbf", true, function(){
+          try {
+            window.belksZapfEintragen(
+              { art: zapf.art, leit: zapf.leit, mittel: zapf.mittel },
+              undefined, benutzer || "");
+            setZapfZu(true);
+          } catch(e){}
+        }),
+        knopf("Selbst eintragen", "#eee", false, function(){
+          setZapfZu(true);
+          if (onOeffnen) onOeffnen("zapf");
+        })
+      ),
+      R.createElement("div", { style:{ display:"flex", gap:8 } },
+        knopf("Sp\u00e4ter", "#f5f5f5", false, function(){
+          try { window.belksZapfSpaeter(); } catch(e){}
+          setZapfZu(true);
+        }),
+        knopf("Heute Ruhetag", "#f5f5f5", false, function(){
+          try { window.belksHaccpRuhetagSetzen(); } catch(e){}
+          setZapfZu(true);
+        })
+      )
+    )
+  ]);
+
+  return R.createElement("div", {
+    style: { position:"fixed", inset:0, background:"#0009", zIndex:5000,
+             display:"flex", alignItems:"center", justifyContent:"center", padding:16 }
+  },
+    R.createElement("div", {
+      style: { background:"#fff", borderRadius:16, width:"100%", maxWidth:440,
+               overflow:"hidden", boxShadow:"0 8px 30px #0005" }
+    },
+      R.createElement("div", {
+        style: { background:"linear-gradient(135deg,#f5c542,#e0a800)", padding:"14px 16px" }
+      },
+        R.createElement("div", { style:{ fontWeight:800, fontSize:16, color:"#3d2f00" } },
+          "\uD83C\uDF21\uFE0F Temperaturkontrolle"),
+        R.createElement("div", { style:{ fontSize:12.5, color:"#5c4700", marginTop:2 } },
+          noetig.offen + " von " + noetig.gesamt + " Ger\u00e4ten noch offen")
+      ),
+      R.createElement("div", { style:{ padding:16 } },
+        v
+          ? R.createElement("div", null,
+              R.createElement("div", { style:{ fontSize:13.5, color:"#555", lineHeight:1.6, marginBottom:6 } },
+                "Vom ", R.createElement("b", null, de(v.vortag)), " liegen Werte vor:"),
+              R.createElement("div", {
+                style:{ background:"#f7f7f7", borderRadius:10, padding:"11px 13px",
+                        fontSize:16, fontWeight:800, color:"#333", marginBottom:10,
+                        letterSpacing:"0.5px" } },
+                v.werte.map(function(w){ return w.wert; }).join(" \u00b7 "), " \u00b0C"),
+              R.createElement("div", { style:{ fontSize:12, color:"#777", lineHeight:1.55, marginBottom:14 } },
+                "Wenn alles passt: \u00fcbernehmen. Weicht ein Wert ab, danach in der "
+                + "HACCP-Ansicht \u00fcberschreiben.")
+            )
+          : R.createElement("div", { style:{ fontSize:13.5, color:"#555", lineHeight:1.6, marginBottom:14 } },
+              "Es liegen noch keine fr\u00fcheren Werte vor, die \u00fcbernommen werden k\u00f6nnten. "
+              + "Bitte die Ger\u00e4te ablesen und eintragen."),
+
+        R.createElement("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
+          v && knopf("\u2714\uFE0F \u00dcbernehmen", "#2e7d32", true, function(){
+            try {
+              window.belksHaccpUebernehmen(v.vortag, undefined, benutzer || "");
+              setZu(true);
+            } catch(e){}
+          }),
+          knopf(v ? "Selbst eintragen" : "\uD83C\uDF21\uFE0F Jetzt eintragen",
+                v ? "#eee" : "#C84B31", !v, function(){
+            setZu(true);
+            if (onOeffnen) onOeffnen();
+          })
+        ),
+        R.createElement("div", { style:{ display:"flex", gap:8 } },
+          knopf("Sp\u00e4ter", "#f5f5f5", false, function(){
+            try { window.belksHaccpSpaeter(); } catch(e){}
+            setZu(true);
+          }),
+          /* Ruhetag: kein Eintrag, keine Meldung mehr an diesem Tag. Er wird
+             festgehalten, damit im Monatsbericht ein Grund fuer die Luecke
+             steht - eine unbegruendete Luecke sieht nach Versaeumnis aus. */
+          knopf("Heute Ruhetag", "#f5f5f5", false, function(){
+            try { window.belksHaccpRuhetagSetzen(); } catch(e){}
+            setZu(true);
+          })
+        )
+      )
+    )
+  );
+}
 
 function AiBetriebsleiterView({ completedOrders, expenses, customers }) {
   var R = React;
@@ -36109,6 +36683,9 @@ var BELKS_RESET_KASSE = [
    Treuepunkten - die haben mit dem Kassenstand nichts zu tun. */
 
 var SYNC_BLACKLIST = [
+  /* v414: "Spaeter" beim HACCP-Pop-up gilt nur fuer DIESES Geraet - siehe
+     die Praefix-Regel in _isLocalOnlyKey. Waere es in der Cloud, wuerde ein
+     Wegtippen an der Theke das Pop-up in der Kueche mit verstummen lassen. */
   'eatdesi_device_id',     // jede Geraete-ID ist eigen
   'eatdesi_reset_gesehen', // v352: welchen Reset dieses Geraet schon ausgefuehrt hat
   'eatdesi_session',       // Login-Session lokal
@@ -36165,6 +36742,14 @@ function _isLocalOnlyKey(k) {
   if (k.indexOf('eatdesi_tenant_ok_')  === 0) return true;
   if (k.indexOf('eatdesi_bootpull_')   === 0) return true;
   if (k.indexOf('eatdesi_setup_hide_') === 0) return true;
+  /* v414: 'eatdesi_haccp_spaeter_<datum>'. Der Eintrag in der SYNC_BLACKLIST
+     haette nicht gegriffen - die Liste vergleicht GENAUE Namen, hier haengt
+     aber das Datum hinten dran. */
+  if (k.indexOf('eatdesi_haccp_spaeter_') === 0) return true;
+  /* v415: Startreiter ist reine Bedienung DIESES Geraets. Waere er in
+     der Cloud, wuerde ein Tippen an der Theke die Kasse in der Kueche
+     in einen anderen Reiter springen lassen. */
+  if (k === 'eatdesi_haccp_starttab') return true;
   if (k.indexOf('eatdesi_firmabak_')   === 0) return true;
   if (k.indexOf('eatdesi_auth_')       === 0) return true;   // v200: Sitzungen je Tochter
   if (k.indexOf('eatdesi_printer_')    === 0) return true;   // v209: Drucker je Tochter, nie in die Cloud
