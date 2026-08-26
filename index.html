@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v417</title>
+<title>eatDeSi POS v418</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -24602,7 +24602,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v417"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v418"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27940,6 +27940,8 @@ function App() {
     /* v415: Der Reiter wird gemerkt, damit "Selbst eintragen" bei der
        Zapfanlage nicht auf "Heute" landet. */
     onOeffnen: function(reiter){
+      /* v418: auch die Temperatur uebergibt jetzt ihren Reiter - vorher
+         landete "Selbst eintragen" dort auf "Heute". */
       try { if (reiter) localStorage.setItem("eatdesi_haccp_starttab", reiter); } catch(e){}
       setView("haccp");
     }
@@ -33014,68 +33016,84 @@ function HACCPModul({
       style: st.input,
       value: monat,
       onChange: e => setMonat(e.target.value)
-    })), /*#__PURE__*/React.createElement("div", {
+    })),
+
+    /* ═══ v418: KARTEN STATT TABELLE ═══
+       Vorher eine Tabelle mit bis zu sechs Spalten in einem Kasten mit
+       overflowX. Auf dem Telefon lief die letzte Spalte - genau die mit
+       Bearbeiten und Loeschen - aus dem Bild. Die Knoepfe waren da, nur
+       sah sie niemand.
+       Jede Zeile ist jetzt eine Karte: oben Datum und die Hauptangabe,
+       darunter der Rest, rechts die Knoepfe. Nichts mehr zu schieben. */
+    rows.map(r => /*#__PURE__*/React.createElement("div", {
+      key: r.id,
       style: {
-        overflowX: 'auto'
+        background: bearbeite === r.id ? T.row : 'transparent',
+        border: '1px solid ' + (bearbeite === r.id ? T.warn : T.line),
+        borderRadius: 10, padding: '11px 12px', marginBottom: 8,
+        display: 'flex', gap: 10, alignItems: 'flex-start'
       }
-    }, /*#__PURE__*/React.createElement("table", {
-      style: {
-        width: '100%',
-        borderCollapse: 'collapse'
-      }
-    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, def.spalten.map(s => /*#__PURE__*/React.createElement("th", {
-      key: s,
-      style: st.th
-    }, s === 'datum' ? 'Datum' : def.felder.find(f => f.k === s)?.l || s)), /*#__PURE__*/React.createElement("th", {
-      style: st.th
-    }))), /*#__PURE__*/React.createElement("tbody", null, rows.map(r => /*#__PURE__*/React.createElement("tr", {
-      key: r.id
-    }, def.spalten.map(s => /*#__PURE__*/React.createElement("td", {
-      key: s,
-      style: st.td
-    }, s === 'datum' ? de(r.datum) : s === 'belehrung' || s === 'schulung' ? de(r[s]) : r[s] || '')), /*#__PURE__*/React.createElement("td", {
-      style: st.td
-    }, /*#__PURE__*/React.createElement("div", {
-      style: { display: 'flex', gap: 2, justifyContent: 'flex-end' }
     },
-      /* v416: Bearbeiten - der Eintrag wandert ins Formular, die Kennung
-         bleibt gemerkt. Wer sich vertippt hat, musste bisher loeschen und
-         neu erfassen und verlor dabei das urspruengliche Datum. */
-      /*#__PURE__*/React.createElement("button", {
-        onClick: () => {
-          setEntwurf({ ...r });
-          setBearbeite(r.id);
-          try { window.scrollTo(0, 0); } catch(e) {}
-        },
-        title: 'Bearbeiten',
-        style: { background: 'none', border: 'none', color: T.muted,
-                 fontSize: 16, cursor: 'pointer', padding: '2px 6px' }
-      }, "\u270F\uFE0F"),
-      /* v416: Loeschen jetzt MIT Rueckfrage. Ein Nachweis ist Dokumentation;
-         ein Fehlgriff auf dem Handy darf ihn nicht stillschweigend
-         entfernen. */
-      /*#__PURE__*/React.createElement("button", {
-        onClick: () => {
-          var wann = r.datum ? de(r.datum) : 'Eintrag';
-          if (window.confirm('Eintrag vom ' + wann + ' wirklich l\u00f6schen?\n\n'
-            + 'HACCP-Nachweise sind Dokumentation. Ein Tippfehler geh\u00f6rt '
-            + 'berichtigt (\u270F\uFE0F), nicht gel\u00f6scht.')) {
-            loesche(modul, r.id);
-            if (bearbeite === r.id) { setBearbeite(null); setEntwurf(leer()); }
-            melden('Eintrag gel\u00f6scht.');
-          }
-        },
-        title: 'L\u00f6schen',
-        style: { background: 'none', border: 'none', color: T.muted,
-                 fontSize: 20, cursor: 'pointer', padding: '0 4px' }
-      }, "\u00d7")
-    )))), rows.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-      colSpan: def.spalten.length + 1,
-      style: {
-        ...st.td,
-        color: T.muted
-      }
-    }, "Kein Eintrag."))))), /*#__PURE__*/React.createElement("button", {
+      /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+        /* Kopfzeile: Datum und die erste inhaltliche Spalte - das ist das,
+           wonach man sucht. */
+        /*#__PURE__*/React.createElement("div", {
+          style: { fontWeight: 700, fontSize: 14, marginBottom: 2 }
+        }, def.ohneDatum ? (r[def.spalten[0]] || '\u2013') : de(r.datum)),
+        /* Alle uebrigen Angaben untereinander, mit ihrer Beschriftung -
+           ohne Kopfzeile weiss sonst niemand, was "3" bedeutet. */
+        def.spalten.filter(sp => sp !== 'datum').map(sp => {
+          const wert = (sp === 'belehrung' || sp === 'schulung') ? de(r[sp]) : (r[sp] || '');
+          if (!wert && wert !== 0) return null;
+          const feld = def.felder.find(f => f.k === sp);
+          return /*#__PURE__*/React.createElement("div", {
+            key: sp,
+            style: { fontSize: 12.5, color: T.muted, lineHeight: 1.5 }
+          },
+            /*#__PURE__*/React.createElement("span", { style: { opacity: .75 } },
+              (feld ? feld.l : sp) + ': '),
+            /*#__PURE__*/React.createElement("span", { style: { color: T.text } }, wert)
+          );
+        })
+      ),
+
+      /* Die Knoepfe: gross genug fuer einen Daumen, immer sichtbar. */
+      /*#__PURE__*/React.createElement("div", {
+        style: { display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }
+      },
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => {
+            setEntwurf({ ...r });
+            setBearbeite(r.id);
+            try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch(e) { try { window.scrollTo(0,0); } catch(e2){} }
+          },
+          style: { background: T.row, border: '1px solid ' + T.line, borderRadius: 9,
+                   color: T.text, fontSize: 16, cursor: 'pointer',
+                   padding: '8px 12px', fontFamily: 'inherit' }
+        }, "\u270F\uFE0F"),
+        /* v416: Loeschen mit Rueckfrage. Ein Nachweis ist Dokumentation;
+           ein Fehlgriff auf dem Handy darf ihn nicht stillschweigend
+           entfernen. */
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => {
+            var wann = r.datum ? de(r.datum) : 'Eintrag';
+            if (window.confirm('Eintrag vom ' + wann + ' wirklich l\u00f6schen?\n\n'
+              + 'HACCP-Nachweise sind Dokumentation. Ein Tippfehler geh\u00f6rt '
+              + 'berichtigt (Stift), nicht gel\u00f6scht.')) {
+              loesche(modul, r.id);
+              if (bearbeite === r.id) { setBearbeite(null); setEntwurf(leer()); }
+              melden('Eintrag gel\u00f6scht.');
+            }
+          },
+          style: { background: T.row, border: '1px solid ' + T.line, borderRadius: 9,
+                   color: T.alarm, fontSize: 18, cursor: 'pointer',
+                   padding: '6px 12px', fontFamily: 'inherit', fontWeight: 700 }
+        }, "\u00d7")
+      )
+    )),
+    rows.length === 0 && /*#__PURE__*/React.createElement("div", {
+      style: { color: T.muted, fontSize: 13.5, padding: '10px 0' }
+    }, "Kein Eintrag."), /*#__PURE__*/React.createElement("button", {
       style: {
         ...st.btnAlt,
         width: '100%',
@@ -33721,16 +33739,30 @@ function HaccpPopup({ benutzer, onOeffnen }) {
     }, text);
   };
 
+  /* v418: Fast bildschirmfuellend. Ein Kaertchen in der Mitte laesst sich
+     leicht uebersehen und verlangt genaues Zielen; hier soll man mit dem
+     Daumen fertig werden, waehrend man die Kueche aufschliesst. */
   var huelle = function(kinder){
     return R.createElement("div", {
-      style: { position:"fixed", inset:0, background:"#0009", zIndex:5000,
-               display:"flex", alignItems:"center", justifyContent:"center", padding:16 }
+      style: { position:"fixed", inset:0, background:"#000c", zIndex:5000,
+               display:"flex", alignItems:"stretch", justifyContent:"center", padding:10 }
     },
       R.createElement("div", {
-        style: { background:"#fff", borderRadius:16, width:"100%", maxWidth:440,
-                 overflow:"hidden", boxShadow:"0 8px 30px #0005" }
+        style: { background:"#fff", borderRadius:18, width:"100%", maxWidth:520,
+                 display:"flex", flexDirection:"column",
+                 overflow:"hidden", boxShadow:"0 8px 40px #0007" }
       }, kinder)
     );
+  };
+
+  /* Ein Knopf, der einen Daumen trifft. gross = der eine Hauptweg. */
+  var grossKnopf = function(text, farbe, fn){
+    return R.createElement("button", {
+      onClick: fn,
+      style: { width:"100%", padding:"18px 12px", borderRadius:14, border:"none",
+               background:farbe, color:"#fff", fontFamily:"inherit",
+               fontWeight:800, fontSize:17, cursor:"pointer", minHeight:56 }
+    }, text);
   };
 
   /* ═══ v415: ZAPFANLAGE ═══
@@ -33748,41 +33780,50 @@ function HaccpPopup({ benutzer, onOeffnen }) {
           : "Letzte Reinigung vor " + zapf.seitTagen + " Tagen ("
             + de(zapf.letzte.datum) + ")")
     ),
-    R.createElement("div", { key:"b", style:{ padding:16 } },
-      R.createElement("div", { style:{ fontSize:13.5, color:"#555", lineHeight:1.6, marginBottom:10 } },
-        "Nachweis nach DIN 6650-6. Eingetragen wird:"),
+    R.createElement("div", { key:"b", style:{ padding:18, flex:1, display:"flex",
+      flexDirection:"column", overflowY:"auto" } },
+      R.createElement("div", { style:{ fontSize:14, color:"#555", marginBottom:10 } },
+        "Nachweis nach DIN 6650-6 \u00b7 eingetragen wird:"),
+      /* v418: Die Angaben gross und untereinander statt als Fliesstext -
+         man soll sie im Vorbeigehen erfassen koennen. */
       R.createElement("div", {
-        style:{ background:"#f7f7f7", borderRadius:10, padding:"11px 13px",
-                fontSize:13, color:"#333", marginBottom:12, lineHeight:1.7 } },
-        R.createElement("div", null, R.createElement("b", null, zapf.art)),
-        zapf.leit && R.createElement("div", null, "Leitungen: ", zapf.leit),
-        zapf.mittel && R.createElement("div", null, "Mittel: ", zapf.mittel),
-        R.createElement("div", { style:{ color:"#777" } }, "Heute \u00b7 ", benutzer || "\u2013")
+        style:{ background:"#f4f7fa", border:"1px solid #dbe6ef", borderRadius:12,
+                padding:"14px 16px", marginBottom:14 } },
+        R.createElement("div", { style:{ fontSize:17, fontWeight:800, color:"#123",
+          marginBottom: (zapf.leit || zapf.mittel) ? 8 : 0 } }, zapf.art),
+        zapf.leit && R.createElement("div", { style:{ fontSize:14, color:"#456" } },
+          "Leitungen: ", R.createElement("b", null, zapf.leit)),
+        zapf.mittel && R.createElement("div", { style:{ fontSize:14, color:"#456" } },
+          "Mittel: ", R.createElement("b", null, zapf.mittel)),
+        R.createElement("div", { style:{ fontSize:13.5, color:"#789", marginTop:8 } },
+          "Heute \u00b7 ", benutzer || "\u2013")
       ),
-      R.createElement("div", { style:{ fontSize:12, color:"#777", lineHeight:1.55, marginBottom:14 } },
+      R.createElement("div", { style:{ fontSize:12.5, color:"#777", lineHeight:1.55, marginBottom:16 } },
         "Nur best\u00e4tigen, wenn die Reinigung wirklich durchgef\u00fchrt wurde. "
-        + "Abweichende Angaben (anderes Mittel, Fachfirma) bitte \u00fcber "
-        + "\u201eSelbst eintragen\u201c erfassen."),
-      R.createElement("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
-        knopf("\u2714\uFE0F Reinigung erledigt", "#2f7fbf", true, function(){
-          try {
-            window.belksZapfEintragen(
-              { art: zapf.art, leit: zapf.leit, mittel: zapf.mittel },
-              undefined, benutzer || "");
-            setZapfZu(true);
-          } catch(e){}
-        }),
-        knopf("Selbst eintragen", "#eee", false, function(){
+        + "Abweichende Angaben \u00fcber \u201eSelbst eintragen\u201c erfassen."),
+      /* Der Rest wird nach unten geschoben - der Hauptknopf liegt dort, wo
+         der Daumen ohnehin ist. */
+      R.createElement("div", { style:{ flex:1 } }),
+      grossKnopf("\u2714\uFE0F Reinigung erledigt", "#2f7fbf", function(){
+        try {
+          window.belksZapfEintragen(
+            { art: zapf.art, leit: zapf.leit, mittel: zapf.mittel },
+            undefined, benutzer || "");
+          setZapfZu(true);
+        } catch(e){}
+      }),
+      /* Die Nebenwege klein und darunter - nicht gleichrangig neben dem
+         Hauptweg, sonst tippt man im Halbschlaf das Falsche. */
+      R.createElement("div", { style:{ display:"flex", gap:8, marginTop:10 } },
+        knopf("Selbst eintragen", "#f0f0f0", false, function(){
           setZapfZu(true);
           if (onOeffnen) onOeffnen("zapf");
-        })
-      ),
-      R.createElement("div", { style:{ display:"flex", gap:8 } },
+        }),
         knopf("Sp\u00e4ter", "#f5f5f5", false, function(){
           try { window.belksZapfSpaeter(); } catch(e){}
           setZapfZu(true);
         }),
-        knopf("Heute Ruhetag", "#f5f5f5", false, function(){
+        knopf("Ruhetag", "#f5f5f5", false, function(){
           try { window.belksHaccpRuhetagSetzen(); } catch(e){}
           setZapfZu(true);
         })
@@ -33790,69 +33831,79 @@ function HaccpPopup({ benutzer, onOeffnen }) {
     )
   ]);
 
-  return R.createElement("div", {
-    style: { position:"fixed", inset:0, background:"#0009", zIndex:5000,
-             display:"flex", alignItems:"center", justifyContent:"center", padding:16 }
-  },
-    R.createElement("div", {
-      style: { background:"#fff", borderRadius:16, width:"100%", maxWidth:440,
-               overflow:"hidden", boxShadow:"0 8px 30px #0005" }
-    },
-      R.createElement("div", {
-        style: { background:"linear-gradient(135deg,#f5c542,#e0a800)", padding:"14px 16px" }
-      },
-        R.createElement("div", { style:{ fontWeight:800, fontSize:16, color:"#3d2f00" } },
-          "\uD83C\uDF21\uFE0F Temperaturkontrolle"),
-        R.createElement("div", { style:{ fontSize:12.5, color:"#5c4700", marginTop:2 } },
-          noetig.offen + " von " + noetig.gesamt + " Ger\u00e4ten noch offen")
-      ),
-      R.createElement("div", { style:{ padding:16 } },
-        v
-          ? R.createElement("div", null,
-              R.createElement("div", { style:{ fontSize:13.5, color:"#555", lineHeight:1.6, marginBottom:6 } },
-                "Vom ", R.createElement("b", null, de(v.vortag)), " liegen Werte vor:"),
-              R.createElement("div", {
-                style:{ background:"#f7f7f7", borderRadius:10, padding:"11px 13px",
-                        fontSize:16, fontWeight:800, color:"#333", marginBottom:10,
-                        letterSpacing:"0.5px" } },
-                v.werte.map(function(w){ return w.wert; }).join(" \u00b7 "), " \u00b0C"),
-              R.createElement("div", { style:{ fontSize:12, color:"#777", lineHeight:1.55, marginBottom:14 } },
-                "Wenn alles passt: \u00fcbernehmen. Weicht ein Wert ab, danach in der "
-                + "HACCP-Ansicht \u00fcberschreiben.")
-            )
-          : R.createElement("div", { style:{ fontSize:13.5, color:"#555", lineHeight:1.6, marginBottom:14 } },
-              "Es liegen noch keine fr\u00fcheren Werte vor, die \u00fcbernommen werden k\u00f6nnten. "
-              + "Bitte die Ger\u00e4te ablesen und eintragen."),
+  /* v418: Dieselbe Huelle wie beim Zapf-Fenster - vorher hatte dieses hier
+     einen eigenen Aufbau mit anderer Groesse. Zwei Fenster derselben Art,
+     die verschieden aussehen, sind der kleine Bruder desselben Fehlers, den
+     wir ueberall gesucht haben. */
+  return huelle([
+    R.createElement("div", { key:"k",
+      style: { background:"linear-gradient(135deg,#f5c542,#e0a800)", padding:"16px 18px" } },
+      R.createElement("div", { style:{ fontWeight:800, fontSize:19, color:"#3d2f00" } },
+        "\uD83C\uDF21\uFE0F Temperaturkontrolle"),
+      R.createElement("div", { style:{ fontSize:13.5, color:"#5c4700", marginTop:3 } },
+        noetig.offen + " von " + noetig.gesamt + " Ger\u00e4ten noch offen")
+    ),
+    R.createElement("div", { key:"b",
+      style:{ padding:18, flex:1, display:"flex", flexDirection:"column", overflowY:"auto" } },
+      v
+        ? R.createElement("div", null,
+            R.createElement("div", { style:{ fontSize:14, color:"#555", marginBottom:10 } },
+              "Vom ", R.createElement("b", null, de(v.vortag)), " liegen diese Werte vor:"),
+            /* v418: Jedes Geraet mit Namen und Wert in einer eigenen Zeile.
+               Vorher stand nur "4 · 3 · 2 · -18 · -18 · -18 °C" - man konnte
+               nicht sehen, welche Zahl zu welchem Geraet gehoert, und damit
+               auch nicht beurteilen, ob sie passt. */
+            R.createElement("div", {
+              style:{ background:"#fafafa", border:"1px solid #eee", borderRadius:12,
+                      padding:"6px 14px", marginBottom:14 } },
+              v.werte.map(function(w, i){
+                return R.createElement("div", { key:"w"+i,
+                  style:{ display:"flex", justifyContent:"space-between",
+                          alignItems:"center", padding:"9px 0",
+                          borderBottom: i < v.werte.length - 1 ? "1px solid #eee" : "none" } },
+                  R.createElement("span", { style:{ fontSize:14.5, color:"#444" } }, w.name),
+                  R.createElement("b", { style:{ fontSize:19, color:"#222" } }, w.wert, " \u00b0C")
+                );
+              })
+            ),
+            R.createElement("div", { style:{ fontSize:12.5, color:"#777", lineHeight:1.55, marginBottom:16 } },
+              "Wenn alles passt: \u00fcbernehmen. Weicht ein Wert ab, danach in der "
+              + "HACCP-Ansicht \u00fcberschreiben.")
+          )
+        : R.createElement("div", { style:{ fontSize:14.5, color:"#555", lineHeight:1.6, marginBottom:16 } },
+            "Es liegen noch keine fr\u00fcheren Werte vor, die \u00fcbernommen werden k\u00f6nnten. "
+            + "Bitte die Ger\u00e4te ablesen und eintragen."),
 
-        R.createElement("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
-          v && knopf("\u2714\uFE0F \u00dcbernehmen", "#2e7d32", true, function(){
+      R.createElement("div", { style:{ flex:1 } }),
+
+      v
+        ? grossKnopf("\u2714\uFE0F Alles passt \u2013 \u00fcbernehmen", "#2e7d32", function(){
             try {
               window.belksHaccpUebernehmen(v.vortag, undefined, benutzer || "");
               setZu(true);
             } catch(e){}
-          }),
-          knopf(v ? "Selbst eintragen" : "\uD83C\uDF21\uFE0F Jetzt eintragen",
-                v ? "#eee" : "#C84B31", !v, function(){
-            setZu(true);
-            if (onOeffnen) onOeffnen();
           })
-        ),
-        R.createElement("div", { style:{ display:"flex", gap:8 } },
-          knopf("Sp\u00e4ter", "#f5f5f5", false, function(){
-            try { window.belksHaccpSpaeter(); } catch(e){}
+        : grossKnopf("\uD83C\uDF21\uFE0F Jetzt eintragen", "#C84B31", function(){
             setZu(true);
+            if (onOeffnen) onOeffnen("temp");
           }),
-          /* Ruhetag: kein Eintrag, keine Meldung mehr an diesem Tag. Er wird
-             festgehalten, damit im Monatsbericht ein Grund fuer die Luecke
-             steht - eine unbegruendete Luecke sieht nach Versaeumnis aus. */
-          knopf("Heute Ruhetag", "#f5f5f5", false, function(){
-            try { window.belksHaccpRuhetagSetzen(); } catch(e){}
-            setZu(true);
-          })
-        )
+
+      R.createElement("div", { style:{ display:"flex", gap:8, marginTop:10 } },
+        v && knopf("Selbst eintragen", "#f0f0f0", false, function(){
+          setZu(true);
+          if (onOeffnen) onOeffnen("temp");
+        }),
+        knopf("Sp\u00e4ter", "#f5f5f5", false, function(){
+          try { window.belksHaccpSpaeter(); } catch(e){}
+          setZu(true);
+        }),
+        knopf("Ruhetag", "#f5f5f5", false, function(){
+          try { window.belksHaccpRuhetagSetzen(); } catch(e){}
+          setZu(true);
+        })
       )
     )
-  );
+  ]);
 }
 
 function AiBetriebsleiterView({ completedOrders, expenses, customers }) {
