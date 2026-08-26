@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v419</title>
+<title>eatDeSi POS v420</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9027,8 +9027,77 @@ function belksNummer(zaehlerKey, praefix) {
   return (praefix || '') + ymd + '-' + String(n).padStart(4, '0');
 }
 
-// Belegnummer - nur fuer Belege, die eine Zahlung abschliessen
-function genNr() { return belksNummer('eatdesi_bon_counter', ''); }
+/* ═══ v420: DIE BELEGNUMMER KOMMT AUS DER DATENBANK ═══
+   Vorher zaehlte jedes Geraet in seinem eigenen localStorage, und der
+   Zaehler wurde ueber den normalen Abgleich verteilt ("der letzte gewinnt").
+   Am 26.08. haben zwei Geraete im selben Abgleichfenster kassiert und beide
+   die 0033 gezogen - der zweite Beleg hat den ersten in der Cloud
+   ueberschrieben. Ein ganzer Tisch war weg.
+
+   Ein Zaehler, den zwei Geraete gleichzeitig lesen koennen, kollidiert
+   irgendwann. Deshalb zieht jetzt die Datenbank: belks_next_bon() macht ein
+   "update ... returning", das die Zeile sperrt. Zwei Geraete bekommen
+   zwangslaeufig verschiedene Nummern.
+
+   genNr() ist ab jetzt ASYNC. Alle sieben Ziehstellen stehen ohnehin in
+   async-Funktionen (geprueft), also aendert sich dort nur ein "await". */
+async function genNr() {
+  try {
+    var resp = await fetch(SUPA_URL + '/rest/v1/rpc/belks_next_bon', {
+      method: 'POST',
+      headers: {
+        'apikey': SUPA_KEY,
+        'Authorization': 'Bearer ' + SUPA_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ loc: LOCATION_ID })
+    });
+    if (resp.ok) {
+      var nr = await resp.json();
+      if (typeof nr === 'string' && /^\d{8}-\d{4}$/.test(nr)) {
+        /* Den lokalen Zaehler mitfuehren. Er vergibt keine Nummern mehr,
+           dient aber als Ausgangspunkt fuer den Notfall unten und macht in
+           der Diagnose sichtbar, wo die Reihe steht. */
+        try { localStorage.setItem('eatdesi_bon_counter', String(parseInt(nr.slice(-4), 10) || 0)); } catch(e){}
+        try { localStorage.removeItem('eatdesi_bon_offline'); } catch(e){}
+        return nr;
+      }
+    }
+    console.warn('belks_next_bon: HTTP ' + resp.status);
+  } catch(e) {
+    console.warn('belks_next_bon nicht erreichbar:', e && e.message);
+  }
+  return belksNotfallNummer();
+}
+
+/* Ohne Netz: eine Nummer MIT Geraetekennung.
+   Sie kann mit keiner Nummer der Datenbank kollidieren, weil dort nie ein
+   Suffix vorkommt - und sie ist auf dem Bon als offline entstanden
+   erkennbar. Das ist ehrlicher als still dieselbe Zahl zweimal zu vergeben.
+   Solche Belege sammelt die Diagnose, damit sie nachgetragen werden
+   koennen. */
+function belksNotfallNummer() {
+  var n = 0;
+  try { n = parseInt(localStorage.getItem('eatdesi_bon_counter') || '0', 10) || 0; } catch(e){}
+  n += 1;
+  try { localStorage.setItem('eatdesi_bon_counter', String(n)); } catch(e){}
+  var kennung = 'XX';
+  try {
+    var d = String(localStorage.getItem('eatdesi_device_id') || '');
+    kennung = (d.replace(/[^A-Za-z0-9]/g, '').slice(-3) || 'XX').toUpperCase();
+  } catch(e){}
+  var dt = new Date();
+  var ymd = '' + dt.getFullYear() + String(dt.getMonth()+1).padStart(2,'0') + String(dt.getDate()).padStart(2,'0');
+  var nr = ymd + '-' + String(n).padStart(4,'0') + '-' + kennung;
+  /* Merken, damit die Diagnose und der Tagesbericht darauf hinweisen
+     koennen - ein Beleg ausserhalb der Datenbankreihe darf nicht untergehen. */
+  try {
+    var liste = JSON.parse(localStorage.getItem('eatdesi_bon_offline') || '[]');
+    liste.push(nr);
+    localStorage.setItem('eatdesi_bon_offline', JSON.stringify(liste.slice(-100)));
+  } catch(e){}
+  return nr;
+}
 
 /* ═══ v372: HIER STANDEN ZWEI WEITERE ZAEHLER ═══
        genBestellNr() -> eatdesi_best_counter, Praefix B-
@@ -24607,7 +24676,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v419"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v420"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25769,7 +25838,7 @@ function App() {
        weiterverwendet, sondern durch eine echte ersetzt. */
     const _alteNr = quelle.bestellNr && !/^[BS]-/.test(String(quelle.bestellNr))
                     ? quelle.bestellNr : null;
-    const _bestellNr = _alteNr || genNr();
+    const _bestellNr = _alteNr || await genNr();      /* v420 */
     let _tse = null;
     try {
       const summe = neue.reduce((s, i) => s + (i.finalPrice || 0) * (i.qty || 0), 0);
@@ -25950,7 +26019,7 @@ function App() {
      (siehe belksUmsatzBuchungen). Rueckgabe geht an den Bon, damit Beleg und
      Buchung dieselbe Nummer tragen. */
   const belksGutscheinVerkauf = async (g, zahlart) => {
-    const _bonNr = genNr();
+    const _bonNr = await genNr();      /* v420 */
     const _items = [{ id: 0, nr: "GS", name: "Gutschein " + g.code, qty: 1, finalPrice: g.betrag, _gutschein: true }];
     let _tse = null;
     try {
@@ -25978,7 +26047,7 @@ function App() {
 
       const roh = gastItems.reduce((sum, i) => sum + i.finalPrice * i.qty, 0);
       const orderTotal = Math.max(0, Math.round((roh - (rabatt || 0)) * 100) / 100);
-      const _bonNr = genNr();
+      const _bonNr = await genNr();      /* v420 */
       let _tse = null;
       try {
         _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod: "Karte", items: gastItems, tableId: tid });
@@ -26069,7 +26138,7 @@ function App() {
            dann eine schon gesetzte Bon-Nummer, erst zuletzt eine neue. */
         const _echtTa = nr => (nr && !/^[BS]-/.test(String(nr))) ? nr : null;
         const _vorhandenTa = _echtTa(ta.bestellNr) || _echtTa(ta.bonNr);
-        _bonNr = _vorhandenTa || genNr();   // v357/v368/v372: siehe oben
+        _bonNr = _vorhandenTa || await genNr();   // v357/v368/v372: siehe oben; v420: await
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: ta.items, tableId: null }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
         try { window.maybeOpenDrawer && window.maybeOpenDrawer(payMethod); } catch (e) {}
@@ -26136,7 +26205,7 @@ function App() {
            wurde (direkt kassiert), entsteht hier eine neue. */
         const _echt = nr => (nr && !/^[BS]-/.test(String(nr))) ? nr : null;
         const _vorhanden = _echt(o.bestellNr) || _echt(o.bonNr);
-        const _bonNr = _vorhanden || genNr();
+        const _bonNr = _vorhanden || await genNr();      /* v420 */
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: o.items, tableId: tid }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
         try { window.maybeOpenDrawer && window.maybeOpenDrawer(payMethod); } catch (e) {}
@@ -26943,7 +27012,7 @@ function App() {
            mit B-Nummer), wird eine gezogen - sonst stuende der Vorgang
            unnummeriert in den Buechern. */
         var _echtSt = function(nr){ return (nr && !/^[BS]-/.test(String(nr))) ? nr : null; };
-        var _stornoNr = _echtSt(_o.bestellNr) || _echtSt(_o.bonNr) || genNr();
+        var _stornoNr = _echtSt(_o.bestellNr) || _echtSt(_o.bonNr) || await genNr();   /* v420 */
         var _tse = null;
         try {
           _tse = await window.TSE.signOrder({
@@ -27422,6 +27491,28 @@ function App() {
                   }
                   _dg.push('Letzter Tisch-Abgleich: '
                     + (window.__belksToSync ? _uhr(window.__belksToSync) : 'noch keiner'));
+
+                /* ═══ v420: BELEGNUMMERN ═══
+                   Woher kommt die Nummer, und gab es Probleme? */
+                try {
+                  var _off = JSON.parse(localStorage.getItem('eatdesi_bon_offline') || '[]');
+                  var _kol = JSON.parse(localStorage.getItem('eatdesi_bon_kollision') || '[]');
+                  if (localStorage.getItem('eatdesi_extra_fehlt'))
+                    _dg.push('\uD83D\uDD34 Spalte `extra` fehlt in eatdesi_orders \u2013 '
+                      + 'Trinkgeld und Rabatt gehen beim Abgleich verloren!');
+                  _dg.push('Belegnummer: aus der Datenbank (belks_next_bon)');
+                  _dg.push('  Stand lokal: ' + (localStorage.getItem('eatdesi_bon_counter') || '0'));
+                  if (_off.length)
+                    _dg.push('  \u26a0\ufe0f ohne Netz vergeben: ' + _off.length
+                      + '  (' + _off.slice(-3).join(', ') + ')');
+                  if (_kol.length) {
+                    _dg.push('  \uD83D\uDD34 DOPPELTE NUMMERN: ' + _kol.length);
+                    _kol.slice(-3).forEach(function(k){
+                      _dg.push('     ' + k.nr + ': hier ' + k.meins + ' / Cloud ' + k.fremd);
+                    });
+                    _dg.push('     Diese Belege wurden NICHT hochgeladen.');
+                  }
+                } catch(e){}
                 } catch(e){}
                 /* v276: Warteschlange und letzter Push-Fehler. Damit trennt sich
                    endlich "es wurde nie gesendet" von "es wurde abgelehnt". */
@@ -30274,7 +30365,8 @@ function fileToJpegBase64(file, maxDim){
 
 // Pure Builder: baut den Supabase-Body für eine Kanal-Bestellung.
 // Wird auch die spätere echte API-Anbindung wiederverwenden.
-function buildChannelOrderBody(p){
+/* v420: async, weil die Belegnummer jetzt aus der Datenbank kommt. */
+async function buildChannelOrderBody(p){
   var lines=p.lines||[];
   if(!lines.length) throw new Error('Mindestens 1 Artikel hinzufügen.');
   var kanal=(p.kanal==='UBEREATS')?'UBEREATS':'LIEFERANDO';
@@ -30286,7 +30378,7 @@ function buildChannelOrderBody(p){
      Zuordnung, keine TSE. Seit v372 gibt es EINE Reihe - diese Bestellungen
      gehoeren hinein wie jede andere auch. Woher sie kommt, steht weiterhin
      in source und in der Notiz. */
-  var bonNr=genNr();
+  var bonNr=await genNr();      /* v420 */
   var icon=kanal==='LIEFERANDO'?'\uD83D\uDEF5 LIEFERANDO':'\uD83D\uDE97 UBER EATS';
   var items=lines.map(function(l){return {name:l.name,nr:l.nr,qty:l.qty,price:l.price,taxRate:l.taxRate||'food',options:[],note:l.note||''};});
   var fee=parseFloat(p.fee)||0;
@@ -30631,10 +30723,12 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
       var c=orderChannel(o); if(c==='lieferando')cntL++; else if(c==='ubereats')cntU++;
     }catch(e){}
   });
-  function send(){
+  async function send(){
     setBusy(true);setMsg('');
     var body;
-    try{ body=buildChannelOrderBody({kanal:kanal,typ:typ,pnr:pnr,kname:kname,kphone:kphone,addr:addr,lines:lines,fee:fee,pay:pay}); }
+    /* v420: await - die Nummer kommt aus der Datenbank, damit zwei Geraete
+       nie dieselbe ziehen koennen. */
+    try{ body=await buildChannelOrderBody({kanal:kanal,typ:typ,pnr:pnr,kname:kname,kphone:kphone,addr:addr,lines:lines,fee:fee,pay:pay}); }
     catch(e){ setMsg('\u26A0\uFE0F '+e.message); setBusy(false); return; }
     fetch(SUPA_URL+'/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr',{method:'POST',
       headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
@@ -35672,6 +35766,40 @@ function belksExtraAnwenden(ziel, extra){
    nicht bei jeder Buchung erneut vergeblich mitgeschickt. */
 window.__belksKeinExtra = false;
 
+/* ═══ v420: GIBT ES DIE SPALTE `extra` UEBERHAUPT? ═══
+   Ohne sie verliert JEDE Buchung ihr Trinkgeld, sobald ein zweites Geraet
+   sie liest - der Rabatt, der Gutschein und die Bestellnummer ebenso.
+   Bisher fiel das erst auf, wenn jemand zwei Geraete nebeneinander legte
+   (Abdullah, 26.08., Beleg 20260826-0033).
+   Deshalb wird es jetzt AKTIV gefragt, statt auf den ersten Fehlschlag zu
+   warten - und das Ergebnis steht in der Diagnose. */
+window.belksExtraSpaltePruefen = async function(){
+  try {
+    var r = await supaFetch('/rest/v1/eatdesi_orders?select=extra&limit=1');
+    if (!r) return null;
+    if (r.ok) {
+      window.__belksKeinExtra = false;
+      try { localStorage.removeItem('eatdesi_extra_fehlt'); } catch(e){}
+      return true;
+    }
+    var txt = '';
+    try { txt = await r.text(); } catch(e){}
+    /* 400 mit "extra" im Text heisst: die Spalte fehlt. 401/403 heisst nur,
+       dass die Anmeldung haengt - das ist ein anderes Problem und darf hier
+       keinen Fehlalarm ausloesen. */
+    if (r.status === 400 && txt.indexOf('extra') !== -1) {
+      window.__belksKeinExtra = true;
+      try {
+        localStorage.setItem('eatdesi_extra_fehlt', JSON.stringify({
+          seit: Date.now(), grund: txt.slice(0, 300)
+        }));
+      } catch(e){}
+      return false;
+    }
+    return null;
+  } catch(e){ return null; }
+};
+
 // Push eine Bestellung zu Supabase (UPSERT auf location_id+bon_nr,
 // damit Stornierungen denselben Beleg aktualisieren statt zu duplizieren)
 async function pushOrderToSupabase(order) {
@@ -35715,6 +35843,44 @@ async function pushOrderToSupabase(order) {
       });
     };
 
+    /* ═══ v420: KOLLISIONSSCHUTZ ═══
+       Steht unter dieser Nummer bereits ein ANDERER Vorgang in der Cloud,
+       darf merge-duplicates ihn nicht ueberschreiben. Am 26.08. ist genau
+       das passiert: Tisch 6 hat Tisch 1 unter der 0033 ersetzt.
+       Geprueft wird an der Zeit und am Betrag - beides steht in der Cloud
+       und aendert sich fuer denselben Vorgang nicht. */
+    try {
+      var _pruef = await fetch(SUPA_URL + '/rest/v1/eatdesi_orders?location_id=eq.'
+        + encodeURIComponent(LOCATION_ID) + '&bon_nr=eq.' + encodeURIComponent(String(order.bonNr))
+        + '&select=bon_nr,total,created_at,table_id', {
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+      });
+      if (_pruef.ok) {
+        var _da = await _pruef.json();
+        if (_da && _da.length) {
+          var _alt = _da[0];
+          var _gleich = Math.abs((Number(_alt.total)||0) - (Number(order.total)||0)) < 0.005
+            && String(_alt.table_id || '') === String(order.tableId || order.label || '');
+          if (!_gleich) {
+            /* Nicht hochladen. Der Beleg bleibt lokal und in der
+               Warteschlange; die Diagnose weist ihn aus. */
+            try {
+              var _k = JSON.parse(localStorage.getItem('eatdesi_bon_kollision') || '[]');
+              _k.push({ nr: order.bonNr, zeit: Date.now(),
+                        meins: (order.tableId || order.label || '?') + ' / ' + (order.total||0),
+                        fremd: (_alt.table_id || '?') + ' / ' + (_alt.total||0) });
+              localStorage.setItem('eatdesi_bon_kollision', JSON.stringify(_k.slice(-50)));
+            } catch(e2){}
+            console.error('BELEGNUMMER DOPPELT: ' + order.bonNr
+              + ' - in der Cloud steht ' + _alt.table_id + ' mit ' + _alt.total
+              + ', hier ' + (order.tableId||order.label) + ' mit ' + order.total
+              + '. Wird NICHT hochgeladen.');
+            return false;
+          }
+        }
+      }
+    } catch(e) { /* Pruefung fehlgeschlagen: dann lieber hochladen als verlieren */ }
+
     var resp = await _senden(true);
     /* Fehlt die Spalte `extra`, lehnt PostgREST den ganzen Datensatz mit
        400 ab. Dann lieber die Buchung ohne die Zusatzfelder hochladen als
@@ -35726,6 +35892,19 @@ async function pushOrderToSupabase(order) {
         console.warn('Spalte extra fehlt - Buchung wird ohne Zusatzfelder hochgeladen. Bitte in Supabase anlegen:',
                      'alter table public.eatdesi_orders add column if not exists extra jsonb;');
         window.__belksKeinExtra = true;
+        /* v420: Nicht nur in die Konsole - auf dem Telefon sieht die niemand.
+           Ohne die Spalte `extra` geht das Trinkgeld beim Abgleich verloren:
+           das Geraet, das kassiert hat, zeigt es, jedes andere nicht.
+           Genau das war am 26.08. zu sehen. */
+        try { localStorage.setItem('eatdesi_extra_fehlt', String(Date.now())); } catch(e2){}
+        /* v420: Festhalten, damit es nicht beim naechsten Start vergessen
+           ist. Geraetelokal - es ist eine Eigenschaft der Datenbank, aber
+           jedes Geraet stellt sie selbst fest. */
+        try {
+          localStorage.setItem('eatdesi_extra_fehlt', JSON.stringify({
+            seit: Date.now(), grund: String(grund || '').slice(0, 300)
+          }));
+        } catch(e){}
         resp = await _senden(false);
       }
     }
@@ -36913,6 +37092,15 @@ var BELKS_RESET_KASSE = [
    Treuepunkten - die haben mit dem Kassenstand nichts zu tun. */
 
 var SYNC_BLACKLIST = [
+  /* v420: Der Belegzaehler wird nicht mehr abgeglichen. Genau das war die
+     Ursache der doppelten Nummer 0033 am 26.08.: zwei Geraete lasen im
+     selben Abgleichfenster denselben Stand. Die Vergabe macht jetzt die
+     Datenbank; dieser Wert ist nur noch ein Merker fuer den Notfall ohne
+     Netz und fuer die Anzeige. */
+  'eatdesi_bon_counter',
+  'eatdesi_bon_offline',     // Belege, die ohne Netz entstanden sind
+  'eatdesi_bon_kollision',   // erkannte doppelte Nummern (v420)
+  'eatdesi_extra_fehlt',     // Spalte extra fehlt (v420)
   /* v414: "Spaeter" beim HACCP-Pop-up gilt nur fuer DIESES Geraet - siehe
      die Praefix-Regel in _isLocalOnlyKey. Waere es in der Cloud, wuerde ein
      Wegtippen an der Theke das Pop-up in der Kueche mit verstummen lassen. */
