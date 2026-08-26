@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v420</title>
+<title>eatDeSi POS v421</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -24676,7 +24676,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v420"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v421"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27483,11 +27483,17 @@ function App() {
                   /* Geht die Uhr dieses Geraets vor oder nach? Ein Geraet mit
                      vorgehender Uhr schlaegt mit seinem Zeitstempel jede
                      fremde Loeschmarke - der Tisch kommt immer wieder. */
-                  var _uSrv = window.__belksServerZeit;
-                  if (_uSrv) {
-                    var _diff = Math.round((Date.now() - _uSrv) / 1000);
-                    _dg.push('Uhr gegen Server: ' + (_diff > 0 ? '+' : '') + _diff + ' s'
-                      + (Math.abs(_diff) > 120 ? '  \u26a0\ufe0f zu gross' : ''));
+                  /* v421: Der Versatz wird jetzt bei jeder Antwort gemessen und
+                     ausgeglichen. Er steht hier nur noch zur Information - ein
+                     grosser Wert heisst, dass die Uhr des Telefons falsch geht,
+                     schadet dem Abgleich aber nicht mehr. */
+                  if (window.__belksZeitGemessen) {
+                    var _v = Math.round((window.__belksZeitVersatz || 0) / 1000);
+                    _dg.push('Uhr gegen Server: ' + (_v > 0 ? 'geht ' + _v + ' s NACH'
+                      : _v < 0 ? 'geht ' + (-_v) + ' s VOR' : 'genau')
+                      + '  (wird ausgeglichen)');
+                  } else {
+                    _dg.push('Uhr gegen Server: noch nicht gemessen');
                   }
                   _dg.push('Letzter Tisch-Abgleich: '
                     + (window.__belksToSync ? _uhr(window.__belksToSync) : 'noch keiner'));
@@ -35697,6 +35703,36 @@ window._deviceId = localStorage.getItem('eatdesi_device_id') || (function(){
 })();
 
 // Supabase fetch helper
+/* ═══ v421: EINE UHR FUER ALLE GERAETE ═══
+   __belksZeitVersatz = Serverzeit minus Geraetezeit, gemessen an der
+   Date-Kopfzeile jeder Antwort. Sie kostet nichts: sie steht in jeder
+   HTTP-Antwort ohnehin drin.
+
+   belksJetzt() liefert damit die Serverzeit. JEDER Stempel, der spaeter mit
+   dem eines anderen Geraets verglichen wird, muss von hier kommen - sonst
+   vergleicht man zwei Uhren, die auseinandergehen, und das Geraet mit der
+   vorgehenden Uhr gewinnt immer. */
+window.__belksZeitVersatz = 0;
+window.belksJetzt = function(){
+  return Date.now() + (window.__belksZeitVersatz || 0);
+};
+window.belksZeitMerken = function(resp){
+  try {
+    var d = resp && resp.headers && resp.headers.get && resp.headers.get('date');
+    if (!d) return;
+    var srv = new Date(d).getTime();
+    if (!isFinite(srv)) return;
+    var neu = srv - Date.now();
+    /* Glaetten: eine einzelne langsame Antwort soll den Versatz nicht
+       verreissen. Der erste Messwert gilt sofort, danach wird gemittelt. */
+    window.__belksZeitVersatz = window.__belksZeitGemessen
+      ? Math.round(window.__belksZeitVersatz * 0.7 + neu * 0.3)
+      : neu;
+    window.__belksZeitGemessen = 1;
+    window.__belksServerZeit = srv;
+  } catch(e){}
+};
+
 function supaFetch(path, method, body) {
   try { window.__reqGes = (window.__reqGes||0) + 1; } catch(e){}
   return fetch(SUPA_URL + path, {
@@ -35708,6 +35744,10 @@ function supaFetch(path, method, body) {
       'Prefer': 'resolution=ignore-duplicates'
     },
     body: body ? JSON.stringify(body) : undefined
+  }).then(function(r){
+    /* v421: Bei JEDER Antwort den Uhrenversatz nachfuehren. */
+    try { window.belksZeitMerken(r); } catch(e){}
+    return r;
   });
 }
 
@@ -36511,9 +36551,10 @@ function toMetaWrite(m){
 }
 // Alte Loeschmarken wegraeumen, damit die Liste nicht ewig waechst
 function toMetaPurge(m){
-  var grenze = Date.now() - TO_TOMB_MS;
+  /* v421: Serverzeit, damit die Frist auf allen Geraeten gleich laeuft. */
+  var grenze = window.belksJetzt() - TO_TOMB_MS;
   /* v405: zweite, viel spaetere Grenze fuer alles mit Nummer oder TSE. */
-  var grenzeF = Date.now() - TO_TOMB_FISKAL_MS;
+  var grenzeF = window.belksJetzt() - TO_TOMB_FISKAL_MS;
   Object.keys(m.delF||{}).forEach(function(k){ if (m.delF[k] < grenzeF) delete m.delF[k]; });
   Object.keys(m.idelF||{}).forEach(function(k){
     var tf = m.idelF[k] || {};
@@ -36532,7 +36573,11 @@ function toMetaPurge(m){
 }
 // Was hat sich lokal geaendert? -> Zeitstempel bzw. Loeschmarke setzen
 function toMetaStampChanges(neu, alt){
-  var m = toMetaRead(), now = Date.now();
+  /* v421: Serverzeit. Diese Stempel werden in toMerge mit denen ANDERER
+     Geraete verglichen - mit der Geraeteuhr gewinnt immer das Handy, dessen
+     Uhr vorgeht. Genau daran hing der Tisch, den A geschlossen und B behalten
+     hat (26.08., 19:25). */
+  var m = toMetaRead(), now = window.belksJetzt();
   neu = neu || {}; alt = alt || {};
   Object.keys(neu).forEach(function(k){
     if (JSON.stringify(neu[k]) !== JSON.stringify(alt[k])) {
@@ -36666,7 +36711,7 @@ function belksZeilenMarkeSetzen(tid, iids, fiskalisch){
     var m = toMetaRead();
     m.idel = m.idel || {};
     m.idel[tid] = m.idel[tid] || {};
-    var jetzt = Date.now();
+    var jetzt = window.belksJetzt();   /* v421: Serverzeit */
     iids.forEach(function(id){ m.idel[tid][id] = jetzt; });
     /* v405: Ein Artikel-Storno an einem gebuchten Tisch ist fiskalisch - es
        gibt einen Journal-Eintrag mit TSE dazu (v392/v394). Kaeme die Zeile
@@ -36768,7 +36813,7 @@ function toMerge(local, lmeta, remote, rmeta){
       else if (k in remote) _ohne = remote[k];
       if (_ohne && _ohne.items && _ohne.items.length > 0) {
         out[k] = _ohne;
-        meta.ts[k] = Date.now();
+        meta.ts[k] = window.belksJetzt();   /* v421: Serverzeit */
       }
       return;
     }
@@ -37044,7 +37089,7 @@ async function syncTableOrders() {
     // Weicht die Cloud vom zusammengefuehrten Stand ab? Dann hochladen –
     // aber nur, wenn die Cloud einmal gelesen wurde (Hydrations-Sperre).
     if (window.__belksHydrated && (!remote || JSON.stringify(remote.value||{}) !== mergedStr)) {
-      _setLocalStamp('tableOrders', Date.now());
+      _setLocalStamp('tableOrders', window.belksJetzt());   /* v421 */
       pushStateToSupabase('tableOrders', res.tables);
       pushStateToSupabase('tableordersmeta', res.meta);
     }
@@ -37411,7 +37456,7 @@ async function syncOneStateKey(lsKey) {
            wieder herunter. Der falsche Datensatz muss weg. */
         if (local && local._loc === _hier) {
           await pushStateToSupabase(remoteKey, local);
-          _setLocalStamp(remoteKey, Date.now());
+          _setLocalStamp(remoteKey, window.belksJetzt());   /* v421: Serverzeit */
         } else {
           /* v361: derselbe Aufruffehler wie beim Reset - fremde
              Firmendaten liessen sich dadurch nie entfernen. */
@@ -37471,7 +37516,10 @@ async function syncOneStateKey(lsKey) {
       }
       // wenn lokale/gemergte Liste sich von der Cloud unterscheidet -> zurueck in die Cloud
       if (mergedStr !== JSON.stringify(remoteArr)) {
-        var _now = Date.now();
+        /* v421: Serverzeit - sonst steht der eigene Stempel in der Zukunft
+           und remote.updated_at ist nie groesser. Das Geraet nimmt dann fuer
+           diesen Schluessel nie wieder etwas an. */
+        var _now = window.belksJetzt();
         _setLocalStamp(remoteKey, _now);
         pushStateToSupabase(remoteKey, merged);
       } else if (remote) {
@@ -37834,7 +37882,7 @@ LS.set = function(key, value) {
       return;
     }
     // eigenen Zeitstempel JETZT setzen, damit der eigene Push nicht zurueckgeholt wird
-    _setLocalStamp('tableOrders', Date.now());
+    _setLocalStamp('tableOrders', window.belksJetzt());   /* v421 */
     /* v280: Vergleichsgrundlage ist jetzt der ECHTE Speicherstand von vor
        diesem Schreibvorgang - nicht mehr die Variable _toVorher.
        WARUM: syncTableOrders schreibt den zusammengefuehrten Stand direkt mit
@@ -37867,7 +37915,10 @@ LS.set = function(key, value) {
   // AUTOMATISCH: jeder sync-faehige eatdesi_-Key wird bei Aenderung hochgeladen
   else if (key && key.indexOf('eatdesi_') === 0 && !_isLocalOnlyKey(key)) {
     var _rk = _remoteName(key);
-    var _now = Date.now();
+    /* v421: Serverzeit. Mein Kommentar behauptete das schon, die Zeile
+       darunter tat es nicht - beim Umstellen uebersehen. Genau so entstehen
+       Kommentare, die luegen. */
+    var _now = window.belksJetzt();
     _setLocalStamp(_rk, _now); // eigene Aenderung kennen wir bereits
     (function(remoteKey, val){
       setTimeout(function(){ pushStateToSupabase(remoteKey, val); }, 300);
@@ -37961,7 +38012,7 @@ localStorage.setItem = function(key, valueStr) {
     try {
       var parsed = JSON.parse(valueStr);
       var rk = _remoteName(key);
-      _setLocalStamp(rk, Date.now());
+      _setLocalStamp(rk, window.belksJetzt());   /* v421 */
       (function(remoteKey, val){
         setTimeout(function(){ pushStateToSupabase(remoteKey, val); }, 300);
       })(rk, parsed);
