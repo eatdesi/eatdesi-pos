@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v415</title>
+<title>eatDeSi POS v417</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -24602,7 +24602,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v415"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v417"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -32257,7 +32257,10 @@ function HACCPModul({
     /* Wochentag der Zapfanlagenreinigung: 0 = Sonntag ... 6 = Samstag.
        v415: Vorgabe Freitag (5). Am 26.08. hiess es noch Montag - deshalb
        einstellbar und nicht fest im Code. */
-    zapfWochentag: 5,
+    /* v417: zapfWochentag ist entfallen. Die Faelligkeit haengt allein am
+       Abstand zur letzten Reinigung. Eine Einstellung, die niemand mehr
+       liest, waere die naechste zweite Quelle - irgendwann fragt jemand,
+       warum das Aendern nichts bewirkt. */
     /* v414: feste Ruhetage (0 = Sonntag ... 6 = Samstag). An diesen Tagen
        kommt keine Meldung - es wird ja nicht gearbeitet. Einzelne
        Ausnahmetage markiert man am Pop-up selbst. */
@@ -32286,14 +32289,21 @@ function HACCPModul({
       stufe: 'alarm',
       text: 'Noch keine Reinigung erfasst'
     };
-    const rest = (+cfg.zapfIntervall || 14) - tage(letzte, heute());
-    return {
-      letzte,
-      rest,
-      stufe: rest < 0 ? 'alarm' : rest <= 2 ? 'warn' : 'ok',
-      text: rest < 0 ? `${-rest} Tage überfällig` : rest === 0 ? 'Heute fällig' : `Noch ${rest} Tage`
+    /* v417: Rechnet nicht selbst - belksZapfFaellig() ist die eine Regel,
+       die auch das Pop-up benutzt. Kein Wochentag mehr: sieben Tage nach
+       der letzten Reinigung. */
+    const f = window.belksZapfFaellig(letzte, heute());
+    if (f.ueberfaellig) return {
+      letzte, rest: -(f.seit - f.intervall), stufe: 'alarm',
+      text: `${f.seit} Tage her \u2013 \u00fcberf\u00e4llig`
     };
-  }, [daten.zapf, cfg.zapfIntervall]);
+    if (f.faellig) return { letzte, rest: 0, stufe: 'warn', text: 'Heute f\u00e4llig' };
+    return {
+      letzte, rest: f.bis,
+      stufe: f.bis <= 1 ? 'warn' : 'ok',
+      text: `N\u00e4chste Reinigung in ${f.bis} Tag${f.bis === 1 ? '' : 'en'}`
+    };
+  }, [daten.zapf]);
   const heuteTemp = temp[heute()] || {};
   const offeneTemp = cfg.geraete.filter(g => !heuteTemp[g.id] && heuteTemp[g.id] !== 0).length;
   const heuteClean = clean[heute()] || {};
@@ -32328,6 +32338,12 @@ function HACCPModul({
   const loesche = (modul, id) => setDaten(p => ({
     ...p,
     [modul]: p[modul].filter(r => r.id !== id)
+  }));
+  /* v416: Bearbeiten heisst ersetzen - die Kennung bleibt, damit der Eintrag
+     derselbe bleibt und nicht als neuer Nachweis zaehlt. */
+  const ersetze = (modul, id, satz) => setDaten(p => ({
+    ...p,
+    [modul]: p[modul].map(r => r.id === id ? { ...satz, id: id } : r)
   }));
 
   /* ---- Export ---- */
@@ -32773,7 +32789,31 @@ function HACCPModul({
         color: T.muted,
         fontSize: 12
       }
-    }, cfg.geraete.filter(g => temp[d][g.id] !== undefined && temp[d][g.id] !== '').length, " Werte", temp[d]._by ? ` · ${temp[d]._by}` : '')))), !Object.keys(temp).some(d => d.startsWith(monat)) && /*#__PURE__*/React.createElement("div", {
+    }, cfg.geraete.filter(g => temp[d][g.id] !== undefined && temp[d][g.id] !== '').length, " Werte",
+       temp[d]._by ? ` \u00b7 ${temp[d]._by}` : '',
+       temp[d]._pruefer ? ` \u00b7 ${temp[d]._pruefer}` : '',
+       /* v416: Sichtbar machen, dass uebernommen und nicht gemessen wurde. */
+       temp[d]._uebernommenVon ? ` \u00b7 \u00fcbernommen vom ${de(temp[d]._uebernommenVon)}` : ''),
+       /*#__PURE__*/React.createElement("div", {
+         style: { color: T.muted, fontSize: 11.5, marginTop: 2 }
+       }, "Antippen zum Bearbeiten")),
+    /* v416: Loeschen eines ganzen Tages - mit Rueckfrage. Vorher liess sich
+       ein versehentlich angelegter Tag gar nicht entfernen. */
+    /*#__PURE__*/React.createElement("button", {
+      onClick: e => {
+        e.stopPropagation();      /* sonst oeffnet der Klick den Tag */
+        if (window.confirm('Alle Temperaturwerte vom ' + de(d) + ' l\u00f6schen?\n\n'
+          + 'HACCP-Nachweise sind Dokumentation. Einzelne Werte lassen sich '
+          + 'durch Antippen berichtigen.')) {
+          const neu = { ...temp };
+          delete neu[d];
+          setTemp(neu);
+          melden('Tag gel\u00f6scht.');
+        }
+      },
+      style: { background: 'none', border: 'none', color: T.muted,
+               fontSize: 20, cursor: 'pointer', padding: '0 6px' }
+    }, "\u00d7"))), !Object.keys(temp).some(d => d.startsWith(monat)) && /*#__PURE__*/React.createElement("div", {
       style: {
         color: T.muted,
         fontSize: 13.5
@@ -32879,6 +32919,9 @@ function HACCPModul({
       return o;
     };
     const [entwurf, setEntwurf] = useState(leer);
+    /* v416: Wird gerade ein vorhandener Eintrag bearbeitet? Dann ist hier
+       seine Kennung - beim Speichern wird ersetzt statt angehaengt. */
+    const [bearbeite, setBearbeite] = useState(null);
     const rows = daten[modul].filter(r => def.ohneDatum || (r.datum || '').startsWith(monat)).sort((a, b) => (b.datum || '').localeCompare(a.datum || ''));
     return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Karte, {
       titel: def.titel,
@@ -32921,17 +32964,41 @@ function HACCPModul({
         ...entwurf,
         [f.k]: e.target.value
       })
-    })))), /*#__PURE__*/React.createElement("button", {
+    })))),
+    /* v416: Wird ein vorhandener Eintrag bearbeitet, sagt der Balken das -
+       sonst tippt jemand etwas ein und wundert sich, warum kein neuer
+       Eintrag entsteht. */
+    bearbeite && /*#__PURE__*/React.createElement("div", {
+      style: { background: T.row, border: '1px solid ' + T.warn, borderRadius: 9,
+               padding: '9px 12px', marginBottom: 10, fontSize: 12.5, color: T.warn,
+               display: 'flex', alignItems: 'center', gap: 10 }
+    },
+      /*#__PURE__*/React.createElement("span", { style: { flex: 1 } },
+        "\u270F\uFE0F Vorhandenen Eintrag bearbeiten"),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => { setBearbeite(null); setEntwurf(leer()); },
+        style: { background: 'none', border: '1px solid ' + T.line, borderRadius: 7,
+                 color: T.muted, padding: '5px 10px', fontFamily: 'inherit',
+                 fontSize: 12, cursor: 'pointer' }
+      }, "Abbrechen")
+    ),
+    /*#__PURE__*/React.createElement("button", {
       style: {
         ...st.btn,
         width: '100%'
       },
       onClick: () => {
-        fuegeHinzu(modul, entwurf);
+        if (bearbeite) {
+          ersetze(modul, bearbeite, entwurf);
+          setBearbeite(null);
+          melden('\u00c4nderung gespeichert');
+        } else {
+          fuegeHinzu(modul, entwurf);
+          melden('Gespeichert');
+        }
         setEntwurf(leer());
-        melden('Gespeichert');
       }
-    }, "Eintrag speichern"), def.hinweis && /*#__PURE__*/React.createElement("div", {
+    }, bearbeite ? "\u00c4nderung speichern" : "Eintrag speichern"), def.hinweis && /*#__PURE__*/React.createElement("div", {
       style: {
         color: T.muted,
         fontSize: 12,
@@ -32968,16 +33035,41 @@ function HACCPModul({
       style: st.td
     }, s === 'datum' ? de(r.datum) : s === 'belehrung' || s === 'schulung' ? de(r[s]) : r[s] || '')), /*#__PURE__*/React.createElement("td", {
       style: st.td
-    }, /*#__PURE__*/React.createElement("button", {
-      onClick: () => loesche(modul, r.id),
-      style: {
-        background: 'none',
-        border: 'none',
-        color: T.muted,
-        fontSize: 20,
-        cursor: 'pointer'
-      }
-    }, "×")))), rows.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { display: 'flex', gap: 2, justifyContent: 'flex-end' }
+    },
+      /* v416: Bearbeiten - der Eintrag wandert ins Formular, die Kennung
+         bleibt gemerkt. Wer sich vertippt hat, musste bisher loeschen und
+         neu erfassen und verlor dabei das urspruengliche Datum. */
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => {
+          setEntwurf({ ...r });
+          setBearbeite(r.id);
+          try { window.scrollTo(0, 0); } catch(e) {}
+        },
+        title: 'Bearbeiten',
+        style: { background: 'none', border: 'none', color: T.muted,
+                 fontSize: 16, cursor: 'pointer', padding: '2px 6px' }
+      }, "\u270F\uFE0F"),
+      /* v416: Loeschen jetzt MIT Rueckfrage. Ein Nachweis ist Dokumentation;
+         ein Fehlgriff auf dem Handy darf ihn nicht stillschweigend
+         entfernen. */
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => {
+          var wann = r.datum ? de(r.datum) : 'Eintrag';
+          if (window.confirm('Eintrag vom ' + wann + ' wirklich l\u00f6schen?\n\n'
+            + 'HACCP-Nachweise sind Dokumentation. Ein Tippfehler geh\u00f6rt '
+            + 'berichtigt (\u270F\uFE0F), nicht gel\u00f6scht.')) {
+            loesche(modul, r.id);
+            if (bearbeite === r.id) { setBearbeite(null); setEntwurf(leer()); }
+            melden('Eintrag gel\u00f6scht.');
+          }
+        },
+        title: 'L\u00f6schen',
+        style: { background: 'none', border: 'none', color: T.muted,
+                 fontSize: 20, cursor: 'pointer', padding: '0 4px' }
+      }, "\u00d7")
+    )))), rows.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
       colSpan: def.spalten.length + 1,
       style: {
         ...st.td,
@@ -33237,6 +33329,9 @@ function HACCPModul({
   }, /*#__PURE__*/React.createElement("input", {
     type: "number",
     style: st.input,
+    /* v416: Nur noch Hinweis auf den Hoechstabstand nach DIN. Faellig macht
+       der Wochentag (siehe zapfStatus) - zwei Quellen fuer dieselbe Frage
+       waren der Fehler. */
     value: cfg.zapfIntervall,
     onChange: e => setCfg({
       ...cfg,
@@ -33457,6 +33552,39 @@ function HACCPModul({
   };
 
 
+  /* ═══ v417: DIE EINE FAELLIGKEITSREGEL ═══
+     Sieben Tage nach der letzten Reinigung ist wieder eine faellig. Nichts
+     weiter. Wer freitags reinigt, ist sieben Tage spaeter wieder freitags
+     dran - der Wochentag stellt sich von selbst ein.
+
+     Vorher (v415/v416) haengte es am eingestellten Wochentag. Das war eine
+     zweite Angabe neben dem Intervall, und beide konnten auseinanderlaufen.
+     Status und Pop-up benutzen diese Funktion gemeinsam.
+
+     letzte = Datum der letzten Reinigung (oder leer)
+     Rueckgabe: { faellig, ueberfaellig, seit, bis, intervall } */
+  /* v417: Das Intervall steht hier und nur hier. Vorher war es ein
+     Argument - und beide Aufrufer uebergaben versehentlich den Wochentag
+     (5), also waeren es fuenf Tage geworden statt sieben. */
+  window.BELKS_ZAPF_TAGE = 7;
+  window.belksZapfFaellig = function(letzte, heuteStr, intervall){
+    var h = heuteStr || heute();
+    var iv = parseInt(intervall, 10);
+    if (!(iv > 0)) iv = window.BELKS_ZAPF_TAGE;
+    if (!letzte) return { faellig: true, ueberfaellig: false, seit: null, bis: 0, intervall: iv };
+    var seit = tage(letzte, h);
+    /* Ein Datum in der Zukunft (vertippt) darf nicht dazu fuehren, dass die
+       Reinigung monatelang als erledigt gilt. */
+    if (seit < 0) seit = 0;
+    return {
+      faellig: seit >= iv,
+      ueberfaellig: seit > iv,
+      seit: seit,
+      bis: Math.max(0, iv - seit),
+      intervall: iv
+    };
+  };
+
   /* ═══ v415: ZAPFANLAGE - WOCHENTAG-ERINNERUNG ═══ */
 
   /* Wann wurde zuletzt gereinigt, und was stand damals im Formular? */
@@ -33477,18 +33605,15 @@ function HACCPModul({
       if (window.belksHaccpRuhetag(heuteStr, p)) return null;
 
       var cfg = ladeLokal(p + 'cfg', {}) || {};
-      var tag = (cfg.zapfWochentag === undefined || cfg.zapfWochentag === null)
-        ? 5 : cfg.zapfWochentag;                      /* 5 = Freitag */
-      if (new Date(heuteStr + 'T12:00:00').getDay() !== tag) return null;
-
       var ab = cfg.tempErinnerung || '10:00';
       if (new Date().toTimeString().slice(0,5) < ab) return null;
 
-      /* Schon in dieser Woche gereinigt? Gemessen an sieben Tagen zurueck,
-         nicht am Kalenderwochenanfang: wer Donnerstag reinigt, soll am
-         Freitag nicht schon wieder gefragt werden. */
+      /* v416: Dieselbe Regel wie der Status. Vorher stand hier eine eigene
+         (unter 7 Tagen schweigen) - dadurch konnte der Reiter "Heute fällig"
+         sagen, waehrend das Pop-up schwieg. */
       var letzte = window.belksZapfLetzte(p);
-      if (letzte && letzte.datum && tage(letzte.datum, heuteStr) < 7) return null;
+      var f = window.belksZapfFaellig(letzte && letzte.datum, heuteStr);
+      if (!f.faellig) return null;
 
       try {
         var bis = parseInt(localStorage.getItem(p + 'spaeter_zapf_' + heuteStr) || '0', 10);
@@ -33497,7 +33622,8 @@ function HACCPModul({
 
       return {
         letzte: letzte || null,
-        seitTagen: (letzte && letzte.datum) ? tage(letzte.datum, heuteStr) : null,
+        seitTagen: f.seit,
+        ueberfaellig: f.ueberfaellig,
         /* Vorbelegung aus der letzten Reinigung - keine Messwerte, nur
            betriebliche Angaben. */
         art: (letzte && letzte.art) || LISTEN.zapf.felder[0].opt[0],
