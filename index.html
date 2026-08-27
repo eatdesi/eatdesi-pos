@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v421</title>
+<title>eatDeSi POS v422</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8551,10 +8551,30 @@ const LS = {
       return def;
     }
   },
+  /* ═══ v422: EIN SPEICHERFEHLER DARF NICHT STILL BLEIBEN ═══
+     Hier stand "catch {}". Damit verschluckte LS.set JEDEN Fehler - auch
+     "Speicher voll" (QuotaExceededError). Die Speisekarte ist der groesste
+     Datensatz der App; passt sie einmal nicht mehr hinein, ist sie beim
+     naechsten Start weg, und niemand hat je etwas gesehen.
+     Ein Speicherfehler, den niemand sieht, frisst Daten, bis jemand
+     zufaellig darueber stolpert. */
   set: (k, v) => {
     try {
       localStorage.setItem(k, JSON.stringify(v));
-    } catch {}
+      return true;
+    } catch (e) {
+      try {
+        var voll = /quota|exceed|storage/i.test(String((e && e.name) || '') + ' ' + String((e && e.message) || ''));
+        console.error('SPEICHERN FEHLGESCHLAGEN: ' + k + ' \u2013 ' + ((e && e.message) || e));
+        /* Festhalten, damit die Diagnose es zeigt. Der Merker selbst ist
+           winzig - er passt auch dann noch hinein, wenn sonst nichts mehr
+           geht. */
+        localStorage.setItem('eatdesi_speicher_fehler',
+          JSON.stringify({ key: k, zeit: Date.now(), voll: !!voll,
+                           text: String((e && e.message) || e).slice(0, 200) }));
+      } catch (e2) {}
+      return false;
+    }
   }
 };
 
@@ -24676,7 +24696,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v421"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v422"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27503,6 +27523,28 @@ function App() {
                 try {
                   var _off = JSON.parse(localStorage.getItem('eatdesi_bon_offline') || '[]');
                   var _kol = JSON.parse(localStorage.getItem('eatdesi_bon_kollision') || '[]');
+                  /* v422: Speicherplatz und letzter Schreibfehler. */
+                  try {
+                    var _bytes = 0;
+                    for (var _i = 0; _i < localStorage.length; _i++) {
+                      var _k = localStorage.key(_i);
+                      _bytes += (_k || '').length + (localStorage.getItem(_k) || '').length;
+                    }
+                    var _mb = (_bytes / 1048576).toFixed(2);
+                    var _menu = localStorage.getItem('eatdesi_menu');
+                    _dg.push('Speicher belegt: ' + _mb + ' MB'
+                      + (_bytes > 4 * 1048576 ? '  \u26a0\ufe0f wird eng' : ''));
+                    _dg.push('Speisekarte lokal: '
+                      + (_menu ? (Object.keys(JSON.parse(_menu) || {}).length + ' Kategorien, '
+                                  + (_menu.length / 1024).toFixed(0) + ' KB')
+                               : '\uD83D\uDD34 FEHLT \u2013 wird aus der Cloud geholt'));
+                    var _sf = localStorage.getItem('eatdesi_speicher_fehler');
+                    if (_sf) {
+                      var _o = JSON.parse(_sf);
+                      _dg.push('\uD83D\uDD34 Speichern fehlgeschlagen: ' + _o.key
+                        + (_o.voll ? '  (SPEICHER VOLL)' : '') + ' um ' + _uhr(_o.zeit));
+                    }
+                  } catch(e){}
                   if (localStorage.getItem('eatdesi_extra_fehlt'))
                     _dg.push('\uD83D\uDD34 Spalte `extra` fehlt in eatdesi_orders \u2013 '
                       + 'Trinkgeld und Rabatt gehen beim Abgleich verloren!');
@@ -37146,6 +37188,7 @@ var SYNC_BLACKLIST = [
   'eatdesi_bon_offline',     // Belege, die ohne Netz entstanden sind
   'eatdesi_bon_kollision',   // erkannte doppelte Nummern (v420)
   'eatdesi_extra_fehlt',     // Spalte extra fehlt (v420)
+  'eatdesi_speicher_fehler', // letzter Schreibfehler (v422)
   /* v414: "Spaeter" beim HACCP-Pop-up gilt nur fuer DIESES Geraet - siehe
      die Praefix-Regel in _isLocalOnlyKey. Waere es in der Cloud, wuerde ein
      Wegtippen an der Theke das Pop-up in der Kueche mit verstummen lassen. */
@@ -37219,12 +37262,36 @@ function _isLocalOnlyKey(k) {
   return false;
 }
 // Aus localStorage alle aktuell vorhandenen sync-faehigen eatdesi_-Keys ermitteln
+/* ═══ v422: WAS IMMER AUS DER CLOUD KOMMEN MUSS ═══
+   Diese Dinge gehoeren dem Restaurant und muessen auf JEDEM Geraet stehen.
+   Fehlen sie lokal - frisches Geraet, geleerter Speicher, ein Schreibfehler
+   wegen vollem Speicher -, muessen sie trotzdem geholt werden.
+
+   Vorher listete _getSyncableKeys() nur, was lokal SCHON DA war. Ein
+   fehlendes eatdesi_menu stand nie in der Liste und wurde nie geholt: die
+   Speisekarte blieb beim Platzhalter "Menue importieren", bis jemand von
+   Hand importierte. Genau das Bild nach jedem Hochladen einer neuen Datei. */
+var BELKS_PFLICHT_KEYS = [
+  'eatdesi_menu',          // Speisekarte - der groesste und wichtigste Satz
+  'eatdesi_optiongroups',  // Optionsgruppen gehoeren zur Karte
+  'eatdesi_cat_order',     // Reihenfolge der Kategorien
+  'eatdesi_firma',         // Firmendaten
+  'eatdesi_floors',        // Raumplan
+  'eatdesi_loyalty_settings'
+];
+
 function _getSyncableKeys() {
   var keys = [];
+  var drin = {};
   for (var i = 0; i < localStorage.length; i++) {
     var k = localStorage.key(i);
-    if (k && k.indexOf('eatdesi_') === 0 && !_isLocalOnlyKey(k)) keys.push(k);
+    if (k && k.indexOf('eatdesi_') === 0 && !_isLocalOnlyKey(k)) { keys.push(k); drin[k] = 1; }
   }
+  /* v422: Fehlende Pflichtschluessel trotzdem abfragen. Hochgeladen wird
+     dabei nichts - syncOneStateKey schreibt nur, wenn die Cloud etwas hat. */
+  BELKS_PFLICHT_KEYS.forEach(function(k){
+    if (!drin[k] && !_isLocalOnlyKey(k)) keys.push(k);
+  });
   return keys;
 }
 // Remote-Key-Name (ohne eatdesi_ Praefix, Supabase-seitig)
@@ -37571,7 +37638,13 @@ async function syncAllStateKeys() {
      bringt es nichts mehr, weil der Rundlauf dann ohnehin nur noch einmal pro
      Minute stattfindet. */
   for (var i = 0; i < keys.length; i++) {
-    if (!alle && !_TO_SCHNELL[keys[i]]) continue;
+    /* v422: Ein FEHLENDER Pflichtschluessel wird in jeder Runde versucht,
+       nicht nur jede Minute. Ohne Speisekarte kann niemand arbeiten - da
+       ist eine Minute Warten zu lang. Sobald er da ist, faellt er in den
+       normalen, langsamen Takt zurueck. */
+    var _fehlt = BELKS_PFLICHT_KEYS.indexOf(keys[i]) >= 0
+                 && localStorage.getItem(keys[i]) === null;
+    if (!alle && !_TO_SCHNELL[keys[i]] && !_fehlt) continue;
     await syncOneStateKey(keys[i]);
   }
 }
