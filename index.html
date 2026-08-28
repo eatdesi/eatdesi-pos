@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v425</title>
+<title>eatDeSi POS v427</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -24744,7 +24744,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v425"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v427"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -36143,8 +36143,28 @@ async function pushOrderToSupabase(order) {
         var _da = await _pruef.json();
         if (_da && _da.length) {
           var _alt = _da[0];
+          /* v426: Verglichen wird mit DERSELBEN Funktion, die auch schreibt.
+             Vorher stand hier "order.tableId || order.label" - in der Cloud
+             steht aber belksAusserHausKennung(order). Bei Takeaway und bei
+             Kanalbestellungen weichen die beiden ab ("Takeaway Abholung"
+             gegen "Takeaway #3"), und der Waechter hielt den eigenen Beleg
+             fuer einen fremden. Ein Storno wird nach dem Anlegen ein zweites
+             Mal geschrieben - genau dort schlug es zu und der Beleg blieb auf
+             dem Geraet liegen, das ihn gemacht hat.
+             Zwei Orte, die dasselbe wissen sollten, und einer war falsch. */
+          var _meineKennung = '';
+          try { _meineKennung = String(belksAusserHausKennung(order) || ''); } catch(e){}
           var _gleich = Math.abs((Number(_alt.total)||0) - (Number(order.total)||0)) < 0.005
-            && String(_alt.table_id || '') === String(order.tableId || order.label || '');
+            && String(_alt.table_id || '') === _meineKennung;
+          /* v426: Ein Storno aendert weder Betrag noch Tisch - er setzt nur
+             das Kennzeichen. Kommt der Beleg mit derselben Nummer und
+             demselben Betrag, ist es unser eigener und darf durch, auch wenn
+             die Kennung aus irgendeinem Grund abweicht (Altbestand aus der
+             Zeit vor belksAusserHausKennung). */
+          if (!_gleich && order.storniert
+              && Math.abs((Number(_alt.total)||0) - (Number(order.total)||0)) < 0.005) {
+            _gleich = true;
+          }
           if (!_gleich) {
             /* Nicht hochladen. Der Beleg bleibt lokal und in der
                Warteschlange; die Diagnose weist ihn aus. */
@@ -37556,9 +37576,12 @@ async function syncTableOrders() {
         window.__belksVorgabeGeprueft = true;
         setTimeout(function(){
           try{
-            if(window.belksVorgabeBenutzerAufraeumen() > 0){
-              window.dispatchEvent(new CustomEvent('eatdesi_users_cleaned'));
-            }
+            /* v427: Hier stand ein Ereignis 'eatdesi_users_cleaned', auf
+               das niemand hoerte. Vom Wachhund gefunden. Es ist entfernt
+               statt mit einem Empfaenger versehen: ein totes Ereignis
+               taeuscht eine Verbindung vor, die es nie gab, und wer spaeter
+               sucht, verliert Zeit damit. */
+            window.belksVorgabeBenutzerAufraeumen();
           }catch(e){}
         }, 2500);
       }
@@ -37646,6 +37669,12 @@ var SYNC_BLACKLIST = [
   'eatdesi_bon_kollision',   // erkannte doppelte Nummern (v420)
   'eatdesi_extra_fehlt',     // Spalte extra fehlt (v420)
   'eatdesi_speicher_fehler', // letzter Schreibfehler (v422)
+  /* v427, vom Wachhund gefunden: eine Warteschlange noch nicht gesendeter
+     Tischnotizen. Sie stand im Abgleich und waere mit "der letzte gewinnt"
+     verteilt worden - zwei Geraete haetten sich gegenseitig die eigenen
+     offenen Sendungen geloescht. Eine Warteschlange gehoert immer dem
+     Geraet, das sie fuellt. */
+  'eatdesi_pending_notepush',
   /* v424: Der neue Tisch-Abgleich. Alles davon gehoert dem GERAET:
      der gewaehlte Weg, der Lesestand, die Versionen, die Warteschlange und
      die Konfliktliste. In der Cloud haetten sie nichts zu suchen - dort
@@ -37801,7 +37830,35 @@ async function pullStateWithTime(remoteKey) {
 // Keys die als ID-Liste MERGED werden muessen (statt Last-Write-Wins ueberschreiben),
 // damit Eintraege von mehreren Geraeten erhalten bleiben (z.B. Stempel von Abdullah UND Alexy)
 var MERGE_LIST_KEYS = {
-  'zeiterfassung': 1, 'customers': 1, 'expenses': 1, 'reservations': 1, 'users': 1, 'floors': 1, 'drivers': 1
+  'zeiterfassung': 1, 'customers': 1, 'expenses': 1, 'reservations': 1, 'users': 1, 'floors': 1, 'drivers': 1,
+  /* v426: Storni gehoeren hierher. Sie standen nicht drin, deshalb galt
+     "der letzte gewinnt" - und die Liste des einen Geraets loeschte die des
+     anderen. Am 28.08. zeigte Geraet 1 drei stornierte Tische, Geraet 2
+     keinen einzigen.
+     Eine Liste, die auf ZWEI Geraeten waechst, darf nie so abgeglichen
+     werden. Beim Bauen von v346 uebersehen - ausgerechnet bei der Liste,
+     die man am wenigsten verlieren darf: § 146a verlangt, dass ein Storno
+     nachvollziehbar bleibt. */
+  'stornos': 1,
+  /* ═══ v427: GEFUNDEN BEIM SYSTEMATISCHEN DURCHGEHEN ═══
+     Sieben Listen standen auf "der letzte gewinnt", obwohl sie auf zwei
+     Geraeten wachsen. Diese vier vertragen die Zusammenfuehrung sicher -
+     sie loeschen nie einen Eintrag, sie fuegen nur hinzu und aendern:
+
+       archive       die Tagesabschluesse. Der wichtigste Fund: ging einer
+                     verloren, fehlte ein Z-Bon-Tag, und niemand haette es
+                     bemerkt.
+       inventory     Lagerbestand
+       staff         Personal und Schichten
+       optiongroups  Optionsgruppen zur Karte
+
+     NICHT dabei sind 'gutscheine' und 'happyhours': die entfernen Eintraege
+     wirklich aus der Liste, statt sie zu markieren. _mergeById kennt
+     Loeschungen nur ueber ein Feld 'deleted' - ein geloeschter Gutschein
+     kaeme vom anderen Geraet zurueck. Sie brauchen erst eine
+     Loeschmarkierung wie die Kunden seit v370. Eigene Aenderung, eigener
+     Test. */
+  'archive': 1, 'inventory': 1, 'staff': 1, 'optiongroups': 1
 };
 
 // Zwei ID-Listen zusammenfuehren: alle Eintraege eindeutig, deleted gewinnt.
@@ -37828,14 +37885,44 @@ function _mergeById(localArr, remoteArr, byName) {
     if(!ex){ byId[k] = e; return; }
     if(e.deleted && !ex.deleted){ byId[k] = e; return; }   // Loeschung gewinnt
     if(!e.deleted && ex.deleted){ return; }                // bestehende Loeschung behalten
-    // beide gleicher Status: neueren nach time behalten
-    var te = new Date(e.time || e.deletedAt || 0), tx = new Date(ex.time || ex.deletedAt || 0);
+    /* v427: Beide gleicher Status - der neuere gewinnt.
+       Frueher wurde nur e.time betrachtet. Listen, deren Eintraege dieses
+       Feld nicht haben (Gutscheine, Lager, Personal), konnten damit keine
+       Aenderung aufloesen: die zuerst gesehene Fassung gewann. Ein auf
+       Geraet A eingeloester Gutschein waere von Geraet B als nicht
+       eingeloest zurueckgekommen.
+       Deshalb zaehlt jetzt der spaeteste Zeitpunkt, den ein Eintrag
+       mitbringt - egal wie das Feld heisst. */
+    var _zeitVon = function(x){
+      var kandidaten = [x.geaendert, x.time, x.usedAt, x.deletedAt, x.zeit,
+                        x.createdAt, x.created_at, x.datum];
+      var beste = 0;
+      for (var i = 0; i < kandidaten.length; i++) {
+        var t = new Date(kandidaten[i] || 0).getTime();
+        if (isFinite(t) && t > beste) beste = t;
+      }
+      return beste;
+    };
+    var te = _zeitVon(e), tx = _zeitVon(ex);
     if(te > tx) byId[k] = e;
   };
   (Array.isArray(remoteArr) ? remoteArr : []).forEach(consider);
   (Array.isArray(localArr) ? localArr : []).forEach(consider);
   return Object.keys(byId).map(function(k){ return byId[k]; })
-    .sort(function(a,b){ return new Date(a.time||0) - new Date(b.time||0); });
+    .sort(function(a,b){
+      /* v427: dieselbe Regel wie oben - sonst sortiert die Liste nach einem
+         Feld, das viele Eintraege gar nicht haben. */
+      var z = function(x){
+        var kk = [x.geaendert, x.time, x.zeit, x.createdAt, x.created_at, x.datum];
+        var b = 0;
+        for (var i = 0; i < kk.length; i++) {
+          var t = new Date(kk[i] || 0).getTime();
+          if (isFinite(t) && t > b) b = t;
+        }
+        return b;
+      };
+      return z(a) - z(b);
+    });
 }
 // Diese Keys werden nach NAME zusammengefuehrt (eindeutiger Datensatz pro Name)
 var MERGE_BY_NAME_KEYS = { 'users': 1, 'floors': 1, 'drivers': 1 };
