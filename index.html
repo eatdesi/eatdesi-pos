@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v424</title>
+<title>eatDeSi POS v425</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -24744,7 +24744,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v424"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v425"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27582,7 +27582,14 @@ function App() {
                   var _offen = Object.keys(JSON.parse(localStorage.getItem('eatdesi_tableorders') || '{}'));
                   if (_offen.length) {
                     _dg.push('Tische lokal offen: ' + _offen.join(', '));
-                    var _ohneStempel = _offen.filter(function(t){ return !(_lm.ts && _lm.ts[t]); });
+                    /* v425: Nur im ALTEN Weg. Der neue kennt keine
+                       Zeitstempel - dort entscheidet die Version. Die Warnung
+                       stand am 28.08. auf einem Geraet, das laengst auf dem
+                       neuen Weg lief, und hat die Fehlersuche in die Irre
+                       gefuehrt. */
+                    var _altWeg = !(window.belksTischModus && window.belksTischModus() === 'neu');
+                    var _ohneStempel = !_altWeg ? [] :
+                      _offen.filter(function(t){ return !(_lm.ts && _lm.ts[t]); });
                     if (_ohneStempel.length)
                       _dg.push('  \u26a0\ufe0f OHNE Zeitstempel: ' + _ohneStempel.join(', ')
                         + '  (wird nie hochgeladen)');
@@ -27617,6 +27624,15 @@ function App() {
                     ? 'NEU (\u00fcber die Datenbank)' : 'ALT (\u00fcber pos_state)'));
                   if (_mod === 'neu') {
                     _dg.push('  Lesestand: ' + (localStorage.getItem('eatdesi_tisch_seq') || '0'));
+                    /* v425: Die Version je offenem Tisch. Weicht sie von der
+                       Datenbank ab, sieht man es sofort - das war am 28.08.
+                       nur ueber SQL zu erkennen. */
+                    try {
+                      var _v = JSON.parse(localStorage.getItem('eatdesi_tisch_ver') || '{}');
+                      var _vo = Object.keys(JSON.parse(localStorage.getItem('eatdesi_tableorders') || '{}'));
+                      if (_vo.length) _dg.push('  Versionen: ' + _vo.map(function(t){
+                        return t + '=v' + ((_v[t] && _v[t].version) || '?'); }).join('  '));
+                    } catch(e){}
                     var _q = JSON.parse(localStorage.getItem('eatdesi_tisch_queue') || '{}');
                     var _qn = Object.keys(_q).length;
                     if (_qn) _dg.push('  \u26a0\ufe0f wartet auf Netz: ' + _qn
@@ -37361,7 +37377,15 @@ window.belksTischeLesen = async function(){
       window._syncWriting = true;
       localStorage.setItem('eatdesi_tableorders', JSON.stringify(tische));
       window._syncWriting = false;
-      window.dispatchEvent(new CustomEvent('eatdesi_tableorders_synced', { detail: tische }));
+      /* v425: 'eatdesi_tables_synced' - so heisst das Ereignis, auf das die
+         App horcht. Ich hatte den Schluesselnamen genommen; dadurch kam der
+         neue Stand zwar im Speicher an, aber nie auf den Bildschirm. */
+      /* v425: Den Vergleichsstand mitfuehren. Ohne das haelt der Schreibblock
+         eine gerade EMPFANGENE Aenderung fuer eine eigene und schickt sie
+         sofort zurueck - zwei Geraete werfen sich dann dieselbe Aenderung
+         gegenseitig zu. */
+      window.__belksTischeVorher = JSON.parse(JSON.stringify(tische));
+      window.dispatchEvent(new CustomEvent('eatdesi_tables_synced', { detail: tische }));
     } catch(e){ window._syncWriting = false; }
   }
   belksTischVersionenSchreiben(vers);
@@ -37400,7 +37424,10 @@ window.belksTischKonflikt = function(tid, k){
       localStorage.setItem('eatdesi_tableorders', JSON.stringify(tische));
       window._syncWriting = false;
       window.__belksTischeVorher = JSON.parse(JSON.stringify(tische));
-      window.dispatchEvent(new CustomEvent('eatdesi_tableorders_synced', { detail: tische }));
+      /* v425: 'eatdesi_tables_synced' - so heisst das Ereignis, auf das die
+           App horcht. Ich hatte den Schluesselnamen genommen; dadurch kam
+           der neue Stand zwar im Speicher an, aber nie auf den Bildschirm. */
+        window.dispatchEvent(new CustomEvent('eatdesi_tables_synced', { detail: tische }));
     } catch(e){ window._syncWriting = false; }
 
     /* Was hatte ICH, was jetzt fehlt? Verglichen wird ueber die
