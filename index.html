@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v422</title>
+<title>eatDeSi POS v424</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -11832,7 +11832,32 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
             },
             style:{ width:"100%", padding:14, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:15 }
           }, "\uD83C\uDD95 Tisch freigeben"),
-          /*#__PURE__*/React.createElement(BewirtungButtons, { items:items, total:totalNachRabatt, label:label, firma:printerSettings })
+          /*#__PURE__*/React.createElement(BewirtungButtons, { items:items, total:totalNachRabatt, label:label, firma:printerSettings }),
+
+          /* ═══ v423: DER WEG ZURUECK ═══
+             Vorher gab es hier keinen. Wer den Dialog offen hatte, kam nur
+             ueber "Tisch freigeben" heraus.
+             WICHTIG: An dieser Stelle ist die Zahlung noch NICHT gebucht -
+             finishFull() hat nur den Bon gedruckt. Deshalb schliesst dieser
+             Knopf nicht stillschweigend, sondern sagt, was offen bleibt. */
+          /*#__PURE__*/React.createElement("button", {
+            onClick: function(){
+              var weiter = window.confirm(
+                'Zur\u00fcck zur Bestellung?\n\n'
+                + 'Der Bon ist bereits gedruckt, die Zahlung aber noch NICHT '
+                + 'gebucht. Der Tisch bleibt offen und wird als "Bon gedruckt" '
+                + 'gekennzeichnet.\n\n'
+                + 'Zum Abschliessen sp\u00e4ter wieder auf Zahlen tippen.');
+              if (!weiter) return;
+              /* Merken, damit der Tisch sichtbar macht, dass ein Bon
+                 draussen ist. Sonst faende es niemand wieder. */
+              try { if (typeof onBonOffen === 'function') onBonOffen(done); } catch(e){}
+              if (typeof onClose === 'function') onClose();
+            },
+            style:{ width:"100%", marginTop:10, padding:12, borderRadius:10,
+                    border:"2px solid #ddd", background:"#fff", color:"#666",
+                    cursor:"pointer", fontFamily:"inherit", fontSize:14, fontWeight:600 }
+          }, "\u2190 Zur\u00fcck zur Bestellung")
         )
       )
     )
@@ -14830,6 +14855,29 @@ function OrderView({
         : /*#__PURE__*/React.createElement("span", {
             style:{ display:"block", fontSize:10.5, fontWeight:600, opacity:.6, marginTop:2 }
           }, "Tippen f\u00fcr Notiz (Uhrzeit, Gast, Allergie \u2026)")),
+
+    /* ═══ v423: BON GEDRUCKT, NOCH NICHT GEBUCHT ═══
+       Wer den Zahlungs-Dialog ueber "Zurueck zur Bestellung" verlaesst, hat
+       einen Bon auf dem Tresen liegen, zu dem es keine Buchung gibt. Ohne
+       diesen Streifen faende ihn niemand wieder - und am Tagesende fehlte
+       der Umsatz, ohne dass jemand wuesste warum. */
+    (order && order.bonGedruckt) && /*#__PURE__*/React.createElement("div", {
+      style:{ background:"#fff8e1", border:"2px solid #f5c542", borderRadius:10,
+              padding:"10px 12px", margin:"8px 0", color:"#7a5c00", fontSize:13,
+              lineHeight:1.5 }
+    },
+      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, marginBottom:2 } },
+        "\u26A0\uFE0F Bon gedruckt \u2013 noch nicht gebucht"),
+      /*#__PURE__*/React.createElement("div", null,
+        (Number(order.bonGedruckt.betrag)||0).toFixed(2).replace('.',',') + " \u20AC",
+        order.bonGedruckt.zahlart ? " \u00b7 " + order.bonGedruckt.zahlart : "",
+        " \u00b7 ",
+        (function(){
+          try { return new Date(order.bonGedruckt.zeit).toLocaleTimeString('de-DE',
+            { hour:'2-digit', minute:'2-digit' }); } catch(e){ return ''; }
+        })()),
+      /*#__PURE__*/React.createElement("div", { style:{ marginTop:4, opacity:.85 } },
+        "Zum Abschliessen wieder auf Zahlen tippen.")),
 
     /* ═══ v392: GRUND FUER DEN ARTIKEL-STORNO ═══
        Dieselben vier Gruende wie beim Tischstorno (v346). Ohne Grund bleibt
@@ -24696,7 +24744,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v422"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v424"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25282,13 +25330,35 @@ function App() {
       const arch = LS.get("eatdesi_archive", []) || [];
       const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
       const yKey = yesterday.toLocaleDateString("de-DE");
-      arch.push({ date: yKey, orders: completedOrders, expenses, auto: true, time: now.toISOString() });
+      /* v424: Im Archiv festhalten, dass an diesem Tag umgestellt wurde -
+         fuer die Verfahrensdokumentation braucht es ein Datum, ab dem der
+         Betrieb anders lief. */
+      var _umst = false;
+      try { _umst = (window.belksTischModus && window.belksTischModus() !== 'neu'); } catch(e){}
+      arch.push({ date: yKey, orders: completedOrders, expenses, auto: true,
+                  time: now.toISOString(),
+                  hinweis: _umst ? 'Tisch-Abgleich auf den neuen Weg umgestellt' : undefined });
       LS.set("eatdesi_archive", arch);
       /* v307: Um 04:00 tippt niemand auf den Bildschirm - ohne Fingertipp
          darf der Browser keine Datei schreiben. Also nur vormerken; die
          Startseite fragt spaeter nach. Die Bestellungen liegen im Archiv. */
       try { if ((completedOrders || []).filter(belksBezahlt).length) belksExportOffenSetzen(yKey); } catch (e) {}
       try { belksGrabsteineWeg(); } catch (e) {}   // v324
+
+      /* ═══ v424: UMSTELLUNG AUF DEN NEUEN TISCH-ABGLEICH ═══
+         Um 04:00 ist kein Tisch offen - es gibt nichts zu uebernehmen, die
+         Umstellung kann also nichts kosten. Sie laeuft einmal je Geraet.
+
+         Zurueckschalten geht jederzeit sofort: Firmendaten -> Tisch-Abgleich.
+         In kk steht kein Testgeraet; wenn im Betrieb etwas klemmt, muss der
+         alte Weg in Sekunden wieder da sein. */
+      try {
+        if (window.belksTischModus && window.belksTischModus() !== 'neu') {
+          window.belksTischModusSetzen('neu');
+          localStorage.setItem('eatdesi_tischmodus_seit', new Date().toISOString());
+          console.log('v424: Tisch-Abgleich auf den neuen Weg umgestellt');
+        }
+      } catch (e) {}
       setCompletedOrders([]);
       setExpenses([]);
       LS.set("eatdesi_last_autoclose", todayKey);
@@ -25380,6 +25450,28 @@ function App() {
   // tableOrders - localStorage + Supabase sync
   useEffect(() => {
     LS.set("eatdesi_tableorders", tableOrders);
+    /* ═══ v424: IM NEUEN WEG SOFORT SCHREIBEN ═══
+       Der alte Weg lud den ganzen Tischbestand im Rundlauf hoch. Der neue
+       schickt jede Aenderung einzeln und mit ihrer Version - so kann die
+       Datenbank erkennen, wenn zwei Geraete denselben Tisch anfassen.
+       Ein Vergleich mit dem vorigen Stand verhindert, dass jeder Aufbau der
+       Ansicht eine Schreibrunde ausloest. */
+    if (window.belksTischModus && window.belksTischModus() === 'neu') {
+      try {
+        var _vorher = window.__belksTischeVorher || {};
+        var _jetzt = tableOrders || {};
+        Object.keys(_jetzt).forEach(function(tid){
+          if (JSON.stringify(_vorher[tid]) !== JSON.stringify(_jetzt[tid]))
+            window.belksTischSchreiben(tid, _jetzt[tid]).then(function(r){
+              if (r && r.konflikt) window.belksTischKonflikt(tid, r.konflikt);
+            });
+        });
+        Object.keys(_vorher).forEach(function(tid){
+          if (!(tid in _jetzt)) window.belksTischSchliessen(tid);
+        });
+        window.__belksTischeVorher = JSON.parse(JSON.stringify(_jetzt));
+      } catch(e) { console.warn('v424 Tisch-Schreiben:', e); }
+    }
   }, [tableOrders]);
 
   // Wenn andere Geraete Tische aendern (via Sync-Engine), State aktualisieren
@@ -27518,6 +27610,28 @@ function App() {
                   _dg.push('Letzter Tisch-Abgleich: '
                     + (window.__belksToSync ? _uhr(window.__belksToSync) : 'noch keiner'));
 
+                /* v424: Welcher Weg laeuft, und klemmt etwas? */
+                try {
+                  var _mod = (window.belksTischModus && window.belksTischModus()) || 'alt';
+                  _dg.push('Tisch-Abgleich: ' + (_mod === 'neu'
+                    ? 'NEU (\u00fcber die Datenbank)' : 'ALT (\u00fcber pos_state)'));
+                  if (_mod === 'neu') {
+                    _dg.push('  Lesestand: ' + (localStorage.getItem('eatdesi_tisch_seq') || '0'));
+                    var _q = JSON.parse(localStorage.getItem('eatdesi_tisch_queue') || '{}');
+                    var _qn = Object.keys(_q).length;
+                    if (_qn) _dg.push('  \u26a0\ufe0f wartet auf Netz: ' + _qn
+                      + ' Tisch(e) \u2013 ' + Object.keys(_q).join(', '));
+                    var _kf = JSON.parse(localStorage.getItem('eatdesi_tisch_konflikte') || '[]');
+                    if (_kf.length) {
+                      _dg.push('  \uD83D\uDD34 Konflikte: ' + _kf.length);
+                      _kf.slice(-3).forEach(function(k){
+                        _dg.push('     Tisch ' + k.tid + ' um ' + _uhr(k.zeit)
+                          + ': ' + (k.fehlend || []).join(', '));
+                      });
+                    }
+                  }
+                } catch(e){}
+
                 /* ═══ v420: BELEGNUMMERN ═══
                    Woher kommt die Nummer, und gab es Probleme? */
                 try {
@@ -28222,6 +28336,26 @@ function App() {
   })), checkout && /*#__PURE__*/React.createElement(CheckoutModal, _extends({}, checkout, {
     printerSettings: printerSettings,
     onClose: () => setCheckout(null),
+    /* v423: Wer den Dialog nach dem Druck verlaesst, ohne zu buchen, laesst
+       einen Bon auf dem Tresen liegen, zu dem es keine Buchung gibt. Der
+       Tisch merkt es sich und zeigt es an - sonst faende es niemand wieder. */
+    onBonOffen: (d) => {
+      try {
+        setTableOrders(p => {
+          var t = p[checkout.tableId];
+          if (!t) return p;
+          var n = Object.assign({}, p);
+          n[checkout.tableId] = Object.assign({}, t, {
+            bonGedruckt: {
+              zeit: (window.belksJetzt ? window.belksJetzt() : Date.now()),
+              betrag: (d && d.total) || 0,
+              zahlart: (d && d.method) || ''
+            }
+          });
+          return n;
+        });
+      } catch(e) { console.warn('v423 Bon-Merker:', e); }
+    },
     onComplete: (method, tg, rabatt, usedGutschein, loyaltyPhone, redeemedPts, splitDetails) => {
       if(usedGutschein && setGutscheine) {
         setGutscheine(prev => prev.map(g => g.id === usedGutschein.id ? {
@@ -28231,6 +28365,17 @@ function App() {
           usedAt: new Date().toISOString()
         } : g));
       }
+      /* v423: Jetzt wird wirklich gebucht - der Merker hat sich erledigt. */
+      try {
+        setTableOrders(p => {
+          var t = p[checkout.tableId];
+          if (!t || !t.bonGedruckt) return p;
+          var n = Object.assign({}, p), k = Object.assign({}, t);
+          delete k.bonGedruckt;
+          n[checkout.tableId] = k;
+          return n;
+        });
+      } catch(e){}
       completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts, splitDetails, usedGutschein ? (usedGutschein.rabatt||0) : 0, checkout.lieferFee || 0);   // v330
     },
     onTeilzahlung: (gastItems, tg, rabatt, gastNr) => belksTeilzahlung(checkout.tableId, gastItems, tg, rabatt, gastNr),
@@ -28704,6 +28849,47 @@ function GrabsteinCard(){
       'Die untere Frist ist die Zeit, in der ein Ger\u00e4t sp\u00e4testens abgeglichen haben muss. '
       + 'Zu kurz eingestellt, kann ein Ger\u00e4t, das l\u00e4nger aus war, einen bezahlten Tisch '
       + 'wieder \u00f6ffnen.'),
+
+    /* ═══ v424: DER WEG DES TISCH-ABGLEICHS ═══
+       Der neue Weg geht beim Tagesabschluss um 04:00 von selbst an. Dieser
+       Schalter ist der Rueckweg - er wirkt SOFORT, ohne neue Datei.
+       In kk steht kein Testgeraet: wenn im Betrieb etwas klemmt, muss der
+       alte Weg in Sekunden wieder da sein. */
+    R.createElement('div',{style:{borderTop:'1px solid #eee',marginTop:14,paddingTop:12}},
+      R.createElement('div',{style:{fontWeight:800,fontSize:13,marginBottom:4}},
+        '\uD83D\uDD00 Tisch-Abgleich'),
+      R.createElement('div',{style:{fontSize:12,color:'#666',marginBottom:8,lineHeight:1.5}},
+        (window.belksTischModus && window.belksTischModus() === 'neu')
+          ? 'Aktuell: NEU \u2013 \u00fcber die Datenbank. Zwei Ger\u00e4te k\u00f6nnen denselben '
+            + 'Tisch nicht mehr \u00fcberschreiben.'
+          : 'Aktuell: ALT \u2013 \u00fcber pos_state. Wird beim n\u00e4chsten Tagesabschluss '
+            + 'um 04:00 auf den neuen Weg umgestellt.'),
+      R.createElement('div',{style:{display:'flex',gap:8}},
+        R.createElement('button',{
+          onClick:function(){
+            if(!window.confirm('Auf den ALTEN Weg zur\u00fcckschalten?\n\n'
+              + 'Nur tun, wenn mit dem neuen Weg etwas nicht stimmt. '
+              + 'Offene Tische bleiben erhalten.')) return;
+            window.belksTischModusSetzen('alt');
+            setMsg('\u2705 Auf den alten Weg zur\u00fcckgeschaltet.');
+          },
+          style:{flex:1,padding:'10px 8px',borderRadius:9,border:'1px solid #ddd',
+                 background:'#fafafa',color:'#666',fontFamily:'inherit',
+                 fontSize:12.5,fontWeight:700,cursor:'pointer'}
+        },'\u2190 Alter Weg'),
+        R.createElement('button',{
+          onClick:function(){
+            if(!window.confirm('Jetzt auf den NEUEN Weg umstellen?\n\n'
+              + 'Am besten nach Feierabend, wenn kein Tisch offen ist.')) return;
+            window.belksTischModusSetzen('neu');
+            setMsg('\u2705 Neuer Weg aktiv.');
+          },
+          style:{flex:1,padding:'10px 8px',borderRadius:9,border:'none',
+                 background:'#2e7d32',color:'#fff',fontFamily:'inherit',
+                 fontSize:12.5,fontWeight:700,cursor:'pointer'}
+        },'Neuer Weg')
+      )
+    ),
     msg?R.createElement('div',{style:{color:msg.indexOf('\u26A0')===0?'#c62828':'#2e7d32',fontSize:12,fontWeight:700,marginBottom:8}},msg):null,
     R.createElement('button',{onClick:save,style:{width:'100%',padding:12,borderRadius:10,border:'none',background:'#2e7d32',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'\uD83D\uDCBE Speichern')
   );
@@ -37028,6 +37214,250 @@ try {
 } catch(e){}
 
 // Tischbestellungen synchronisieren
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   v424: TISCHE UEBER DIE DATENBANK
+   Der neue Weg. Der alte (syncTableOrders) bleibt unveraendert daneben;
+   belksTischModus() entscheidet, welcher laeuft.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Welcher Weg gilt? 'neu' oder 'alt'.
+   Geraetelokal - so kann ein einzelnes Geraet zurueckgeschaltet werden,
+   ohne den ganzen Betrieb umzustellen. */
+window.belksTischModus = function(){
+  try { return localStorage.getItem('eatdesi_tischmodus') === 'neu' ? 'neu' : 'alt'; }
+  catch(e){ return 'alt'; }
+};
+window.belksTischModusSetzen = function(m){
+  try {
+    localStorage.setItem('eatdesi_tischmodus', m === 'neu' ? 'neu' : 'alt');
+    /* Beim Umschalten neu anfangen zu lesen - sonst fehlt der Anfang. */
+    if (m === 'neu') localStorage.removeItem('eatdesi_tisch_seq');
+  } catch(e){}
+};
+
+/* Version und Stand je Tisch. Steht neben den Tischen, nicht in ihnen -
+   die Version gehoert dem Abgleich, nicht der Bestellung. */
+function belksTischVersionen(){
+  try { return JSON.parse(localStorage.getItem('eatdesi_tisch_ver') || '{}') || {}; }
+  catch(e){ return {}; }
+}
+function belksTischVersionenSchreiben(v){
+  try { localStorage.setItem('eatdesi_tisch_ver', JSON.stringify(v)); } catch(e){}
+}
+
+/* Ein Aufruf einer Datenbankfunktion. */
+async function belksTischRpc(name, args){
+  var r = await fetch(SUPA_URL + '/rest/v1/rpc/' + name, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(args)
+  });
+  try { window.belksZeitMerken(r); } catch(e){}
+  if (!r.ok) throw new Error(name + ': HTTP ' + r.status);
+  return await r.json();
+}
+
+/* ── SCHREIBEN ──────────────────────────────────────────────────────────
+   Gibt zurueck: { ok:true } oder { ok:false, konflikt:{...} }.
+   Bei einem Konflikt wird NICHTS ueberschrieben - der Aufrufer bekommt den
+   fremden Stand und entscheidet. Genau das fehlte am 26.08. */
+window.belksTischSchreiben = async function(tid, daten){
+  var vers = belksTischVersionen();
+  var meine = vers[tid] ? vers[tid].version : null;
+  var erg;
+  try {
+    erg = await belksTischRpc('belks_tisch_setzen', {
+      p_loc: LOCATION_ID, p_tid: String(tid),
+      p_daten: daten, p_version: meine
+    });
+  } catch(e) {
+    /* Kein Netz: in die Warteschlange. Der Tisch bleibt lokal offen und
+       geht hoch, sobald es wieder geht. */
+    belksTischWarteschlangeAn(tid, daten, false);
+    return { ok: false, offline: true };
+  }
+  if (erg && erg.ok) {
+    vers[tid] = { version: erg.version, seq: erg.seq };
+    belksTischVersionenSchreiben(vers);
+    belksTischWarteschlangeAb(tid);
+    return { ok: true };
+  }
+  /* Konflikt: ein anderes Geraet war schneller. */
+  return { ok: false, konflikt: erg || null };
+};
+
+/* ── SCHLIESSEN ─────────────────────────────────────────────────────── */
+window.belksTischSchliessen = async function(tid){
+  try {
+    var erg = await belksTischRpc('belks_tisch_schliessen', {
+      p_loc: LOCATION_ID, p_tid: String(tid)
+    });
+    var vers = belksTischVersionen();
+    if (erg && erg.ok) vers[tid] = { version: erg.version, seq: erg.seq };
+    belksTischVersionenSchreiben(vers);
+    belksTischWarteschlangeAb(tid);
+    return { ok: true };
+  } catch(e) {
+    belksTischWarteschlangeAn(tid, null, true);
+    return { ok: false, offline: true };
+  }
+};
+
+/* ── WARTESCHLANGE OHNE NETZ ───────────────────────────────────────────
+   Geraetelokal. Ein Eintrag je Tisch - der letzte Stand zaehlt, aeltere
+   Zwischenstaende braucht niemand. */
+function belksTischWarteschlangeAn(tid, daten, schliessen){
+  try {
+    var q = JSON.parse(localStorage.getItem('eatdesi_tisch_queue') || '{}') || {};
+    q[String(tid)] = { daten: daten, schliessen: !!schliessen, zeit: window.belksJetzt() };
+    localStorage.setItem('eatdesi_tisch_queue', JSON.stringify(q));
+  } catch(e){}
+}
+function belksTischWarteschlangeAb(tid){
+  try {
+    var q = JSON.parse(localStorage.getItem('eatdesi_tisch_queue') || '{}') || {};
+    if (String(tid) in q) { delete q[String(tid)]; localStorage.setItem('eatdesi_tisch_queue', JSON.stringify(q)); }
+  } catch(e){}
+}
+
+/* ── LESEN ──────────────────────────────────────────────────────────────
+   Holt nur, was seit der letzten Runde passiert ist. */
+window.belksTischeLesen = async function(){
+  var seq = 0;
+  try { seq = parseInt(localStorage.getItem('eatdesi_tisch_seq') || '0', 10) || 0; } catch(e){}
+  var liste = await belksTischRpc('belks_tische_seit', { p_loc: LOCATION_ID, p_seq: seq });
+  if (!Array.isArray(liste) || !liste.length) return { anzahl: 0 };
+
+  var tische = {};
+  try { tische = JSON.parse(localStorage.getItem('eatdesi_tableorders') || '{}') || {}; } catch(e){}
+  var vers = belksTischVersionen();
+  var hoechste = seq, geaendert = 0;
+
+  liste.forEach(function(z){
+    if (!z || !z.tid) return;
+    if (z.seq > hoechste) hoechste = z.seq;
+    /* Ein Tisch, den DIESES Geraet gerade in der Warteschlange hat, wird
+       nicht ueberschrieben - sonst verliert man die eigene Arbeit, sobald
+       das Netz zurueckkommt. */
+    var wartet = false;
+    try {
+      var q = JSON.parse(localStorage.getItem('eatdesi_tisch_queue') || '{}') || {};
+      wartet = !!q[String(z.tid)];
+    } catch(e){}
+    if (wartet) return;
+
+    if (z.geschlossen) { delete tische[z.tid]; }
+    else if (z.daten)  { tische[z.tid] = z.daten; }
+    vers[z.tid] = { version: z.version, seq: z.seq };
+    geaendert++;
+  });
+
+  if (geaendert) {
+    try {
+      window._syncWriting = true;
+      localStorage.setItem('eatdesi_tableorders', JSON.stringify(tische));
+      window._syncWriting = false;
+      window.dispatchEvent(new CustomEvent('eatdesi_tableorders_synced', { detail: tische }));
+    } catch(e){ window._syncWriting = false; }
+  }
+  belksTischVersionenSchreiben(vers);
+  try { localStorage.setItem('eatdesi_tisch_seq', String(hoechste)); } catch(e){}
+  try { window.__belksToSync = window.belksJetzt(); } catch(e){}
+  return { anzahl: geaendert };
+};
+
+/* ── KONFLIKT ───────────────────────────────────────────────────────────
+   Zwei Geraete haben denselben Tisch gleichzeitig geaendert. Die Datenbank
+   hat abgewiesen und den echten Stand mitgeschickt.
+
+   REGEL: Der fremde Stand gewinnt - er steht schon in der Datenbank und
+   andere Geraete haben ihn womoeglich schon. Aber die eigene Arbeit wird
+   NICHT stillschweigend verworfen: was fehlt, wird aufgelistet und muss
+   von Hand nachgetragen werden.
+
+   Das ist unbequem und trotzdem richtig. Automatisch zusammenfuehren hiesse
+   raten, welche Zeile gemeint war - und beim Raten verschwindet irgendwann
+   wieder etwas, ohne dass es jemand merkt. */
+window.belksTischKonflikt = function(tid, k){
+  try {
+    if (!k) return;
+    /* Den fremden Stand uebernehmen. */
+    var tische = {};
+    try { tische = JSON.parse(localStorage.getItem('eatdesi_tableorders') || '{}') || {}; } catch(e){}
+    var meins = tische[tid];
+    if (k.geschlossen) delete tische[tid]; else tische[tid] = k.daten;
+
+    var vers = belksTischVersionen();
+    vers[tid] = { version: k.version, seq: k.seq };
+    belksTischVersionenSchreiben(vers);
+
+    try {
+      window._syncWriting = true;
+      localStorage.setItem('eatdesi_tableorders', JSON.stringify(tische));
+      window._syncWriting = false;
+      window.__belksTischeVorher = JSON.parse(JSON.stringify(tische));
+      window.dispatchEvent(new CustomEvent('eatdesi_tableorders_synced', { detail: tische }));
+    } catch(e){ window._syncWriting = false; }
+
+    /* Was hatte ICH, was jetzt fehlt? Verglichen wird ueber die
+       Zeilen-Kennung, nicht ueber Namen - derselbe Artikel kann mehrfach
+       auf dem Tisch stehen. */
+    var fehlend = [];
+    try {
+      var fremd = {};
+      ((k.daten && k.daten.items) || []).forEach(function(i){
+        if (i && i._iid) fremd[i._iid] = 1;
+      });
+      ((meins && meins.items) || []).forEach(function(i){
+        if (i && i._iid && !fremd[i._iid])
+          fehlend.push((i.qty || 1) + '\u00d7 ' + (i.name || '?'));
+      });
+    } catch(e){}
+
+    if (!fehlend.length) return;   // nichts von mir verloren - kein Laerm
+
+    var text = 'Tisch ' + tid + ': Ein anderes Ger\u00e4t hat diesen Tisch '
+      + 'gleichzeitig ge\u00e4ndert.\n\nDer Stand des anderen Ger\u00e4ts gilt jetzt. '
+      + 'Diese Zeilen von diesem Ger\u00e4t fehlen darin:\n\n'
+      + fehlend.map(function(z){ return '\u2022 ' + z; }).join('\n')
+      + '\n\nBitte pr\u00fcfen und bei Bedarf neu erfassen.';
+    /* Festhalten, damit es auch dann auffindbar ist, wenn die Meldung
+       weggetippt wird. */
+    try {
+      var liste = JSON.parse(localStorage.getItem('eatdesi_tisch_konflikte') || '[]');
+      liste.push({ tid: tid, zeit: window.belksJetzt(), fehlend: fehlend });
+      localStorage.setItem('eatdesi_tisch_konflikte', JSON.stringify(liste.slice(-30)));
+    } catch(e){}
+    try { alert('\u26A0\uFE0F ' + text); } catch(e){ console.warn(text); }
+  } catch(e) { console.warn('v424 Konflikt:', e); }
+};
+
+/* ── DIE RUNDE ──────────────────────────────────────────────────────────
+   Erst die Warteschlange leeren, dann lesen. Die Reihenfolge ist wichtig:
+   sonst liest man den alten Stand und ueberschreibt damit die eigene, noch
+   nicht gesendete Aenderung. */
+window.belksTischeSync = async function(){
+  try {
+    var q = {};
+    try { q = JSON.parse(localStorage.getItem('eatdesi_tisch_queue') || '{}') || {}; } catch(e){}
+    var offen = Object.keys(q);
+    for (var i = 0; i < offen.length; i++) {
+      var tid = offen[i], e = q[tid];
+      if (e.schliessen) await window.belksTischSchliessen(tid);
+      else await window.belksTischSchreiben(tid, e.daten);
+    }
+    await window.belksTischeLesen();
+    return true;
+  } catch(e) {
+    try { console.warn('Tisch-Abgleich (neu):', e && e.message); } catch(x){}
+    return false;
+  }
+};
+
 async function syncTableOrders() {
   try {
     // App speichert Tische unter 'eatdesi_tableorders' (klein!) via LS.set
@@ -37189,6 +37619,15 @@ var SYNC_BLACKLIST = [
   'eatdesi_bon_kollision',   // erkannte doppelte Nummern (v420)
   'eatdesi_extra_fehlt',     // Spalte extra fehlt (v420)
   'eatdesi_speicher_fehler', // letzter Schreibfehler (v422)
+  /* v424: Der neue Tisch-Abgleich. Alles davon gehoert dem GERAET:
+     der gewaehlte Weg, der Lesestand, die Versionen, die Warteschlange und
+     die Konfliktliste. In der Cloud haetten sie nichts zu suchen - dort
+     steht die Wahrheit ohnehin in belks_tables. */
+  'eatdesi_tischmodus',
+  'eatdesi_tisch_seq',
+  'eatdesi_tisch_ver',
+  'eatdesi_tisch_queue',
+  'eatdesi_tisch_konflikte',
   /* v414: "Spaeter" beim HACCP-Pop-up gilt nur fuer DIESES Geraet - siehe
      die Praefix-Regel in _isLocalOnlyKey. Waere es in der Cloud, wuerde ein
      Wegtippen an der Theke das Pop-up in der Kueche mit verstummen lassen. */
@@ -37692,7 +38131,13 @@ async function runSync() {
     await pushPendingOrders();
     var remoteOrders = await pullOrdersFromSupabase();
     if (remoteOrders) mergeRemoteOrders(remoteOrders);
-    await syncTableOrders();
+    /* v424: Die Weiche. Neuer Weg ueber die Datenbank oder der alte ueber
+       pos_state - nie beide gleichzeitig, sonst schreiben sie gegeneinander. */
+    if (window.belksTischModus && window.belksTischModus() === 'neu') {
+      await window.belksTischeSync();
+    } else {
+      await syncTableOrders();
+    }
     await syncAllStateKeys();
     updateSyncBadge('ok');
   } catch(e) {
