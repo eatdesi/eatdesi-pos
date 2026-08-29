@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v427</title>
+<title>eatDeSi POS v429</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -662,12 +662,23 @@ window.belksFirmaSpeichern = function(neu){
     try{ alt = JSON.parse(localStorage.getItem('eatdesi_firma')||'{}') || {}; }catch(e){}
     var z = Object.assign({}, alt, neu || {});
     // Beide Schreibweisen gleich halten, damit beide Masken dasselbe zeigen
+    /* v429: Der Angleich hatte zwei Loecher.
+       1. 'phone' fehlte - firmaPhone und phone liefen auseinander.
+       2. "!== ''" hiess: ein GELEERTES Feld wurde nie uebernommen. Man
+          konnte eine Angabe nicht loeschen; die andere Maske behielt den
+          alten Wert und zeigte ihn weiter.
+       Jetzt zaehlt, WAS GERADE GESCHRIEBEN WURDE - auch wenn es leer ist.
+       Wer ein Feld leert, meint das auch. */
     var paare = [['name','firmaName'],['street','firmaStrasse'],['city','firmaPlzOrt'],
-                 ['stNr','firmaStNr'],['taxId','firmaUst'],['email','firmaEmail']];
+                 ['stNr','firmaStNr'],['taxId','firmaUst'],['email','firmaEmail'],
+                 ['phone','firmaPhone'],['web','firmaWeb'],['zusatz','firmaZusatz']];
     paare.forEach(function(pr){
       var a = pr[0], b = pr[1];
-      if(neu && neu[a] !== undefined && neu[a] !== '') z[b] = neu[a];
-      else if(neu && neu[b] !== undefined && neu[b] !== '') z[a] = neu[b];
+      var hatA = neu && Object.prototype.hasOwnProperty.call(neu, a);
+      var hatB = neu && Object.prototype.hasOwnProperty.call(neu, b);
+      if (hatA && hatB) return;          // beide geschrieben: nichts abzuleiten
+      if (hatA) z[b] = neu[a];
+      else if (hatB) z[a] = neu[b];
     });
     z = window.belksFirmaVollstaendig(z);
     /* v322: Beim Speichern festhalten, zu wem die Daten gehoeren. */
@@ -12177,8 +12188,9 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
       <div class="tot"><span>💰 Einnahmen − Ausgaben</span><span>${fmt(netto)}</span></div>
       <div class="ln"></div>
       ${printerSettings?.firmaStNr ? `<div class="s">StNr: ${printerSettings.firmaStNr}</div>` : ""}
-      <div class="s">USt-IdNr: ${printerSettings?.firmaUst||"DE361161517"}</div>
-      <div class="s" style="margin-top:8px">Belks Direktvertrieb GmbH</div>
+      ${printerSettings?.firmaUst ? `<div class="s">USt-IdNr: ${printerSettings.firmaUst}</div>` : ""}
+      ${(printerSettings?.firmaName || printerSettings?.name)
+        ? `<div class="s" style="margin-top:8px">${printerSettings.firmaName || printerSettings.name}</div>` : ""}
     </body></html>`;
   };
 
@@ -24744,7 +24756,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v427"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v429"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27678,6 +27690,17 @@ function App() {
                   if (localStorage.getItem('eatdesi_extra_fehlt'))
                     _dg.push('\uD83D\uDD34 Spalte `extra` fehlt in eatdesi_orders \u2013 '
                       + 'Trinkgeld und Rabatt gehen beim Abgleich verloren!');
+                  /* v428: Wann hat dieses Geraet seinen Stempel zuletzt
+                     gesetzt? Ein Stempel, der staendig auf "jetzt" springt,
+                     war die Ursache dafuer, dass Geraet B die offene
+                     Takeaway-Bestellung nicht annahm. */
+                  try {
+                    var _st = ['takeaway','tableOrders','menu','customers'].map(function(k){
+                      var v = parseInt(localStorage.getItem('eatdesi_stamp_' + k) || '0', 10);
+                      return k + '=' + (v ? _uhr(v) : '-');
+                    }).join('  ');
+                    _dg.push('Eigene Stempel: ' + _st);
+                  } catch(e){}
                   _dg.push('Belegnummer: aus der Datenbank (belks_next_bon)');
                   _dg.push('  Stand lokal: ' + (localStorage.getItem('eatdesi_bon_counter') || '0'));
                   if (_off.length)
@@ -28716,12 +28739,33 @@ function BonEditorView() {
 function FirmendatenView() {
   var R = React;
   var [data, setData] = R.useState(function(){
-    return LS.get('eatdesi_firma',
-      (typeof LOCATION_ID!=='undefined' && LOCATION_ID!=='eatdesi-bw')
-      ? { name:(typeof tenantDisplayName==='function'?tenantDisplayName():''), street:'', city:'', phone:'', email:'', taxId:'', stNr:'' }
-      : { name:'eatDeSi BW', street:'Brunnenallee 30', city:'34521 Bad Wildungen',
-          phone:'05621 9449087', email:'eatdesi.bw@gmail.com',
-          taxId:'DE361161517', stNr:'26/229/25450' });
+    /* ═══ v429: DIESELBEN DATEN, NICHT EIN ZWEITER SATZ ═══
+       Diese Maske las nur die kurzen Feldnamen (name, street, city). Wer die
+       Angaben in den Druckeinstellungen eingegeben hatte - dort heissen sie
+       firmaName, firmaStrasse, firmaPlzOrt - sah hier leere Felder und tippte
+       alles noch einmal. Das war der dritte "Platz".
+       Jetzt wird beides gelesen; die lange Schreibweise gilt, weil sie auf
+       dem Bon steht.
+
+       Und: die eatDeSi-Daten standen hier FEST IM CODE. Ein fremdes
+       Restaurant haette unsere Steuernummer und unsere Adresse bekommen. */
+    var f = {};
+    try { f = (window.belksFirmaLesen ? window.belksFirmaLesen() : LS.get('eatdesi_firma', {})) || {}; } catch(e){}
+    var nimm = function(lang, kurz){
+      if (f[lang] !== undefined && f[lang] !== '') return f[lang];
+      if (f[kurz] !== undefined && f[kurz] !== '') return f[kurz];
+      return '';
+    };
+    return {
+      name:  nimm('firmaName',   'name')
+             || (typeof tenantDisplayName === 'function' ? tenantDisplayName() : ''),
+      street: nimm('firmaStrasse','street'),
+      city:   nimm('firmaPlzOrt', 'city'),
+      phone:  nimm('firmaPhone',  'phone'),
+      email:  nimm('firmaEmail',  'email'),
+      taxId:  nimm('firmaUst',    'taxId'),
+      stNr:   nimm('firmaStNr',   'stNr')
+    };
   });
   var iS = {width:'100%',padding:'8px 10px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8};
   var save = function() {
@@ -37817,6 +37861,22 @@ async function pullStateWithTime(remoteKey) {
       // v195: Dieser Schluessel wurde jetzt aus der Cloud gelesen.
       // Ab hier darf die App ihn auch ueberschreiben - vorher nicht.
       try { (window.__belksGelesen = window.__belksGelesen || {})[remoteKey] = true; } catch(e) {}
+      /* v429: Wurde waehrend der Sperre etwas geaendert, jetzt nachholen.
+         Ohne das bliebe die Aenderung fuer immer lokal - sie waere zwar
+         nicht verloren, aber das zweite Geraet saehe sie nie. */
+      try {
+        var _nach = window.__belksNachholen && window.__belksNachholen['eatdesi_' + remoteKey];
+        if (_nach) {
+          delete window.__belksNachholen['eatdesi_' + remoteKey];
+          var _wert = localStorage.getItem('eatdesi_' + remoteKey);
+          if (_wert != null) {
+            _setLocalStamp(remoteKey, window.belksJetzt());
+            setTimeout(function(){
+              try { pushStateToSupabase(remoteKey, JSON.parse(_wert)); } catch(e){}
+            }, 400);
+          }
+        }
+      } catch(e) {}
     }
     if (!resp.ok) return null;
     var data = await resp.json();
@@ -37977,6 +38037,12 @@ async function syncOneStateKey(lsKey) {
         window._syncWriting = true;
         localStorage.setItem(lsKey, JSON.stringify(kTab));
         window._syncWriting = false;
+        /* v428: Merker mitfuehren - siehe Kommentar an der ersten
+           Uebernahmestelle. */
+        try {
+          if (!window.__belksZuletztGeschrieben) window.__belksZuletztGeschrieben = {};
+          window.__belksZuletztGeschrieben[lsKey] = JSON.stringify(kTab);
+        } catch(e) {}
         window.dispatchEvent(new CustomEvent('eatdesi_state_synced', { detail: { key: lsKey, value: kTab } }));
         window.dispatchEvent(new CustomEvent(lsKey + '_synced', { detail: kTab }));
       }
@@ -38039,6 +38105,12 @@ async function syncOneStateKey(lsKey) {
         window._syncWriting = true;
         localStorage.setItem(lsKey, neuStr);
         window._syncWriting = false;
+        /* v428: Merker mitfuehren - siehe Kommentar an der ersten
+           Uebernahmestelle. */
+        try {
+          if (!window.__belksZuletztGeschrieben) window.__belksZuletztGeschrieben = {};
+          window.__belksZuletztGeschrieben[lsKey] = neuStr;
+        } catch(e) {}
         window.dispatchEvent(new CustomEvent('eatdesi_state_synced', { detail: { key: lsKey, value: ausTabelle } }));
         window.dispatchEvent(new CustomEvent(lsKey + '_synced', { detail: ausTabelle }));
       }
@@ -38131,6 +38203,14 @@ async function syncOneStateKey(lsKey) {
         window._syncWriting = true;
         localStorage.setItem(lsKey, mergedStr);
         window._syncWriting = false;
+        /* v428: Den Merker mitfuehren. Ohne das gilt der gerade UEBERNOMMENE
+           Wert beim naechsten Schreiben durch die Ansicht als Aenderung -
+           das Geraet stempelt sich wieder auf jetzt und nimmt nichts mehr
+           an. Der Fehler waere zurueck, nur seltener. */
+        try {
+          if (!window.__belksZuletztGeschrieben) window.__belksZuletztGeschrieben = {};
+          window.__belksZuletztGeschrieben[lsKey] = mergedStr;
+        } catch(e) {}
         window.dispatchEvent(new CustomEvent('eatdesi_state_synced', { detail: { key: lsKey, value: merged } }));
         window.dispatchEvent(new CustomEvent(lsKey + '_synced', { detail: merged }));
       }
@@ -38155,6 +38235,12 @@ async function syncOneStateKey(lsKey) {
         window._syncWriting = true;  // verhindert dass dieser Schreibvorgang erneut gepusht wird
         localStorage.setItem(lsKey, remoteStr);
         window._syncWriting = false;
+        /* v428: Merker mitfuehren - siehe Kommentar an der ersten
+           Uebernahmestelle. */
+        try {
+          if (!window.__belksZuletztGeschrieben) window.__belksZuletztGeschrieben = {};
+          window.__belksZuletztGeschrieben[lsKey] = remoteStr;
+        } catch(e) {}
         // generisches Event + spezifisches Event (fuer React-Listener)
         window.dispatchEvent(new CustomEvent('eatdesi_state_synced', { detail: { key: lsKey, value: remote.value } }));
         window.dispatchEvent(new CustomEvent(lsKey + '_synced', { detail: remote.value }));
@@ -38547,6 +38633,24 @@ LS.set = function(key, value) {
   // AUTOMATISCH: jeder sync-faehige eatdesi_-Key wird bei Aenderung hochgeladen
   else if (key && key.indexOf('eatdesi_') === 0 && !_isLocalOnlyKey(key)) {
     var _rk = _remoteName(key);
+
+    /* ═══ v428: OHNE AENDERUNG KEIN STEMPEL ═══
+       Hier wurde bei JEDEM Schreiben gestempelt - auch wenn der Wert
+       derselbe blieb. Beim Start schreibt jede Ansicht ihren Zustand einmal
+       zurueck; damit erklaerte sich das Geraet fuer aktueller als die Cloud
+       und nahm fuer diesen Schluessel nichts mehr an.
+       Erst wenn das andere Geraet erneut schrieb, kam es durch - genau das
+       Bild vom 28.08.: die offene Takeaway-Bestellung erschien erst, als
+       Geraet A wieder geoeffnet wurde.
+       Ein Schreibvorgang, der nichts aendert, ist kein Ereignis. */
+    try {
+      var _neu = JSON.stringify(value);
+      var _alt = window.__belksZuletztGeschrieben && window.__belksZuletztGeschrieben[key];
+      if (_alt !== undefined && _alt === _neu) return;   // nichts passiert
+      if (!window.__belksZuletztGeschrieben) window.__belksZuletztGeschrieben = {};
+      window.__belksZuletztGeschrieben[key] = _neu;
+    } catch(e) { /* nicht vergleichbar: dann lieber senden als verlieren */ }
+
     /* v421: Serverzeit. Mein Kommentar behauptete das schon, die Zeile
        darunter tat es nicht - beim Umstellen uebersehen. Genau so entstehen
        Kommentare, die luegen. */
@@ -38628,10 +38732,25 @@ localStorage.setItem = function(key, valueStr) {
       console.warn('Leeres ' + key + ' verworfen – dieser Schluessel wurde noch nicht aus der Cloud gelesen');
       return;
     }
-    // v206: Einstellungen mit nicht-leerem Vorgabewert (z.B. 30 Tische)
-    // duerfen erst geschrieben werden, wenn die Cloud bekannt ist.
+    /* ═══ v429: LOKAL SPEICHERN, NUR DAS HOCHLADEN WARTET ═══
+       Hier stand ein "return" - der Schreibvorgang wurde KOMPLETT verworfen,
+       auch lokal. Wer in den ersten Sekunden nach dem Start die Speisekarte
+       oder die Firmendaten aenderte, verlor die Eingabe beim naechsten
+       Neuladen. Genau das ist Abdullah nach jedem Hochladen einer neuen
+       Datei passiert.
+
+       Der Schutz selbst ist richtig: ein frisch gestartetes Geraet darf die
+       Cloud nicht mit Vorgabewerten ueberschreiben. Aber das ist eine
+       Aussage ueber das HOCHLADEN, nicht ueber den lokalen Speicher.
+       Die Eingabe eines Menschen wird nie weggeworfen. */
     if (!window._syncWriting && !_darfSchreiben(key)) {
-      console.warn(key + ' noch gesperrt – Cloud-Bestand wird geladen');
+      console.warn(key + ' wird lokal gespeichert, Hochladen wartet auf die Cloud');
+      _origSetItem(key, valueStr);
+      /* Vormerken und nachholen, sobald die Cloud gelesen ist. */
+      try {
+        window.__belksNachholen = window.__belksNachholen || {};
+        window.__belksNachholen[key] = 1;
+      } catch(e){}
       return;
     }
   } catch(e){}
