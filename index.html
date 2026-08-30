@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v430</title>
+<title>eatDeSi POS v432</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9077,9 +9077,7 @@ async function genNr() {
     var resp = await fetch(SUPA_URL + '/rest/v1/rpc/belks_next_bon', {
       method: 'POST',
       headers: {
-        'apikey': SUPA_KEY,
-        'Authorization': 'Bearer ' + SUPA_KEY,
-        'Content-Type': 'application/json'
+        ...window.belksSupaKopf()
       },
       body: JSON.stringify({ loc: LOCATION_ID })
     });
@@ -24763,7 +24761,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v430"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v432"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25254,7 +25252,7 @@ function App() {
     window._setWebRequests = setWebRequests;
     async function pullAnfragen() {
       try {
-        const resp = await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_webrequests&select=value', { headers:{ 'apikey':SUPA_KEY, 'Authorization':'Bearer '+SUPA_KEY } });
+        const resp = await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_webrequests&select=value', { headers:{ ...window.belksSupaKopf() } });
         if (!resp.ok) return;
         const j = await resp.json();
         if (j && j[0] && j[0].value) {
@@ -25288,7 +25286,7 @@ function App() {
     try {
       const r = await fetch(SUPA_URL + '/rest/v1/rpc/belks_anfrage_status', {
         method: 'POST',
-        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' },
+        headers: { ...window.belksSupaKopf() },
         body: JSON.stringify({ p_loc: LOCATION_ID, p_id: String(req.id||''), p_status: status })
       });
       return r.ok;
@@ -25334,6 +25332,55 @@ function App() {
   // Effective mode: auto = use real network, otherwise use manual choice
   const effectiveOnline = manualMode === "auto" ? isOnline : manualMode === "online";
   React.useEffect(() => { LS.set("eatdesi_reservations", reservations); }, [reservations]);
+
+  /* ═══ v432: TAEGLICHE ABMELDUNG UM 04:15 ═══
+     Nach dem Z-Bon meldet sich jedes Geraet ab. Am naechsten Morgen meldet
+     sich das Personal neu an - und bekommt damit eine frische Anmeldung bei
+     Supabase.
+
+     Das ist nicht nur Ordnung: die Anmeldung laeuft nach etwa einer Stunde
+     ab und wird erneuert. Schlaegt die Erneuerung fehl (Netz weg, Geraet im
+     Tiefschlaf), arbeitet die App still mit dem anonymen Schluessel weiter.
+     Was dann noch durchkommt, haengt an den Regeln der jeweiligen Tabelle -
+     genau der Fehler aus v431, der eine Woche lang wie Zufall aussah.
+
+     Abgemeldet wird der MITARBEITER, nicht das Restaurant. Sonst braeuchte
+     das Personal jeden Morgen das Restaurant-Passwort.
+     Geloescht wird NICHTS. */
+  React.useEffect(() => {
+    const checkNachtAbmeldung = () => {
+      try {
+        const now = new Date();
+        if (now.getHours() !== 4 || now.getMinutes() < 15 || now.getMinutes() > 20) return;
+        const todayKey = now.toLocaleDateString("de-DE");
+        if (LS.get("eatdesi_last_logout", "") === todayKey) return;
+
+        /* Erst wenn der Z-Bon dieses Geraets wirklich durch ist. Sonst
+           meldet sich ein Geraet ab, dessen Tagesabschluss noch aussteht -
+           und der laeuft dann erst am naechsten Abend. */
+        if (LS.get("eatdesi_last_autoclose", "") !== todayKey) return;
+
+        /* Ein offener Tisch waere ein Zeichen, dass noch gearbeitet wird.
+           Dann lieber angemeldet lassen und morgen erneut versuchen. */
+        let offen = 0;
+        try { offen = Object.keys(JSON.parse(localStorage.getItem("eatdesi_tableorders") || "{}")).length; } catch(e){}
+        if (offen > 0) {
+          console.warn("v432: Abmeldung verschoben - " + offen + " Tisch(e) offen");
+          return;
+        }
+
+        LS.set("eatdesi_last_logout", todayKey);
+        console.log("v432: naechtliche Abmeldung");
+        /* Nur die Mitarbeiter-Anmeldung. eatdesi_full_logout wird NICHT
+           gesetzt - das Restaurant bleibt freigeschaltet. */
+        setLoggedInUser(null);
+        LS.set("eatdesi_session", null);
+      } catch (e) { console.warn("v432 Abmeldung:", e); }
+    };
+    checkNachtAbmeldung();
+    const t = setInterval(checkNachtAbmeldung, 60000);
+    return () => clearInterval(t);
+  }, []);
 
   // -- Auto-Tagesabschluss um 04:00 Uhr --
   React.useEffect(() => {
@@ -25441,7 +25488,7 @@ function App() {
     } catch(e) { return; }
     const _t = setTimeout(async () => {
       try {
-        const r = await fetch(SUPA_URL + "/rest/v1/pos_state?select=key,value&key=like." + encodeURIComponent(LOCATION_ID + "_") + "*", { headers: { "apikey": SUPA_KEY, "Authorization": "Bearer " + SUPA_KEY } });
+        const r = await fetch(SUPA_URL + "/rest/v1/pos_state?select=key,value&key=like." + encodeURIComponent(LOCATION_ID + "_") + "*", { headers: { ...window.belksSupaKopf() } });
         if (!r.ok) return;
         const rows = await r.json();
         let wrote = 0;
@@ -29166,7 +29213,7 @@ async function belksAuthSetPassword(accessToken, pw){
 }
 async function belksTenantsByEmail(email){
   var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?email=eq.'+encodeURIComponent(String(email).trim().toLowerCase())+'&select=location_id,name,email&active=eq.true',
-    {headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
+    {headers:{...window.belksSupaKopf()}});
   if(!r.ok) return [];
   var j=await r.json();
   return (j||[]).filter(function(t){return t.location_id!=='belks-master';});
@@ -29179,7 +29226,7 @@ async function belksIsMasterEmail(email){
     var m=String(email||'').trim().toLowerCase();
     if(!m) return false;
     var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.belks-master&email=eq.'+encodeURIComponent(m)+'&select=location_id',
-      {headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
+      {headers:{...window.belksSupaKopf()}});
     if(!r.ok) return false;
     var j=await r.json();
     return !!(j && j.length);
@@ -29222,7 +29269,7 @@ function belksOpenMutterEbene(pw){
 async function belksCheckMasterSecret(pw){
   try{
     var rp=await fetch(SUPA_URL+'/rest/v1/rpc/belks_check_secret',{method:'POST',
-      headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+      headers:{...window.belksSupaKopf()},
       body:JSON.stringify({p_code:'belks-master', p_secret:String(pw)})});
     if(rp.ok) return await rp.json();
   }catch(e){}
@@ -30069,10 +30116,10 @@ async function belksGetTenant(code){
   // v188 SICHERHEIT: aus der oeffentlichen Sicht lesen (ohne secret/email).
   // Frueher holte 'select *' das Restaurant-Passwort mit in den Browser.
   var url=SUPA_URL+'/rest/v1/belks_tenants_public?location_id=eq.'+encodeURIComponent(code)+'&select=location_id,name,street,city,phone,plan,active';
-  var r=await fetch(url,{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
+  var r=await fetch(url,{headers:{...window.belksSupaKopf()}});
   if(!r.ok){
     // Rueckfall fuer den Fall, dass die Sicht noch nicht angelegt ist
-    r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(code)+'&select=location_id,name,street,city,phone,plan,active',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
+    r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(code)+'&select=location_id,name,street,city,phone,plan,active',{headers:{...window.belksSupaKopf()}});
     if(!r.ok) return null;
   }
   var j=await r.json();
@@ -30083,7 +30130,7 @@ function RestaurantSwitchView(){
   var [tenants,setTenants]=R.useState(null);
   var [err,setErr]=R.useState('');
   R.useEffect(function(){
-    fetch(SUPA_URL+'/rest/v1/belks_tenants_public?select=location_id,name,city&active=eq.true&order=created_at.asc',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}})
+    fetch(SUPA_URL+'/rest/v1/belks_tenants_public?select=location_id,name,city&active=eq.true&order=created_at.asc',{headers:{...window.belksSupaKopf()}})
     .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
     .then(function(j){ setTenants((j||[]).filter(function(t){return t.location_id!=='belks-master';})); })
     .catch(function(e){ setErr(String(e.message||e)); setTenants([]); });
@@ -30170,7 +30217,7 @@ function BelksZentraleView(){
   var lbl=function(t){return R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:2}},t);};
   var card={background:'#fff',borderRadius:12,padding:14,border:'1px solid #eee',marginBottom:14,maxWidth:620};
   function load(){
-    fetch(SUPA_URL+'/rest/v1/belks_tenants?select=*&order=created_at.asc',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}})
+    fetch(SUPA_URL+'/rest/v1/belks_tenants?select=*&order=created_at.asc',{headers:{...window.belksSupaKopf()}})
     .then(function(r){ if(r.status===404) throw new Error('TABLE_MISSING'); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
     .then(function(j){ setTenants(j); setErr(''); })
     .catch(function(e){ setTenants([]); setErr(String(e.message||e)); });
@@ -30199,7 +30246,7 @@ function BelksZentraleView(){
     if((gate.pw||'').length<6){ setGate(Object.assign({},gate,{err:'Mindestens 6 Zeichen.'})); return; }
     if(gate.pw!==gate.pw2){ setGate(Object.assign({},gate,{err:'Passw\u00f6rter stimmen nicht \u00fcberein.'})); return; }
     fetch(SUPA_URL+'/rest/v1/belks_tenants',{method:'POST',
-      headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},
+      headers:{...window.belksSupaKopf(),Prefer:'return=minimal'},
       body:JSON.stringify({location_id:'belks-master',name:'BELKS MASTER',secret:gate.pw,plan:'master',active:false})})
     .then(function(r){
       if(!r.ok&&r.status!==201&&r.status!==409) throw new Error('HTTP '+r.status);
@@ -30227,7 +30274,7 @@ function BelksZentraleView(){
   // v181: Tochter deaktivieren / wiederherstellen (Daten bleiben erhalten)
   var _setTenantDeleted=function(code,val,nm){
     setErr('');setOk('');
-    fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(code),{method:'PATCH',headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({deleted:val})})
+    fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(code),{method:'PATCH',headers:{...window.belksSupaKopf(),Prefer:'return=minimal'},body:JSON.stringify({deleted:val})})
     .then(function(r){
       if(!r.ok) throw new Error('HTTP '+r.status);
       setOk(val?('\uD83D\uDDD1\uFE0F '+(nm||code)+' deaktiviert \u2013 Daten bleiben erhalten.'):('\u267B\uFE0F '+(nm||code)+' wiederhergestellt.'));
@@ -30262,7 +30309,7 @@ function BelksZentraleView(){
       try{
         var _su=null; if(mail){ _su=await belksAuthSignup(mail, loginPw); }
         var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants',{method:'POST',
-          headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},
+          headers:{...window.belksSupaKopf(),Prefer:'return=minimal'},
           body:JSON.stringify({location_id:effCode,name:name.trim(),street:street.trim(),city:city.trim(),phone:phone.trim(),plan:'free',active:true,secret:pw,email:mail||null})});
         if(r.status===409) throw new Error('Code "'+effCode+'" existiert schon \u2013 bitte anderen Code w\u00e4hlen.');
         if(!r.ok&&r.status!==201) throw new Error('HTTP '+r.status);
@@ -30299,7 +30346,7 @@ function BelksZentraleView(){
 
           var _schreib = function(suffix, wert){
             return fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
-              headers:{apikey:SUPA_KEY, Authorization:'Bearer '+SUPA_KEY,
+              headers:{...window.belksSupaKopf(),
                        'Content-Type':'application/json',
                        Prefer:'return=minimal,resolution=merge-duplicates'},
               body: JSON.stringify({ key: effCode+'_'+suffix,
@@ -30353,7 +30400,7 @@ function BelksZentraleView(){
     if(!window.confirm('Neues Restaurant-Passwort f\u00fcr "'+c+'" erzeugen?\n\nDas alte Passwort gilt danach NICHT mehr f\u00fcr neue Ger\u00e4te-Aktivierungen. Bereits aktivierte Ger\u00e4te laufen normal weiter.')) return;
     var pw=belksRandPw();
     fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(c),{method:'PATCH',
-      headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},
+      headers:{...window.belksSupaKopf(),Prefer:'return=minimal'},
       body:JSON.stringify({secret:pw})})
     .then(function(r){
       if(!r.ok&&r.status!==204) throw new Error('HTTP '+r.status);
@@ -30585,7 +30632,7 @@ function BelksZentraleView(){
                 setErr('');setOk('');
                 belksAuthSignup(m,linkPw).then(function(res){
                   return fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(c),{method:'PATCH',
-                    headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},
+                    headers:{...window.belksSupaKopf(),Prefer:'return=minimal'},
                     body:JSON.stringify({email:m})}).then(function(r2){
                       if(!r2.ok&&r2.status!==204) throw new Error('HTTP '+r2.status);
                       if(res&&res.pwUnchanged){
@@ -31068,7 +31115,7 @@ function ChannelsView({menuData, completedOrders, onInPos, tischAnzahl}){
     try{ body=await buildChannelOrderBody({kanal:kanal,typ:typ,pnr:pnr,kname:kname,kphone:kphone,addr:addr,lines:lines,fee:fee,pay:pay}); }
     catch(e){ setMsg('\u26A0\uFE0F '+e.message); setBusy(false); return; }
     fetch(SUPA_URL+'/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr',{method:'POST',
-      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
+      headers:{...window.belksSupaKopf(),'Prefer':'resolution=merge-duplicates'},
       body:JSON.stringify(body)})
     .then(function(r){
       if(!r.ok&&r.status!==201&&r.status!==409) throw new Error('HTTP '+r.status);
@@ -36064,13 +36111,51 @@ window.belksZeitMerken = function(resp){
   } catch(e){}
 };
 
+/* ═══ v431: EIN ORT FUER DIE KOPFZEILEN ═══
+   Vorher bauten zwoelf Stellen ihre Kopfzeilen selbst - und schickten dabei
+   den anonymen Schluessel statt der Anmeldung. Was die Datenbank davon
+   durchliess, haing an ihren Regeln, und die sind je Tabelle verschieden.
+   So entstand der Eindruck von Zufall.
+   Wer ab jetzt mit unserer Datenbank spricht, holt seine Kopfzeilen hier. */
+window.belksSupaKopf = function(extra){
+  var tok = null;
+  try { tok = window.belksAuthToken ? window.belksAuthToken() : null; } catch(e){}
+  var h = {
+    'apikey': SUPA_KEY,
+    'Authorization': 'Bearer ' + (tok || SUPA_KEY),
+    'Content-Type': 'application/json'
+  };
+  if (extra) { for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) h[k] = extra[k]; }
+  return h;
+};
+
 function supaFetch(path, method, body) {
   try { window.__reqGes = (window.__reqGes||0) + 1; } catch(e){}
+
+  /* ═══ v431: DIE ANMELDUNG MITSCHICKEN ═══
+     Hier stand 'Bearer ' + SUPA_KEY - der ANONYME Schluessel. Damit lief
+     jeder Aufruf als Rolle 'anon'.
+
+     In Supabase gelten (am 30.08. ausgelesen):
+       eatdesi_orders   anon: ALL, qual = true    -> alles erlaubt
+       pos_state        anon: nur INSERT websiteconfig
+                        authenticated: eigene Standorte
+
+     Deshalb kamen Bestellungen immer an und alles, was in pos_state liegt,
+     nur manchmal: Storni, Takeaway, Speisekarte, Kunden, Raumplan.
+     In der Diagnose stand es als "floors: HTTP 401 - new row violates
+     row-level security policy".
+
+     belksAuthToken() gibt es seit v186 - supaFetch hat ihn nur nie benutzt.
+     Ohne gueltige Anmeldung wird weiterhin der anonyme Schluessel genommen;
+     dann greifen die anon-Regeln wie bisher. */
+  var _tok = null;
+  try { _tok = window.belksAuthToken ? window.belksAuthToken() : null; } catch(e){}
   return fetch(SUPA_URL + path, {
     method: method || 'GET',
     headers: {
       'apikey': SUPA_KEY,
-      'Authorization': 'Bearer ' + SUPA_KEY,
+      'Authorization': 'Bearer ' + (_tok || SUPA_KEY),
       'Content-Type': 'application/json',
       'Prefer': 'resolution=ignore-duplicates'
     },
@@ -36204,12 +36289,11 @@ async function pushOrderToSupabase(order) {
       if(mitExtra && _extra) koerper.extra = _extra;
       return fetch(SUPA_URL + '/rest/v1/eatdesi_orders?on_conflict=location_id,bon_nr', {
         method: 'POST',
-        headers: {
-          'apikey': SUPA_KEY,
-          'Authorization': 'Bearer ' + SUPA_KEY,
-          'Content-Type': 'application/json',
-          'Prefer': 'resolution=merge-duplicates'
-        },
+        /* v431: auch hier die Anmeldung. Diese Stelle lief bisher nur
+           deshalb, weil eatdesi_orders anon alles erlaubt - ein Zufall,
+           kein Entwurf. Wird die Regel eines Tages enger gefasst (und das
+           gehoert vor dem Verkauf getan), waere sonst der Bon-Upload tot. */
+        headers: window.belksSupaKopf({ 'Prefer': 'resolution=merge-duplicates' }),
         body: JSON.stringify(koerper)
       });
     };
@@ -36224,7 +36308,7 @@ async function pushOrderToSupabase(order) {
       var _pruef = await fetch(SUPA_URL + '/rest/v1/eatdesi_orders?location_id=eq.'
         + encodeURIComponent(LOCATION_ID) + '&bon_nr=eq.' + encodeURIComponent(String(order.bonNr))
         + '&select=bon_nr,total,created_at,table_id', {
-        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+        headers: { ...window.belksSupaKopf() }
       });
       if (_pruef.ok) {
         var _da = await _pruef.json();
@@ -36313,9 +36397,7 @@ async function updateOrderInSupabase(order) {
     var resp = await fetch(SUPA_URL + '/rest/v1/eatdesi_orders?location_id=eq.' + LOCATION_ID + '&bon_nr=eq.' + encodeURIComponent(String(order.bonNr)), {
       method: 'PATCH',
       headers: {
-        'apikey': SUPA_KEY,
-        'Authorization': 'Bearer ' + SUPA_KEY,
-        'Content-Type': 'application/json',
+        ...window.belksSupaKopf(),
         'Prefer': 'return=minimal'
       },
       body: JSON.stringify({
@@ -36351,9 +36433,7 @@ async function updateOrderNoteInSupabase(bonNr, newNote) {
     var resp = await fetch(SUPA_URL + '/rest/v1/eatdesi_orders?location_id=eq.' + LOCATION_ID + '&bon_nr=eq.' + encodeURIComponent(String(bonNr)), {
       method: 'PATCH',
       headers: {
-        'apikey': SUPA_KEY,
-        'Authorization': 'Bearer ' + SUPA_KEY,
-        'Content-Type': 'application/json',
+        ...window.belksSupaKopf(),
         'Prefer': 'return=minimal'
       },
       body: JSON.stringify({ note: newNote })
@@ -36501,9 +36581,7 @@ async function pushStateToSupabase(key, value) {
     var _opt = {
       method: 'POST',
       headers: {
-        'apikey': SUPA_KEY,
-        'Authorization': 'Bearer ' + SUPA_KEY,
-        'Content-Type': 'application/json',
+        ...window.belksSupaKopf(),
         'Prefer': 'resolution=merge-duplicates'
       },
       body: JSON.stringify({
@@ -37374,7 +37452,7 @@ async function belksTischRpc(name, args){
   var r = await fetch(SUPA_URL + '/rest/v1/rpc/' + name, {
     method: 'POST',
     headers: {
-      'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY,
+      ...window.belksSupaKopf(),
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(args)
@@ -37756,6 +37834,9 @@ var SYNC_BLACKLIST = [
   'eatdesi_bon_kollision',   // erkannte doppelte Nummern (v420)
   'eatdesi_extra_fehlt',     // Spalte extra fehlt (v420)
   'eatdesi_speicher_fehler', // letzter Schreibfehler (v422)
+  /* v432: Wann sich DIESES Geraet zuletzt naechtlich abgemeldet hat.
+     In der Cloud wuerde ein Geraet die Abmeldung des anderen verhindern. */
+  'eatdesi_last_logout',
   /* v427, vom Wachhund gefunden: eine Warteschlange noch nicht gesendeter
      Tischnotizen. Sie stand im Abgleich und waere mit "der letzte gewinnt"
      verteilt worden - zwei Geraete haetten sich gegenseitig die eigenen
@@ -39134,14 +39215,14 @@ function belksTenantGuard(){
           var ok=null;
           try{
             var rp=await fetch(SUPA_URL+'/rest/v1/rpc/belks_check_secret',{method:'POST',
-              headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+              headers:{...window.belksSupaKopf()},
               body:JSON.stringify({p_code:cd, p_secret:String(pw)})});
             if(rp.ok) ok=await rp.json();
           }catch(e){}
           if(ok===true){ activate(cd); return; }
           if(ok===false){ err.textContent='Restaurant-Code oder Passwort falsch.'; return; }
           // Rueckfall, solange die Pruef-Funktion in Supabase noch fehlt
-          var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(cd)+'&select=location_id,secret',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
+          var r=await fetch(SUPA_URL+'/rest/v1/belks_tenants?location_id=eq.'+encodeURIComponent(cd)+'&select=location_id,secret',{headers:{...window.belksSupaKopf()}});
           var j=r.ok?await r.json():[];
           var t=j&&j[0];
           if(!t){ err.textContent='Restaurant nicht gefunden.'; return; }
