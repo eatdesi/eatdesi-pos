@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v429</title>
+<title>eatDeSi POS v430</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -12141,7 +12141,9 @@ function KassenbuchView({ completedOrders, expenses, printerSettings, onReset })
   const bar = belksSummeBar(filtered) + belksSummeBar(gutVerkList);
   const karte = belksSummeKarte(filtered) + belksSummeKarte(gutVerkList);
   const rabattTotal = filtered.reduce((s,o)=>s+(o.rabatt||0),0);
-  const stornoSum = stornos.reduce((s,o)=>s+(o.total||0),0);
+  /* v430: Storni vor Zahlung stehen unter "Stornierte Tische" - hier nicht
+     noch einmal. */
+  const stornoSum = stornos.filter(o => !o.stornoVorZahlung).reduce((s,o)=>s+(o.total||0),0);
   const exp = filtExp.reduce((s,e)=>s+(e.amount||0),0);
   const tax7 = filtered.reduce((s,o)=>s+calcTax7(o.items||[]),0);
   const tax19 = filtered.reduce((s,o)=>s+calcTax19(o.items||[]),0);
@@ -15973,6 +15975,11 @@ function DayEndView({
   const stornos = completedOrders.filter(o => {
     if (!o || !o.storniert) return false;
     if (isPendingOnline(o)) return false;
+    /* v430: Ein Storno VOR der Zahlung steht seit v430 auch in
+       completedOrders - damit die Belegnummer lueckenlos bleibt. Er wird
+       aber schon unter "Stornierte Tische" gezaehlt. Ohne diese Zeile
+       erschiene er zweimal und der Bericht waere falsch. */
+    if (o.stornoVorZahlung) return false;
     const d = new Date(o.time);
     return d >= from && d <= to;
   });
@@ -24756,7 +24763,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v429"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v430"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27158,6 +27165,42 @@ function App() {
           bestellNr: _o.bestellNr || _stornoNr,
           bonNrBestellung: _o.bestellNr || _stornoNr
         }]; });
+
+        /* ═══ v430: AUCH IN DIE BUCHUNGSTABELLE ═══
+           Bis hierher stand der Vorgang nur in eatdesi_stornos. Er hat aber
+           eine Belegnummer gezogen und wurde von der TSE signiert - in der
+           Nummernfolge der Buchungen klaffte damit eine Luecke.
+           Am 29.08. fehlten so 0002 und 0004; die Reihe lief 0001, 0003,
+           0005, 0006. Nach § 146a muss sie lueckenlos sein und jeder
+           signierte Vorgang auffindbar.
+
+           Ein Tisch-Storno vor der Zahlung fuehlt sich an wie "hat nie
+           stattgefunden". Fiskalisch ist er derselbe Fall wie ein Storno
+           nach der Zahlung - nur ohne Geldfluss. */
+        try {
+          var _stornoBuchung = {
+            id: Date.now() + 1,
+            bonNr: _stornoNr,
+            bestellNr: _o.bestellNr || _stornoNr,
+            label: "Tisch " + tid,
+            tableId: String(tid),
+            items: (_o.items || []),
+            total: _summe,
+            payMethod: "",              /* kein Geld geflossen */
+            storniert: true,
+            stornoGrund: grund || "ohne Angabe",
+            stornoVorZahlung: true,     /* unterscheidet ihn vom Storno nach Zahlung */
+            stornoVon: (loggedInUser && loggedInUser.name) || "unbekannt",
+            stornoAt: new Date().toISOString(),
+            time: new Date().toISOString(),
+            tse: _tse,
+            trinkgeld: 0, rabatt: 0
+          };
+          setCompletedOrders(function(p){ return [...(p || []), _stornoBuchung]; });
+          /* Sofort hochladen - nicht auf den naechsten Rundlauf warten.
+             Ein fiskalischer Beleg soll nicht in einer Warteschlange stehen. */
+          try { pushOrderToSupabase(_stornoBuchung); } catch(e) { console.warn("Storno-Buchung:", e); }
+        } catch (e) { console.warn("v430 Storno-Buchung:", e); }
       }
       setTableOrders(p => { const n = {...p}; delete n[tid]; return n; });
       setView("tables");
