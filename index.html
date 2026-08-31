@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v432</title>
+<title>eatDeSi POS v433</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8505,7 +8505,7 @@ function belksStationOffen(station, tableOrders, takeaway, completedOrders){
       if (o && hatOffenes(o.items)) n++;
     });
     (takeaway || []).forEach(function(t){
-      if (t && !t.done && hatOffenes(t.items)) n++;
+      if (t && !t.deleted && !t.done && hatOffenes(t.items)) n++;   /* v433 */
     });
     /* Webshop-Bestellungen sind bereits gebucht - dort gibt es weder
        Entwuerfe noch Sende-Marken, nur die Frage, ob etwas fuer diese
@@ -15390,7 +15390,7 @@ function KitchenView({
     items: o.items.filter(i => isFood(i) && !i._kitchenSent && !i._entwurf),
     time: o.time || new Date(),
     kitchenDone: o.kitchenDone
-  })), ...takeaway.filter(t => t.items?.length > 0 && !t.done).map(t => ({
+  })), ...window.belksTakeawayOffen(takeaway).map(t => ({
     oid: `ta_${t.id}`,
     label: belksTaLabel(t),
     items: t.items.filter(i => isFood(i) && !i._kitchenSent && !i._entwurf),
@@ -15543,7 +15543,7 @@ function BarView({
     items: o.items.filter(i => istBar(i) && !i._barSent && !i._entwurf),
     time: o.time || new Date(),
     barDone: o.barDone
-  })), ...takeaway.filter(t => t.items?.length > 0 && !t.done).map(t => ({
+  })), ...window.belksTakeawayOffen(takeaway).map(t => ({
     oid: `ta_${t.id}`,
     label: belksTaLabel(t),
     items: t.items.filter(i => istBar(i) && !i._barSent && !i._entwurf),
@@ -22254,7 +22254,7 @@ function DeliveryPersonView({ drivers, takeaway, completedOrders, onSave }) {
   };
 
   // Active takeaways not yet delivered
-  const activeTakeaways = takeaway.filter(t => t.items?.length > 0 && !t.done);
+  const activeTakeaways = window.belksTakeawayOffen(takeaway);
   // Completed today
   const todayDeliveries = completedOrders.filter(o => {
     const d = new Date(o.time);
@@ -22685,7 +22685,7 @@ function FahrerView({ takeaway, setTakeaway, completedOrders, setCompletedOrders
         : null
     }));
   // Offene Lieferungen: haben eine Adresse und sind noch nicht abgeschlossen
-  const alle = (takeaway || []).filter(t => t && !t.done && (t.items || []).length > 0 && adresse(t))
+  const alle = (takeaway || []).filter(t => t && !t.deleted && !t.done && (t.items || []).length > 0 && adresse(t))   /* v433 */
     .concat(wsAlle.filter(t => (t.items || []).length > 0 && adresse(t)));
   const offen = alle.filter(t => !t.geliefert);
   const liste = (nurMeine ? offen.filter(t => t.fahrer === ich) : offen)
@@ -22708,7 +22708,13 @@ function FahrerView({ takeaway, setTakeaway, completedOrders, setCompletedOrders
     // Takeaway: erledigte Lieferungen aus der Arbeitsliste nehmen
     const wegIds = {};
     alleFertig.forEach(t => { if (!t._ws) wegIds[t.id] = 1; });
-    if (Object.keys(wegIds).length) setTakeaway(p => (p || []).filter(x => !wegIds[x.id]));
+    /* v433: markieren statt entfernen - siehe deleteTakeaway. */
+    if (Object.keys(wegIds).length) setTakeaway(p => (p || []).map(x => wegIds[x.id]
+      ? Object.assign({}, x, {
+          deleted: true,
+          deletedAt: new Date((window.belksJetzt ? window.belksJetzt() : Date.now())).toISOString()
+        })
+      : x));
     // Webshop: die Marken aus der Notiz entfernen
     alleFertig.filter(t => t._ws).forEach(t => {
       const nn = belksFahrerSpurenLoeschen(t.note);
@@ -24554,7 +24560,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
   const todayTips = todayOrders.reduce((s,o) => s + (o.trinkgeld||0), 0);
   const todayExpenses = (expenses||[]).filter(e => new Date(e.date||e.time||0).toLocaleDateString("de-DE") === todayStr).reduce((s,e) => s+(parseFloat(e.amount)||0),0);
   const openTables = Object.keys(tableOrders).filter(k => !String(k).startsWith("ta_") && tableOrders[k]?.items?.length > 0);
-  const activeTakeaway = (takeaway||[]).filter(t => !t.done && !t.bezahlt);
+  const activeTakeaway = (takeaway||[]).filter(t => !t.deleted && !t.done && !t.bezahlt);   /* v433 */
   const hour = today.getHours();
   const greeting = hour < 12 ? "Guten Morgen" : hour < 18 ? "Guten Tag" : "Guten Abend";
 
@@ -24685,7 +24691,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
         React.createElement("div", { style:{ padding:"10px 14px" } },
           // Offene
           (function(){
-            var roh = (takeaway||[]).filter(function(t){ return !t.done && !t.bezahlt; });
+            var roh = (takeaway||[]).filter(function(t){ return !t.deleted && !t.done && !t.bezahlt; });   /* v433 */
             var sichtbar = roh.filter(function(t){
               if(taFilter === "offen") return !t.geliefert;
               if(taFilter === "geliefert") return !!t.geliefert;
@@ -24761,7 +24767,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v432"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v433"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25410,6 +25416,23 @@ function App() {
          Startseite fragt spaeter nach. Die Bestellungen liegen im Archiv. */
       try { if ((completedOrders || []).filter(belksBezahlt).length) belksExportOffenSetzen(yKey); } catch (e) {}
       try { belksGrabsteineWeg(); } catch (e) {}   // v324
+
+      /* v433: Alte Takeaway-Marken wegraeumen. Seit v433 wird ein
+         erledigter Takeaway markiert statt entfernt - sonst schiebt ein
+         Geraet, das offline war, ihn zurueck (am 31.08. kam so eine
+         Bestellung vom 25.08. wieder).
+         Sieben Tage sind reichlich: so lange darf ein Geraet aus sein.
+         Danach hat die Marke ihre Aufgabe erfuellt. */
+      try {
+        var _taGrenze = (window.belksJetzt ? window.belksJetzt() : Date.now()) - 7 * 86400000;
+        setTakeaway(function(p){
+          return (p || []).filter(function(t){
+            if (!t || !t.deleted) return true;
+            var w = new Date(t.deletedAt || 0).getTime();
+            return !(w > 0 && w < _taGrenze);
+          });
+        });
+      } catch (e) { console.warn("v433 Takeaway aufraeumen:", e); }
 
       /* ═══ v424: UMSTELLUNG AUF DEN NEUEN TISCH-ABGLEICH ═══
          Um 04:00 ist kein Tisch offen - es gibt nichts zu uebernehmen, die
@@ -26484,7 +26507,19 @@ function App() {
   };
 
   const deleteTakeaway = (taId) => {
-    setTakeaway(t => t.filter(x => x.id !== taId));
+    /* ═══ v433: MARKIEREN STATT ENTFERNEN ═══
+       Vorher wurde der Eintrag aus der Liste geworfen. Ein Geraet, das
+       waehrenddessen offline war, hatte ihn noch - und schob ihn beim
+       naechsten Abgleich zurueck. Am 31.08. stand so eine Takeaway-
+       Bestellung vom 25.08. wieder in der Cloud.
+       Dasselbe Mittel wie bei den Tischen: nichts verschwindet, es wird
+       gekennzeichnet. Der Tagesabschluss raeumt spaeter auf. */
+    setTakeaway(t => (t || []).map(x => x.id === taId
+      ? Object.assign({}, x, {
+          deleted: true,
+          deletedAt: new Date((window.belksJetzt ? window.belksJetzt() : Date.now())).toISOString()
+        })
+      : x));
   };
 
   // Reaktiviere eine abgeschlossene Bestellung - zur_ck auf Tisch ODER Takeaway
@@ -26629,7 +26664,7 @@ function App() {
      Entwurfspruefung und benutzte isDrink() statt istBar(). */
   const pendingKitchen = belksStationOffen("kueche", tableOrders, takeaway, completedOrders);
   const pendingBar     = belksStationOffen("bar",    tableOrders, takeaway, completedOrders);
-  const active = Object.values(tableOrders).filter(o => o?.items?.length > 0).length + takeaway.filter(t => t.items?.length > 0 && !t.done).length;
+  const active = Object.values(tableOrders).filter(o => o?.items?.length > 0).length + window.belksTakeawayOffen(takeaway).length;
   const MENU_ITEMS = [{
     id: "dashboard",
     l: "Dashboard",
@@ -35450,7 +35485,7 @@ function KdsProView({ tableOrders, takeaway, setTableOrders, completedOrders, se
   });
 
   // 2) TAKEAWAY (POS Abholung/Lieferung): aus takeaway-Liste, Status im Feld kdsStatus (Default 'new')
-  var taTickets = (takeaway||[]).filter(function(t){ return !t.done && !t.kdsHidden && (t.items||[]).length>0; }).map(function(ta){
+  var taTickets = (takeaway||[]).filter(function(t){ return !t.deleted && !t.done && !t.kdsHidden && (t.items||[]).length>0; })   /* v433 */.map(function(ta){
     var deliv = ta.orderType==='Lieferung' || !!ta.customerStreet;
     var lbl = (ta.source && ta.source!=='Takeaway') ? ta.source : '🥡 Takeaway';
     return {
@@ -36117,6 +36152,19 @@ window.belksZeitMerken = function(resp){
    durchliess, haing an ihren Regeln, und die sind je Tabelle verschieden.
    So entstand der Eindruck von Zufall.
    Wer ab jetzt mit unserer Datenbank spricht, holt seine Kopfzeilen hier. */
+/* ═══ v433: WELCHE TAKEAWAY-BESTELLUNGEN SIND OFFEN? ═══
+   Sechs Stellen filterten die Liste, jede auf ihre Weise - und keine kannte
+   die neue Loeschmarkierung. Ab jetzt entscheidet diese eine Funktion.
+     done    = der Gast hat abgeholt / wurde geliefert
+     deleted = seit v433: erledigt und aus der Arbeitsliste genommen
+               (frueher wurde der Eintrag geworfen; ein Offline-Geraet
+                schob ihn dann zurueck) */
+window.belksTakeawayOffen = function(liste){
+  return (liste || []).filter(function(t){
+    return t && !t.deleted && !t.done && (t.items || []).length > 0;
+  });
+};
+
 window.belksSupaKopf = function(extra){
   var tok = null;
   try { tok = window.belksAuthToken ? window.belksAuthToken() : null; } catch(e){}
@@ -38042,7 +38090,14 @@ var MERGE_LIST_KEYS = {
      kaeme vom anderen Geraet zurueck. Sie brauchen erst eine
      Loeschmarkierung wie die Kunden seit v370. Eigene Aenderung, eigener
      Test. */
-  'archive': 1, 'inventory': 1, 'staff': 1, 'optiongroups': 1
+  'archive': 1, 'inventory': 1, 'staff': 1, 'optiongroups': 1,
+  /* v433: Takeaway. Bis v432 stand es auf "der letzte gewinnt" - ein
+     Offline-Geraet schob am 31.08. eine Bestellung vom 25.08. zurueck.
+     Es steht erst JETZT hier, weil erledigte Eintraege bis v432 aus der
+     Liste geworfen wurden; beim Zusammenfuehren waeren sie alle
+     zurueckgekommen. Seit v433 werden sie markiert (deleted), und
+     _mergeById laesst "geloescht gewinnt" gelten. */
+  'takeaway': 1
 };
 
 // Zwei ID-Listen zusammenfuehren: alle Eintraege eindeutig, deleted gewinnt.
