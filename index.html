@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v433</title>
+<title>eatDeSi POS v434</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -24767,7 +24767,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v433"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v434"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -33082,13 +33082,13 @@ function HACCPModul({
   });
 
   /* ---- Ansicht: Heute ---- */
-  const Heute = () => /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Karte, {
+  const Heute = () => /*#__PURE__*/React.createElement(React.Fragment, null, Karte(Object.assign({}, {
     titel: "Heute zu erledigen",
     sub: `${de(heute())} · ${betrieb}`
-  }, /*#__PURE__*/React.createElement("div", {
+  }, { children: [/*#__PURE__*/React.createElement("div", {
     style: st.zeile,
     onClick: () => setReiter('temp')
-  }, /*#__PURE__*/React.createElement(Ampel, {
+  }, Ampel({
     stufe: offeneTemp ? 'warn' : 'ok'
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -33102,7 +33102,7 @@ function HACCPModul({
   }, offeneTemp ? `${offeneTemp} von ${cfg.geraete.length} Geräten offen` : 'Alle Geräte erfasst'))), /*#__PURE__*/React.createElement("div", {
     style: st.zeile,
     onClick: () => setReiter('zapf')
-  }, /*#__PURE__*/React.createElement(Ampel, {
+  }, Ampel({
     stufe: zapfStatus.stufe
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -33116,7 +33116,7 @@ function HACCPModul({
   }, "Letzte Reinigung: ", de(zapfStatus.letzte), " · ", zapfStatus.text))), /*#__PURE__*/React.createElement("div", {
     style: st.zeile,
     onClick: () => setReiter('clean')
-  }, /*#__PURE__*/React.createElement(Ampel, {
+  }, Ampel({
     stufe: offeneClean ? 'warn' : 'ok'
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -33132,7 +33132,7 @@ function HACCPModul({
       ...st.zeile,
       borderColor: T.alarm
     }
-  }, /*#__PURE__*/React.createElement(Ampel, {
+  }, Ampel({
     stufe: "alarm"
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -33143,10 +33143,10 @@ function HACCPModul({
       color: T.muted,
       fontSize: 12
     }
-  }, abweichungen.map(g => g.name).join(', '), " – Ware prüfen, Maßnahme eintragen", cfg.telTechnik ? `, Technik: ${cfg.telTechnik}` : '')))), /*#__PURE__*/React.createElement(Karte, {
+  }, abweichungen.map(g => g.name).join(', '), " – Ware prüfen, Maßnahme eintragen", cfg.telTechnik ? `, Technik: ${cfg.telTechnik}` : '')))] })), Karte(Object.assign({}, {
     titel: "Schnellzugriff",
     sub: "Was zwischendurch anfällt"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, { children: /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexWrap: 'wrap',
@@ -33164,7 +33164,7 @@ function HACCPModul({
   }, "Schädlingsbefund"), /*#__PURE__*/React.createElement("button", {
     style: st.btnAlt,
     onClick: () => setReiter('report')
-  }, "Monatsbericht"))));
+  }, "Monatsbericht")) })));
 
   /* ---- Ansicht: Temperatur ---- */
   /* ═══ v413: WERTE VON GESTERN UEBERNEHMEN ═══
@@ -33208,19 +33208,17 @@ function HACCPModul({
     const vortag = nochLeer ? letzteMessung(tagDatum) : null;
     const jetztUhr = new Date().toTimeString().slice(0, 5);
     const faellig = tagDatum !== heute() || jetztUhr >= (cfg.tempErinnerung || '10:00');
-    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Karte, {
+    return /*#__PURE__*/React.createElement(React.Fragment, null, Karte(Object.assign({}, {
       titel: "Temperaturkontrolle",
       sub: "Kühl- und Tiefkühlgeräte, einmal pro Tag"
-    }, /*#__PURE__*/React.createElement(Feld, {
+    }, { children: [Feld(Object.assign({}, {
       label: "Datum"
-    }, /*#__PURE__*/React.createElement("input", {
+    }, { children: /*#__PURE__*/React.createElement("input", {
       type: "date",
       style: st.input,
       value: tagDatum,
       onChange: e => setTag(e.target.value)
-    })),
-
-    /* ═══ v413: DER VORSCHLAG ═══
+    }) })), /* ═══ v413: DER VORSCHLAG ═══
        Ein Antippen statt sechs Eingaben. Bewusst ein Knopf und keine
        automatische Eintragung: der Eintrag traegt einen Namen und ist ein
        Nachweis ueber eine durchgefuehrte Kontrolle. Wer nicht nachgesehen
@@ -33241,16 +33239,12 @@ function HACCPModul({
         style: { ...st.btn, width: '100%' },
         onClick: () => uebernehmen(vortag, tagDatum)
       }, 'Werte vom ' + de(vortag) + ' \u00fcbernehmen')
-    ),
-
-    /* Wurde uebernommen, muss das im Nachweis stehen - sonst sieht ein
+    ), /* Wurde uebernommen, muss das im Nachweis stehen - sonst sieht ein
        Pruefer sechs gleiche Tage und kann nicht unterscheiden, ob gemessen
        oder uebernommen wurde. */
     t._uebernommenVon && /*#__PURE__*/React.createElement("div", {
       style: { fontSize: 11.5, color: T.muted, marginBottom: 10 }
-    }, '\u2139\ufe0f Werte vom ', de(t._uebernommenVon), ' \u00fcbernommen und best\u00e4tigt.'),
-
-    cfg.geraete.map(g => {
+    }, '\u2139\ufe0f Werte vom ', de(t._uebernommenVon), ' \u00fcbernommen und best\u00e4tigt.'), cfg.geraete.map(g => {
       const v = t[g.id];
       const da = v !== undefined && v !== '';
       const schlecht = da && (+v > g.max || +v < g.min);
@@ -33297,9 +33291,9 @@ function HACCPModul({
           border: `1px solid ${da ? schlecht ? T.alarm : T.ok : T.line}`
         }
       }, da ? schlecht ? 'außerhalb' : 'i. O.' : 'offen'));
-    }), /*#__PURE__*/React.createElement(Feld, {
+    }), Feld(Object.assign({}, {
       label: "Eingeleitete Maßnahmen / Bemerkung"
-    }, /*#__PURE__*/React.createElement("textarea", {
+    }, { children: /*#__PURE__*/React.createElement("textarea", {
       style: {
         ...st.input,
         minHeight: 64
@@ -33307,30 +33301,30 @@ function HACCPModul({
       value: t._note || '',
       placeholder: "z. B. Tür stand offen, Ware geprüft, Technik informiert",
       onChange: e => setzeTemp(tagDatum, '_note', e.target.value)
-    })), /*#__PURE__*/React.createElement(Feld, {
+    }) })), Feld(Object.assign({}, {
       label: "Kontrolliert von"
-    }, /*#__PURE__*/React.createElement("input", {
+    }, { children: /*#__PURE__*/React.createElement("input", {
       style: st.input,
       value: t._by ?? benutzer,
       onChange: e => setzeTemp(tagDatum, '_by', e.target.value)
-    }))), /*#__PURE__*/React.createElement(Karte, {
+    }) }))] })), Karte(Object.assign({}, {
       titel: "Erfasste Tage",
       sub: monatName(monat)
-    }, /*#__PURE__*/React.createElement(Feld, {
+    }, { children: [Feld(Object.assign({}, {
       label: "Monat"
-    }, /*#__PURE__*/React.createElement("input", {
+    }, { children: /*#__PURE__*/React.createElement("input", {
       type: "month",
       style: st.input,
       value: monat,
       onChange: e => setMonat(e.target.value)
-    })), Object.keys(temp).filter(d => d.startsWith(monat)).sort().reverse().map(d => /*#__PURE__*/React.createElement("div", {
+    }) })), Object.keys(temp).filter(d => d.startsWith(monat)).sort().reverse().map(d => /*#__PURE__*/React.createElement("div", {
       key: d,
       style: {
         ...st.zeile,
         cursor: 'pointer'
       },
       onClick: () => setTag(d)
-    }, /*#__PURE__*/React.createElement(Ampel, {
+    }, Ampel({
       stufe: "ok"
     }), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -33377,7 +33371,7 @@ function HACCPModul({
         marginTop: 10
       },
       onClick: exportTemp
-    }, "CSV für ", monatName(monat))));
+    }, "CSV für ", monatName(monat))] })));
   };
 
   /* ---- Ansicht: Reinigung ---- */
@@ -33413,29 +33407,29 @@ function HACCPModul({
       letterSpacing: '.05em',
       fontWeight: 700
     };
-    return /*#__PURE__*/React.createElement(Karte, {
+    return Karte(Object.assign({}, {
       titel: "Reinigungsplan",
       sub: "Abhaken, sobald erledigt"
-    }, /*#__PURE__*/React.createElement(Feld, {
+    }, { children: [Feld(Object.assign({}, {
       label: "Datum"
-    }, /*#__PURE__*/React.createElement("input", {
+    }, { children: /*#__PURE__*/React.createElement("input", {
       type: "date",
       style: st.input,
       value: tagDatum,
       onChange: e => setTag(e.target.value)
-    })), /*#__PURE__*/React.createElement("div", {
+    }) })), /*#__PURE__*/React.createElement("div", {
       style: kopf
     }, "Täglich"), gruppe('täglich'), /*#__PURE__*/React.createElement("div", {
       style: kopf
     }, "Wöchentlich"), gruppe('wöchentlich'), /*#__PURE__*/React.createElement("div", {
       style: kopf
-    }, "Monatlich"), gruppe('monatlich'), /*#__PURE__*/React.createElement(Feld, {
+    }, "Monatlich"), gruppe('monatlich'), Feld(Object.assign({}, {
       label: "Erledigt von"
-    }, /*#__PURE__*/React.createElement("input", {
+    }, { children: /*#__PURE__*/React.createElement("input", {
       style: st.input,
       value: c._by ?? benutzer,
       onChange: e => setzeClean(tagDatum, '_by', e.target.value)
-    })));
+    }) }))] }));
   };
 
   /* ---- Ansicht: generische Liste (Zapf, Ware, Öl, Schädlinge, Personal) ---- */
@@ -33475,18 +33469,18 @@ function HACCPModul({
        seine Kennung - beim Speichern wird ersetzt statt angehaengt. */
     const [bearbeite, setBearbeite] = useState(null);
     const rows = daten[modul].filter(r => def.ohneDatum || (r.datum || '').startsWith(monat)).sort((a, b) => (b.datum || '').localeCompare(a.datum || ''));
-    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Karte, {
+    return /*#__PURE__*/React.createElement(React.Fragment, null, Karte(Object.assign({}, {
       titel: def.titel,
       sub: def.sub
-    }, /*#__PURE__*/React.createElement("div", {
+    }, { children: [/*#__PURE__*/React.createElement("div", {
       style: {
         display: 'flex',
         flexWrap: 'wrap',
         gap: 10
       }
-    }, !def.ohneDatum && /*#__PURE__*/React.createElement(Feld, {
+    }, !def.ohneDatum && Feld(Object.assign({}, {
       label: "Datum"
-    }, /*#__PURE__*/React.createElement("input", {
+    }, { children: /*#__PURE__*/React.createElement("input", {
       type: "date",
       style: st.input,
       value: entwurf.datum,
@@ -33494,10 +33488,10 @@ function HACCPModul({
         ...entwurf,
         datum: e.target.value
       })
-    })), def.felder.map(f => /*#__PURE__*/React.createElement(Feld, {
+    }) })), def.felder.map(f => Feld(Object.assign({}, {
       key: f.k,
       label: f.l
-    }, f.typ === 'select' ? /*#__PURE__*/React.createElement("select", {
+    }, { children: f.typ === 'select' ? /*#__PURE__*/React.createElement("select", {
       style: st.input,
       value: entwurf[f.k],
       onChange: e => setEntwurf({
@@ -33516,8 +33510,7 @@ function HACCPModul({
         ...entwurf,
         [f.k]: e.target.value
       })
-    })))),
-    /* v416: Wird ein vorhandener Eintrag bearbeitet, sagt der Balken das -
+    }) })))), /* v416: Wird ein vorhandener Eintrag bearbeitet, sagt der Balken das -
        sonst tippt jemand etwas ein und wundert sich, warum kein neuer
        Eintrag entsteht. */
     bearbeite && /*#__PURE__*/React.createElement("div", {
@@ -33533,8 +33526,7 @@ function HACCPModul({
                  color: T.muted, padding: '5px 10px', fontFamily: 'inherit',
                  fontSize: 12, cursor: 'pointer' }
       }, "Abbrechen")
-    ),
-    /*#__PURE__*/React.createElement("button", {
+    ), /*#__PURE__*/React.createElement("button", {
       style: {
         ...st.btn,
         width: '100%'
@@ -33556,25 +33548,22 @@ function HACCPModul({
         fontSize: 12,
         marginTop: 8
       }
-    }, def.hinweis)), /*#__PURE__*/React.createElement(Karte, {
+    }, def.hinweis)] })), Karte(Object.assign({}, {
       titel: "Nachweis",
       sub: def.ohneDatum ? 'Übersicht' : monatName(monat)
-    }, !def.ohneDatum && /*#__PURE__*/React.createElement(Feld, {
+    }, { children: [!def.ohneDatum && Feld(Object.assign({}, {
       label: "Monat"
-    }, /*#__PURE__*/React.createElement("input", {
+    }, { children: /*#__PURE__*/React.createElement("input", {
       type: "month",
       style: st.input,
       value: monat,
       onChange: e => setMonat(e.target.value)
-    })),
-
-    /* ═══ v418: KARTEN STATT TABELLE ═══
+    }) })), /* ═══ v418: KARTEN STATT TABELLE ═══
        Vorher eine Tabelle mit bis zu sechs Spalten in einem Kasten mit
        overflowX. Auf dem Telefon lief die letzte Spalte - genau die mit
        Bearbeiten und Loeschen - aus dem Bild. Die Knoepfe waren da, nur
        sah sie niemand.
-       Jede Zeile ist jetzt eine Karte: oben Datum und die Hauptangabe,
-       darunter der Rest, rechts die Knoepfe. Nichts mehr zu schieben. */
+       Jede Zeile ist jetzt eine Karte: oben Datum und die Hauptangabe, darunter der Rest, rechts die Knoepfe. Nichts mehr zu schieben. */
     rows.map(r => /*#__PURE__*/React.createElement("div", {
       key: r.id,
       style: {
@@ -33640,8 +33629,7 @@ function HACCPModul({
                    padding: '6px 12px', fontFamily: 'inherit', fontWeight: 700 }
         }, "\u00d7")
       )
-    )),
-    rows.length === 0 && /*#__PURE__*/React.createElement("div", {
+    )), rows.length === 0 && /*#__PURE__*/React.createElement("div", {
       style: { color: T.muted, fontSize: 13.5, padding: '10px 0' }
     }, "Kein Eintrag."), /*#__PURE__*/React.createElement("button", {
       style: {
@@ -33650,7 +33638,7 @@ function HACCPModul({
         marginTop: 10
       },
       onClick: () => exportListe(modul)
-    }, "Als CSV exportieren")));
+    }, "Als CSV exportieren")] })));
   };
 
   /* ---- Ansicht: Monatsbericht ---- */
@@ -33719,17 +33707,17 @@ function HACCPModul({
     }, label));
     const rueck = imMonat('ware').filter(r => (r.zust || '').startsWith('Zurück')).length;
     const befund = imMonat('pest').filter(r => !(r.bef || '').startsWith('Kein')).length;
-    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Karte, {
+    return /*#__PURE__*/React.createElement(React.Fragment, null, Karte(Object.assign({}, {
       titel: "Monatsbericht",
       sub: `${betrieb} · ${monatName(monat)}`
-    }, /*#__PURE__*/React.createElement(Feld, {
+    }, { children: [Feld(Object.assign({}, {
       label: "Monat wählen"
-    }, /*#__PURE__*/React.createElement("input", {
+    }, { children: /*#__PURE__*/React.createElement("input", {
       type: "month",
       style: st.input,
       value: monat,
       onChange: e => setMonat(e.target.value)
-    })), /*#__PURE__*/React.createElement("div", {
+    }) })), /*#__PURE__*/React.createElement("div", {
       style: {
         display: 'flex',
         flexWrap: 'wrap',
@@ -33742,10 +33730,10 @@ function HACCPModul({
         gap: 8,
         marginTop: 8
       }
-    }, kachel(imMonat('ware').length, 'Waren­annahmen'), kachel(rueck, 'Zurück­gewiesen', rueck ? T.warn : T.text), kachel(imMonat('oil').length, 'Öl­kontrollen'), kachel(befund, 'Schädlings­befunde', befund ? T.alarm : T.ok))), /*#__PURE__*/React.createElement(Karte, {
+    }, kachel(imMonat('ware').length, 'Waren­annahmen'), kachel(rueck, 'Zurück­gewiesen', rueck ? T.warn : T.text), kachel(imMonat('oil').length, 'Öl­kontrollen'), kachel(befund, 'Schädlings­befunde', befund ? T.alarm : T.ok))] })), Karte(Object.assign({}, {
       titel: "Temperaturübersicht",
       sub: "Ganzer Monat, rot = außerhalb des Sollbereichs"
-    }, /*#__PURE__*/React.createElement("div", {
+    }, { children: [/*#__PURE__*/React.createElement("div", {
       style: {
         overflowX: 'auto'
       }
@@ -33771,7 +33759,7 @@ function HACCPModul({
         marginTop: 12
       },
       onClick: () => window.print()
-    }, "Monat drucken")));
+    }, "Monat drucken")] })));
   };
 
   /* ---- Ansicht: Einstellungen ---- */
@@ -33780,19 +33768,19 @@ function HACCPModul({
   /* ═══ v414: ERINNERUNG UND RUHETAGE ═══
      Beides gehoert dem Restaurant und wird abgeglichen - an einem Ruhetag
      soll kein Geraet im Haus melden. */
-  /*#__PURE__*/React.createElement(Karte, {
+  Karte(Object.assign({}, {
     titel: "Erinnerung",
     sub: "Wann das Pop-up auf der Startseite erscheint"
-  }, /*#__PURE__*/React.createElement(Feld, {
+  }, { children: [Feld(Object.assign({}, {
     label: "T\u00e4glich ab"
-  }, /*#__PURE__*/React.createElement("input", {
+  }, { children: /*#__PURE__*/React.createElement("input", {
     type: "time",
     style: st.input,
     value: cfg.tempErinnerung || '10:00',
     onChange: e => setCfg({ ...cfg, tempErinnerung: e.target.value })
-  })), /*#__PURE__*/React.createElement(Feld, {
+  }) })), Feld(Object.assign({}, {
     label: "Ruhetage \u2013 an diesen Tagen keine Meldung"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, { children: /*#__PURE__*/React.createElement("div", {
     style: { display: 'flex', gap: 6, flexWrap: 'wrap' }
   }, [[1,'Mo'],[2,'Di'],[3,'Mi'],[4,'Do'],[5,'Fr'],[6,'Sa'],[0,'So']].map(([nr, kurz]) => {
     const an = (cfg.ruhetage || []).indexOf(nr) >= 0;
@@ -33807,16 +33795,16 @@ function HACCPModul({
                color: an ? T.accentText : T.muted,
                border: '1px solid ' + (an ? T.accent : T.line) }
     }, kurz);
-  }))), /*#__PURE__*/React.createElement("div", {
+  })) })), /*#__PURE__*/React.createElement("div", {
     style: { fontSize: 11.5, color: T.muted, lineHeight: 1.5 }
   }, "Einzelne Ausnahmetage markiert man direkt am Pop-up \u00fcber "
    + "\u201eHeute Ruhetag\u201c. Der Tag wird festgehalten, damit im "
-   + "Monatsbericht ein Grund f\u00fcr die L\u00fccke steht.")),
+   + "Monatsbericht ein Grund f\u00fcr die L\u00fccke steht.")] })),
 
-  /*#__PURE__*/React.createElement(Karte, {
+  Karte(Object.assign({}, {
     titel: "Kühlgeräte",
     sub: "Name und Sollbereich je Gerät"
-  }, cfg.geraete.map((g, i) => /*#__PURE__*/React.createElement("div", {
+  }, { children: [cfg.geraete.map((g, i) => /*#__PURE__*/React.createElement("div", {
     key: g.id,
     style: {
       display: 'flex',
@@ -33890,11 +33878,11 @@ function HACCPModul({
         max: 7
       }]
     })
-  }, "Gerät hinzufügen")), /*#__PURE__*/React.createElement(Karte, {
+  }, "Gerät hinzufügen")] })), Karte(Object.assign({}, {
     titel: "Zapfanlage & Technik"
-  }, /*#__PURE__*/React.createElement(Feld, {
+  }, { children: [Feld(Object.assign({}, {
     label: "Reinigungsintervall in Tagen"
-  }, /*#__PURE__*/React.createElement("input", {
+  }, { children: /*#__PURE__*/React.createElement("input", {
     type: "number",
     style: st.input,
     /* v416: Nur noch Hinweis auf den Hoechstabstand nach DIN. Faellig macht
@@ -33905,36 +33893,35 @@ function HACCPModul({
       ...cfg,
       zapfIntervall: e.target.value
     })
-  })), /*#__PURE__*/React.createElement(Feld, {
+  }) })), Feld(Object.assign({}, {
     label: "Telefon Technik / Kundendienst"
-  }, /*#__PURE__*/React.createElement("input", {
+  }, { children: /*#__PURE__*/React.createElement("input", {
     style: st.input,
     value: cfg.telTechnik,
     onChange: e => setCfg({
       ...cfg,
       telTechnik: e.target.value
     })
-  }))), /*#__PURE__*/React.createElement(Karte, {
+  }) }))] })), Karte(Object.assign({}, {
     titel: "Daten sichern",
     sub: "Empfehlung: einmal im Monat, zusammen mit dem Z-Bon-Export"
-  }, /*#__PURE__*/React.createElement("button", {
+  }, { children: /*#__PURE__*/React.createElement("button", {
     style: {
       ...st.btn,
       width: '100%'
     },
     onClick: sicherung
-  }, "Alle HACCP-Daten als JSON sichern")));
+  }, "Alle HACCP-Daten als JSON sichern") })));
   const REITER = [['heute', 'Heute'], ['temp', 'Temperatur'], ['zapf', 'Zapfanlage'], ['clean', 'Reinigung'], ['ware', 'Wareneingang'], ['oil', 'Fritteusenöl'], ['staff', 'Personal'], ['pest', 'Schädlinge'], ['report', 'Monatsbericht'], ['set', 'Einstellungen']];
   const inhalt = () => {
-    if (reiter === 'heute') return /*#__PURE__*/React.createElement(Heute, null);
-    if (reiter === 'temp') return /*#__PURE__*/React.createElement(Temperatur, null);
-    if (reiter === 'clean') return /*#__PURE__*/React.createElement(Reinigung, null);
-    if (reiter === 'report') return /*#__PURE__*/React.createElement(Bericht, null);
-    if (reiter === 'set') return /*#__PURE__*/React.createElement(Einstellungen, null);
-    return /*#__PURE__*/React.createElement(Liste, {
-      modul: reiter,
-      key: reiter
-    });
+    if (reiter === 'heute') return Heute();          /* v434: Aufruf statt Bauteil */
+    if (reiter === 'temp') return Temperatur();      /* v434 */
+    if (reiter === 'clean') return Reinigung();      /* v434 */
+    if (reiter === 'report') return Bericht();       /* v434 */
+    if (reiter === 'set') return Einstellungen();    /* v434 */
+    /* v434: Aufruf statt Bauteil - sonst raeumt React bei jedem
+       Tastendruck das Eingabefeld ab und die Tastatur schliesst sich. */
+    return Liste({ modul: reiter });
   };
   return /*#__PURE__*/React.createElement("div", {
     style: st.wrap
