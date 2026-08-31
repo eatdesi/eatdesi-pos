@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v434</title>
+<title>eatDeSi POS v437</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -11193,11 +11193,40 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
   const [pointsRabatt, setPointsRabatt] = React.useState(0); // €-Rabatt durch eingeloeste Punkte
   const [redeemedPts, setRedeemedPts] = React.useState(0);
   const loyCfg = loyaltySettings || { pointsPerEuro:3, redeemRate:100, minRedeem:100, active:true };
-  const foundCustomer = (() => {
-    const q = (loyaltyPhone||"").trim().replace(/\s/g,"").toLowerCase();
-    if(!q) return null;
-    return (customers||[]).find(c => (c.phone||"").replace(/\s/g,"").toLowerCase()===q || (c.kundenNr||"").toLowerCase()===q) || null;
-  })();
+  /* ═══ v436: SUCHE NACH NUMMER ODER NAME ═══
+     Vorher nur GENAUE Uebereinstimmung von Telefon oder Kundennummer. Wer
+     den Namen kennt, aber nicht die Nummer, fand niemanden - und am Tresen
+     kennt man meistens den Namen.
+
+     Telefonnummern werden vor dem Vergleich von allem befreit, was nicht
+     Ziffer ist: 0159 065 530 22, 0159-06553022 und +49159... sind dieselbe
+     Nummer, und Gaeste diktieren sie jedesmal anders. */
+  const _nurZiffern = (s) => String(s||"").replace(/[^\d]/g,"");
+  const belksKundenSuche = (roh) => {
+    const q = String(roh||"").trim().toLowerCase();
+    if(!q) return [];
+    const qz = _nurZiffern(q);
+    const liste = (customers||[]).filter(c => c && !c.deleted);
+    /* Genaue Treffer zuerst - wer die Nummer tippt, will genau den Gast. */
+    const genau = liste.filter(c =>
+      (qz && _nurZiffern(c.phone).length > 0 && _nurZiffern(c.phone) === qz) ||
+      String(c.kundenNr||"").toLowerCase() === q ||
+      String(c.name||"").trim().toLowerCase() === q);
+    if (genau.length) return genau;
+    /* Sonst: Teilstuecke. Ab zwei Zeichen, sonst passt halb Felsberg. */
+    if (q.length < 2) return [];
+    return liste.filter(c =>
+      String(c.name||"").toLowerCase().includes(q) ||
+      (qz.length >= 3 && _nurZiffern(c.phone).includes(qz)) ||
+      String(c.kundenNr||"").toLowerCase().includes(q)
+    ).slice(0, 6);
+  };
+  const kundenTreffer = belksKundenSuche(loyaltyPhone);
+  /* Ein einzelner Treffer gilt als gewaehlt - wie bisher. Bei mehreren
+     waehlt der Kellner aus der Liste. */
+  const [gewaehlterKunde, setGewaehlterKunde] = React.useState(null);
+  const foundCustomer = gewaehlterKunde
+    || (kundenTreffer.length === 1 ? kundenTreffer[0] : null);
   const [cashGiven, setCashGiven] = React.useState("");
   const [splitPersons, setSplitPersons] = React.useState(2);
   const [splitPaid, setSplitPaid] = React.useState([]);
@@ -11416,14 +11445,27 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
           // Stammkunde / Loyalty (Telefon oder Kundennummer)
           /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", border:"2px solid #81c784", borderRadius:12, padding:12, marginBottom:12 } },
             /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#2e7d32", marginBottom:8 } }, "\u2B50 Stammkunde? Treuepunkte sammeln"),
-            /*#__PURE__*/React.createElement("input", { type:"tel", value:loyaltyPhone, onChange:e=>setLoyaltyPhone(e.target.value),
-              placeholder:"\uD83D\uDCF1 Handynummer (= Kundennummer)",
+            /*#__PURE__*/React.createElement("input", { type:"text", value:loyaltyPhone,
+              /* v436: type "text" statt "tel" - man soll auch einen NAMEN
+                 tippen koennen. Die Ziffern-Tastatur haette das verhindert. */
+              onChange:e=>{
+                setLoyaltyPhone(e.target.value);
+                /* v436: Eine getroffene Wahl verfaellt, sobald weiter getippt
+                   wird. Sonst kassiert man auf den falschen Gast und dessen
+                   Punkte waeren falsch. */
+                setGewaehlterKunde(null);
+                setRedeemedPts(0); setPointsRabatt(0);
+              },
+              placeholder:"\uD83D\uDCF1 Nummer oder Name",
               style:{ width:"100%", padding:"10px 12px", borderRadius:8, border:"2px solid #81c784", fontSize:14, fontFamily:"inherit", boxSizing:"border-box" }
             }),
             (() => {
               const q = (loyaltyPhone||"").trim().replace(/\s/g,"").toLowerCase();
               if(!q) return /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#558b2f", marginTop:6 } }, "Telefon oder Kundennummer eingeben \u2192 Gast bekommt Punkte.");
               const found = foundCustomer;
+              /* v436: Wurde aus der Liste gewaehlt oder neu angelegt, traegt
+                 loyaltyPhone womoeglich einen Namen. Die Buchung braucht die
+                 Nummer - sonst findet sie den Gast spaeter nicht wieder. */
               if(found) {
                 const cur = found.points||0;
                 const rate = loyCfg.redeemRate||100;
@@ -11448,8 +11490,79 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
                       )
                 );
               }
-              const looksPhone = /^[+]?\d{5,}$/.test(q);
-              return /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:looksPhone?"#e65100":"#999", marginTop:6 } }, looksPhone ? "\u2139\uFE0F Neuer Gast \u2013 wird als Stammkunde angelegt." : "\u26A0\uFE0F Kein Kunde gefunden.");
+              /* ═══ v436: MEHRERE TREFFER UND NEUANLAGE ═══
+                 Vorher stand hier nur ein Hinweistext. Wer den Namen tippte,
+                 sah nichts - und einen neuen Gast konnte man an dieser Stelle
+                 gar nicht anlegen. */
+              if (kundenTreffer.length > 1) {
+                return /*#__PURE__*/React.createElement("div", { style:{ marginTop:8 } },
+                  /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#558b2f", marginBottom:6 } },
+                    kundenTreffer.length + " Treffer \u2013 wen meinen Sie?"),
+                  kundenTreffer.map(function(c){
+                    return /*#__PURE__*/React.createElement("button", {
+                      key: c.id || c.phone || c.name,
+                      onClick: function(){ setGewaehlterKunde(c); },
+                      style:{ width:"100%", textAlign:"left", marginBottom:5, padding:"9px 11px",
+                              borderRadius:9, border:"1px solid #a5d6a7", background:"#fff",
+                              cursor:"pointer", fontFamily:"inherit" }
+                    },
+                      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#2e7d32" } },
+                        c.name || "(ohne Namen)"),
+                      /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#777" } },
+                        (c.phone || "\u2013") + " \u00b7 " + (c.points || 0) + " Punkte")
+                    );
+                  })
+                );
+              }
+
+              /* Kein Treffer: anlegen anbieten. Was getippt wurde, entscheidet,
+                 ob es als Nummer oder als Name uebernommen wird - der Kellner
+                 soll nicht zweimal dasselbe eintippen. */
+              var istNummer = _nurZiffern(q).length >= 5;
+              return /*#__PURE__*/React.createElement("div", { style:{ marginTop:8 } },
+                /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#e65100", marginBottom:6 } },
+                  "Kein Stammkunde gefunden."),
+                /*#__PURE__*/React.createElement("button", {
+                  onClick: function(){
+                    var name = window.prompt(istNummer
+                      ? "Name des Gastes?"
+                      : "Name des Gastes?", istNummer ? "" : String(loyaltyPhone||"").trim());
+                    if (name === null) return;
+                    name = String(name).trim();
+                    if (!name) { alert("Ohne Namen kann kein Kunde angelegt werden."); return; }
+                    var tel = istNummer ? String(loyaltyPhone||"").trim()
+                                        : String(window.prompt("Handynummer? (leer lassen, wenn unbekannt)", "") || "").trim();
+                    /* Doppelte Nummern verhindern - sonst hat ein Gast zwei
+                       Konten und seine Punkte liegen auf beiden. */
+                    if (tel && (customers||[]).some(function(c){
+                      return c && !c.deleted && _nurZiffern(c.phone) === _nurZiffern(tel); })) {
+                      alert("Diese Nummer geh\u00f6rt schon zu einem Kunden.");
+                      return;
+                    }
+                    var neu = {
+                      id: Date.now(),
+                      name: name,
+                      phone: tel,
+                      points: 0,
+                      visits: 0,
+                      createdAt: new Date((window.belksJetzt ? window.belksJetzt() : Date.now())).toISOString(),
+                      time: new Date((window.belksJetzt ? window.belksJetzt() : Date.now())).toISOString()
+                    };
+                    try {
+                      if (typeof setCustomers === "function") setCustomers(function(p){ return [...(p||[]), neu]; });
+                    } catch(e) { console.warn("v436 Kunde anlegen:", e); }
+                    setGewaehlterKunde(neu);
+                    if (tel) setLoyaltyPhone(tel);
+                  },
+                  style:{ width:"100%", padding:"10px", borderRadius:9, border:"2px solid #2e7d32",
+                          background:"#fff", color:"#2e7d32", cursor:"pointer",
+                          fontFamily:"inherit", fontWeight:700, fontSize:13 }
+                }, "\u2795 Als neuen Stammkunden anlegen"),
+                /*#__PURE__*/React.createElement("div", { style:{ fontSize:10.5, color:"#999", marginTop:5 } },
+                  istNummer
+                    ? "Die Nummer wird \u00fcbernommen, Name wird abgefragt."
+                    : "Der Name wird \u00fcbernommen, Nummer wird abgefragt.")
+              );
             })()
           ),
           // Rabatt
@@ -11836,7 +11949,13 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
               if (done.nurKarte && typeof onNurKarte === "function") {
                 onNurKarte();
               } else {
-                onComplete(done.method, done.trinkgeld||0, done.rabatt||0, gutscheinApplied?{id:gutscheinApplied.id,rabatt:gutscheinAbzug}:null, loyaltyPhone||null, redeemedPts||0, done.splitDetails||null);
+                onComplete(done.method, done.trinkgeld||0, done.rabatt||0, gutscheinApplied?{id:gutscheinApplied.id,rabatt:gutscheinAbzug}:null,
+                  /* v436: die NUMMER des gefundenen Kunden, nicht das, was im
+                     Feld steht. Dort kann seit v436 ein Name stehen - der
+                     waere als Kundennummer gespeichert worden, und beim
+                     naechsten Besuch haette die Kasse ihn nicht wiedergefunden. */
+                  ((foundCustomer && (foundCustomer.phone || foundCustomer.kundenNr))
+                    || loyaltyPhone || null), redeemedPts||0, done.splitDetails||null);
               }
             },
             style:{ width:"100%", padding:14, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:15 }
@@ -22897,12 +23016,22 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
   const [adrText, setAdrText] = React.useState("");
   const [adrTreffer, setAdrTreffer] = React.useState([]);
   const [adrLaedt, setAdrLaedt] = React.useState(false);
+  /* v437: MUSS vor dem Sucheffekt stehen - der liest adrHoert. const wird
+     nicht hochgezogen; eine Verwendung davor waere ein Absturz beim
+     Oeffnen des Dialogs. */
+  const [adrHoert, setAdrHoert] = React.useState(false);
   const [adrManuell, setAdrManuell] = React.useState(false);
   /* Erst tippen lassen, dann suchen. OpenStreetMap erlaubt nur eine Abfrage
      pro Sekunde - bei jedem Tastendruck zu fragen waere unhoeflich und
      wuerde uns gesperrt. */
   React.useEffect(() => {
     if(adrManuell) return;
+    /* v437: Waehrend gesprochen wird, NICHT suchen.
+       Wer "Unterdorf 14 ... Felsberg" sagt, macht nach der Hausnummer eine
+       kurze Pause - die reichte, damit die Suche mit der halben Adresse
+       losrannte und vier Orte in ganz Hessen anbot. Der Ort kam zu spaet.
+       Gesucht wird erst, wenn das Diktat fertig ist. */
+    if(adrHoert) return;
     const q = adrText.trim();
     if(q.length < 4){ setAdrTreffer([]); return; }
     let weg = false;
@@ -22912,17 +23041,101 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
       if(!weg){ setAdrTreffer(res); setAdrLaedt(false); }
     }, 700);
     return () => { weg = true; clearTimeout(t); setAdrLaedt(false); };
-  }, [adrText, adrManuell]);
-  const [adrHoert, setAdrHoert] = React.useState(false);
+    /* v437: adrHoert gehoert dazu - sonst laeuft der Effekt beim Ende des
+       Diktats nicht erneut an und es wird nie gesucht. Genau die Sorte
+       vergessener Abhaengigkeit, die stille Fehler macht. */
+  }, [adrText, adrManuell, adrHoert]);
   const adrDiktat = React.useRef(null);
+
+  /* ═══ v437: ALLES AUF EINMAL DIKTIEREN ═══
+     "Ram, null eins fuenf eins sieben fuenf..., Bahnhofstrasse zehn in
+      vierunddreissig fuenf acht sieben Gensungen"
+     Ein Satz, alle Felder. Die AI zerlegt ihn.
+
+     Warum nicht die Adresssuche daneben ersetzen? Die kommt ohne AI aus,
+     braucht kein Kontingent und ist genauer, wenn man NUR die Adresse
+     braucht. Zwei Werkzeuge fuer zwei Faelle. */
+  const [kiHoert, setKiHoert] = React.useState(false);
+  const [kiDenkt, setKiDenkt] = React.useState(false);
+  const kiDiktat = React.useRef(null);
+
+  const kiUebernehmen = async (satz) => {
+    if (!satz || !satz.trim()) return;
+    setKiDenkt(true);
+    try {
+      var auftrag =
+        'Aus diesem Satz eines Restaurantgastes die Kundendaten herausloesen.\n' +
+        'Antworte AUSSCHLIESSLICH mit einem JSON-Objekt, ohne Text davor oder danach:\n' +
+        '{"name":"","phone":"","street":"","plz":"","city":""}\n' +
+        'Regeln:\n' +
+        '- Was nicht genannt wurde, bleibt leer. NICHTS erfinden.\n' +
+        '- Telefonnummern nur als Ziffern, ohne Leerzeichen.\n' +
+        '- Ausgeschriebene Zahlen in Ziffern umsetzen ("null eins fuenf" = 015).\n' +
+        '- Strasse und Hausnummer gehoeren zusammen in "street".\n' +
+        '- Die Postleitzahl gehoert NICHT in "city".\n\n' +
+        'Satz: ' + satz;
+      var roh = await window.callAI(auftrag, 300);
+      var txt = String(roh || '').replace(/```json|```/g, '').trim();
+      var a = txt.indexOf('{'), b = txt.lastIndexOf('}');
+      if (a < 0 || b < a) throw new Error('keine Daten erkannt');
+      var d = JSON.parse(txt.slice(a, b + 1));
+      /* Nur fuellen, was leer ist - was der Kellner schon getippt hat,
+         wird nicht ueberschrieben. */
+      setNewForm(f => ({
+        ...f,
+        name:   f.name   || String(d.name || '').trim(),
+        phone:  f.phone  || String(d.phone || '').replace(/[^\d+]/g, ''),
+        street: f.street || String(d.street || '').trim(),
+        plz:    f.plz    || String(d.plz || '').trim(),
+        city:   f.city   || String(d.city || '').trim()
+      }));
+      /* Adresse zusammensetzen, damit die Karte sie bestaetigen kann. */
+      var zeile = [d.street, d.plz, d.city].filter(Boolean).join(' ').trim();
+      if (zeile) { setAdrManuell(false); setAdrText(zeile); }
+      if (!d.name && !d.phone && !zeile) alert('Nichts verstanden. Bitte noch einmal.');
+    } catch (e) {
+      alert('Das habe ich nicht verstanden: ' + ((e && e.message) || e));
+    }
+    setKiDenkt(false);
+  };
+
+  const kiMikro = () => {
+    if (kiHoert) { try { kiDiktat.current && kiDiktat.current.stop(); } catch(e){} setKiHoert(false); return; }
+    setKiHoert(true);
+    var gesammelt = '';
+    kiDiktat.current = window.belksDiktat({
+      sprache: 'de-DE',
+      beiText: (t, endgueltig) => { if (endgueltig) gesammelt = (gesammelt + ' ' + t).trim(); },
+      beiEnde: () => { setKiHoert(false); kiUebernehmen(gesammelt); },
+      beiFehler: (m) => { setKiHoert(false); alert(m); }
+    });
+  };
+  React.useEffect(() => () => { try { kiDiktat.current && kiDiktat.current.stop(); } catch(e){} }, []);
   const adrMikro = () => {
     if (adrHoert) { try { adrDiktat.current && adrDiktat.current.stop(); } catch(e){} setAdrHoert(false); return; }
     setAdrManuell(false);
     setAdrHoert(true);
+    /* v437: Die Teilsaetze werden GESAMMELT. Die Spracherkennung liefert
+       "Unterdorf 14" und "Felsberg" als zwei endgueltige Saetze, nicht als
+       einen - wer nur den letzten nimmt, verliert die Strasse. */
+    var gesammelt = '';
     adrDiktat.current = window.belksDiktat({
       sprache: 'de-DE',
-      beiText: (t) => setAdrText(t),
-      beiEnde: () => setAdrHoert(false),
+      beiText: (t, endgueltig) => {
+        if (endgueltig) {
+          gesammelt = (gesammelt + ' ' + t).trim();
+          setAdrText(gesammelt);
+        } else {
+          /* Zwischenergebnis nur anzeigen - gesucht wird ohnehin erst am
+             Ende, also stoert es nicht. */
+          setAdrText((gesammelt + ' ' + t).trim());
+        }
+      },
+      beiEnde: () => {
+        setAdrHoert(false);
+        /* Jetzt erst suchen - mit dem vollstaendigen Satz. */
+        if (gesammelt) setAdrText(gesammelt);
+      },
       beiFehler: (m) => { setAdrHoert(false); alert(m); }
     });
   };
@@ -23005,6 +23218,27 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
       // New customer form
       showNew && /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:12, padding:12, border:"2px solid #a5d6a7" } },
         /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, color:C.green, fontSize:13, marginBottom:10 } }, "➕ Neuer Kunde"),
+
+        /* ═══ v437: ALLES AUF EINMAL DIKTIEREN ═══
+           Ein Satz, alle Felder. Fuer den Fall, dass der Gast am Telefon
+           seine Daten am Stueck durchgibt - dann muss der Kellner nicht
+           fuenfmal umgreifen. */
+        /*#__PURE__*/React.createElement("button", {
+          onClick: kiDenkt ? null : kiMikro,
+          disabled: kiDenkt,
+          style:{ width:"100%", marginBottom:10, padding:"11px",
+                  borderRadius:10, border:"2px solid " + (kiHoert ? "#c62828" : "#6a1b9a"),
+                  background: kiHoert ? "#ffebee" : (kiDenkt ? "#f3e5f5" : "#fff"),
+                  color: kiHoert ? "#c62828" : "#6a1b9a",
+                  cursor: kiDenkt ? "default" : "pointer",
+                  fontFamily:"inherit", fontWeight:700, fontSize:13 }
+        }, kiDenkt ? "\u23F3 Einen Moment \u2026"
+                   : kiHoert ? "\u23F9\uFE0F Fertig \u2013 auswerten"
+                             : "\uD83E\uDDE0 Alles diktieren (Name, Nummer, Adresse)"),
+        kiHoert && /*#__PURE__*/React.createElement("div", {
+          style:{ fontSize:11, color:"#c62828", marginBottom:10, lineHeight:1.5 }
+        }, "Sprechen Sie in einem Satz: Name, Handynummer, Stra\u00dfe mit Hausnummer, PLZ und Ort. Dann auf \u201eFertig\u201c tippen."),
+
         /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 } },
           /*#__PURE__*/React.createElement("div", null,
             /*#__PURE__*/React.createElement("div", { style:{fontSize:10,color:"#555",marginBottom:2} }, "👤 Name *"),
@@ -23026,7 +23260,7 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
               /*#__PURE__*/React.createElement("input", {
                 value:adrText,
                 onChange:e=>setAdrText(e.target.value),
-                placeholder: adrHoert ? "Sprechen \u2026" : "Bahnhofstra\u00dfe 5 Felsberg \u2026",
+                placeholder: adrHoert ? "Sprechen \u2026 Stra\u00dfe, Hausnummer und Ort" : "Bahnhofstra\u00dfe 5 Felsberg \u2026",
                 style:{...iS, flex:1}
               }),
               /*#__PURE__*/React.createElement("button", {
@@ -24767,7 +25001,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v434"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v437"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -32862,7 +33096,7 @@ function HACCPModul({
   const offeneClean = REINIGUNG.filter(x => x.f === 'täglich' && !heuteClean[x.id]).length;
   const abweichungen = cfg.geraete.filter(g => {
     const v = heuteTemp[g.id];
-    return v !== undefined && v !== '' && (+v > g.max || +v < g.min);
+    return v !== undefined && v !== '' && belksAusserhalb(v, g);
   });
 
   /* ---- Schreiben ---- */
@@ -33247,7 +33481,7 @@ function HACCPModul({
     }, '\u2139\ufe0f Werte vom ', de(t._uebernommenVon), ' \u00fcbernommen und best\u00e4tigt.'), cfg.geraete.map(g => {
       const v = t[g.id];
       const da = v !== undefined && v !== '';
-      const schlecht = da && (+v > g.max || +v < g.min);
+      const schlecht = da && belksAusserhalb(v, g);
       return /*#__PURE__*/React.createElement("div", {
         key: g.id,
         style: {
@@ -33266,7 +33500,8 @@ function HACCPModul({
           color: T.muted,
           fontSize: 11.5
         }
-      }, "Soll ", g.min, " bis ", g.max, " °C")), /*#__PURE__*/React.createElement("input", {
+      }, "Soll ", window.belksHaccpBereich(g).min, " bis ",
+         window.belksHaccpBereich(g).max, " \u00b0C")), /*#__PURE__*/React.createElement("input", {
         type: "number",
         step: "0.1",
         inputMode: "decimal",
@@ -33279,7 +33514,29 @@ function HACCPModul({
         },
         value: da ? v : '',
         onChange: e => setzeTemp(tagDatum, g.id, e.target.value)
-      }), /*#__PURE__*/React.createElement("div", {
+      }),
+      /* ═══ v435: DAS MINUS ═══
+         Die Zifferntastatur von Android hat kein Minuszeichen. Bei
+         Tiefkuehlern ist das das wichtigste Zeichen ueberhaupt - Abdullah
+         konnte -18 nicht eintippen.
+         Ein Knopf daneben dreht das Vorzeichen. Kein Umweg ueber eine
+         volle Tastatur, ein Tipp genuegt. */
+      /*#__PURE__*/React.createElement("button", {
+        onClick: function(){
+          var roh = String(da ? v : '').trim();
+          if (roh === '' || roh === '-') { setzeTemp(tagDatum, g.id, '-'); return; }
+          var z = parseFloat(roh.replace(',', '.'));
+          if (!isFinite(z)) return;
+          setzeTemp(tagDatum, g.id, String(-z));
+        },
+        title: 'Vorzeichen wechseln',
+        style: {
+          border: '1px solid ' + T.line, background: T.row, color: T.text,
+          borderRadius: 9, padding: '6px 0', marginTop: 4, width: '100%',
+          fontFamily: 'inherit', fontSize: 15, fontWeight: 800, cursor: 'pointer'
+        }
+      }, "\u00b1"),
+      /*#__PURE__*/React.createElement("div", {
         style: {
           textAlign: 'center',
           fontSize: 12,
@@ -33660,7 +33917,7 @@ function HACCPModul({
       }, /*#__PURE__*/React.createElement("b", null, d)), cfg.geraete.map(g => {
         const v = t[g.id];
         const da = v !== undefined && v !== '';
-        const schlecht = da && (+v > g.max || +v < g.min);
+        const schlecht = da && belksAusserhalb(v, g);
         if (schlecht) abw++;
         return /*#__PURE__*/React.createElement("td", {
           key: g.id,
@@ -33982,6 +34239,34 @@ function HACCPModul({
      Fuer den Schnellzugriff auf der Startseite. Bewusst hier drin, damit die
      Startseite dieselbe Rechnung benutzt wie das Modul selbst und nicht eine
      zweite, eigene - das Muster, das uns diese Sitzung ueber begleitet hat. */
+  /* ═══ v435: DER SOLLBEREICH SORTIERT SICH SELBST ═══
+     Im Bild vom 31.08. stand "Soll -15 bis -29 °C". Verkehrt herum: die App
+     las min = -15 und max = -29, also lag -18 unter dem Minimum und wurde
+     rot. Die Einstellung war falsch, nicht die Anzeige - aber bei
+     Minusgraden denkt man in "von -15 bis -29", waehrend die App
+     "von -29 bis -15" braucht. Das passiert zu leicht.
+     Deshalb wird der Bereich hier sortiert. Die Einstellung darf verdreht
+     sein; das Ergebnis stimmt trotzdem. */
+  /* Liegt ein Wert ausserhalb? Vier Stellen fragten das bisher jede fuer
+     sich - Ansicht, Monatsbericht, Startseiten-Ampel und das Modul selbst.
+     Ab jetzt eine Regel: sonst zeigt die eine Stelle rot und die andere
+     gruen. */
+  function belksAusserhalb(v, g){
+    if (v === undefined || v === null || v === '') return false;
+    var z = Number(String(v).replace(',', '.'));
+    if (!isFinite(z)) return false;
+    var b = window.belksHaccpBereich(g);
+    return z > b.max || z < b.min;
+  }
+  window.belksAusserhalb = belksAusserhalb;
+
+  window.belksHaccpBereich = function(g){
+    var a = Number(g && g.min), b = Number(g && g.max);
+    if (!isFinite(a)) a = -Infinity;
+    if (!isFinite(b)) b = Infinity;
+    return a <= b ? { min: a, max: b } : { min: b, max: a };
+  };
+
   window.belksHaccpOffen = function(prefix){
     try {
       var p = prefix || 'eatdesi_haccp_';
@@ -33995,7 +34280,7 @@ function HACCPModul({
       }).length;
       var ausserhalb = geraete.filter(function(g){
         var v = t[g.id];
-        return v !== undefined && v !== '' && (+v > g.max || +v < g.min);
+        return v !== undefined && v !== '' && belksAusserhalb(v, g);
       }).length;
       return { offen: offen, gesamt: geraete.length, ausserhalb: ausserhalb };
     } catch(e){ return { offen: 0, gesamt: 0, ausserhalb: 0 }; }
