@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v437</title>
+<title>eatDeSi POS v440</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -425,7 +425,16 @@ window.belksWipeTenantData = function(newLoc){
     var keep = ['eatdesi_device_id','eatdesi_location_id','eatdesi_sb_url','eatdesi_sb_key',
                 'eatdesi_guard_v','eatdesi_printer','eatdesi_full_logout','eatdesi_session',
                 'eatdesi_data_owner',
-                'eatdesi_auth'];   // v194: Sitzung ueberlebt das Aufraeumen
+                'eatdesi_auth',    // v194: Sitzung ueberlebt das Aufraeumen
+                /* ═══ v439: DER TISCH-SCHALTER UEBERLEBT ═══
+                   Er stand nicht in dieser Liste. Jeder Standortwechsel
+                   setzte ihn auf ALT zurueck - und weil er geraetelokal ist,
+                   fiel es nur auf EINEM Geraet auf. Ergebnis: eines auf NEU,
+                   eines auf ALT, und die Tische sahen sich nicht.
+                   Abdullah hatte umgestellt; die Diagnose sagte trotzdem ALT.
+                   Das ist eine Einstellung des Geraets, keine Daten eines
+                   Restaurants - sie hat beim Aufraeumen nichts verloren. */
+                'eatdesi_tischmodus'];
     var kill = [];
     for(var i=0;i<localStorage.length;i++){
       var k = localStorage.key(i);
@@ -438,6 +447,12 @@ window.belksWipeTenantData = function(newLoc){
       if(k.indexOf('eatdesi_firmabak_') === 0) continue;    // v187: Firmendaten-Sicherungen NIE loeschen
       if(k.indexOf('eatdesi_auth_') === 0) continue;        // v200: Sitzungen der Toechter behalten
       if(k.indexOf('eatdesi_printer_') === 0) continue;     // v209: Drucker aller Toechter behalten
+      /* v439: Lesestand, Versionen, Warteschlange und Konflikte des neuen
+         Tisch-Abgleichs gehoeren zum ALTEN Standort und MUESSEN weg - sonst
+         liest das Geraet mit einem fremden Lesestand weiter und haelt die
+         Tische des neuen Hauses fuer schon gesehen.
+         Der Schalter selbst bleibt (siehe keep-Liste oben); nur was er
+         verwaltet, wird zurueckgesetzt. */
       kill.push(k);
     }
     // v187: Firmendaten + Druckeinstellungen der ALTEN Tochter sichern,
@@ -23057,6 +23072,11 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
      braucht. Zwei Werkzeuge fuer zwei Faelle. */
   const [kiHoert, setKiHoert] = React.useState(false);
   const [kiDenkt, setKiDenkt] = React.useState(false);
+  /* v438: Was gerade gehoert wird. Ohne diese Anzeige laeuft das Diktat
+     blind - man sieht nicht, ob das Mikrofon nichts aufnimmt oder die AI
+     nichts erkennt. Zwei ganz verschiedene Fehler, die sich sonst gleich
+     anfuehlen. */
+  const [kiGehoert, setKiGehoert] = React.useState("");
   const kiDiktat = React.useRef(null);
 
   const kiUebernehmen = async (satz) => {
@@ -23103,10 +23123,30 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
     if (kiHoert) { try { kiDiktat.current && kiDiktat.current.stop(); } catch(e){} setKiHoert(false); return; }
     setKiHoert(true);
     var gesammelt = '';
+    setKiGehoert("");
     kiDiktat.current = window.belksDiktat({
       sprache: 'de-DE',
-      beiText: (t, endgueltig) => { if (endgueltig) gesammelt = (gesammelt + ' ' + t).trim(); },
-      beiEnde: () => { setKiHoert(false); kiUebernehmen(gesammelt); },
+      /* v438: Ein ganzer Kundensatz - Name, Nummer, Strasse, PLZ, Ort. Da
+         denkt man zwischendurch nach, und der Gast am Telefon diktiert
+         stueckweise. Fuenf Sekunden Pause sind normal. */
+      stille: 5000,
+      maxStille: 30000,
+      beiText: (t, endgueltig) => {
+        if (endgueltig) gesammelt = (gesammelt + ' ' + t).trim();
+        /* v438: mitschreiben, auch die Zwischenergebnisse - so sieht man
+           sofort, ob das Mikrofon ueberhaupt etwas aufnimmt. */
+        setKiGehoert((gesammelt + ' ' + (endgueltig ? '' : t)).trim());
+      },
+      beiEnde: () => {
+        setKiHoert(false);
+        if (!gesammelt.trim()) {
+          setKiGehoert("");
+          alert("Nichts geh\u00f6rt. Ist das Mikrofon freigegeben? "
+              + "Und bitte etwas lauter sprechen.");
+          return;
+        }
+        kiUebernehmen(gesammelt);
+      },
       beiFehler: (m) => { setKiHoert(false); alert(m); }
     });
   };
@@ -23121,6 +23161,10 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
     var gesammelt = '';
     adrDiktat.current = window.belksDiktat({
       sprache: 'de-DE',
+      /* v438: Eine Adresse spricht man in zwei Teilen - Strasse, Pause,
+         Ort. Mit 1,6 Sekunden war nach der Hausnummer Schluss. */
+      stille: 3500,
+      maxStille: 20000,
       beiText: (t, endgueltig) => {
         if (endgueltig) {
           gesammelt = (gesammelt + ' ' + t).trim();
@@ -23134,7 +23178,11 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
       beiEnde: () => {
         setAdrHoert(false);
         /* Jetzt erst suchen - mit dem vollstaendigen Satz. */
-        if (gesammelt) setAdrText(gesammelt);
+        if (gesammelt) { setAdrText(gesammelt); return; }
+        /* v438: Kam gar nichts an, ist das Mikrofon das Problem - nicht die
+           Adresse. Das muss man unterscheiden koennen. */
+        alert("Nichts geh\u00f6rt. Ist das Mikrofon freigegeben? "
+            + "Und bitte etwas lauter sprechen.");
       },
       beiFehler: (m) => { setAdrHoert(false); alert(m); }
     });
@@ -23236,8 +23284,17 @@ function TakeawayCustomerSearch({ customers, completedOrders, onSelect, onSkip, 
                    : kiHoert ? "\u23F9\uFE0F Fertig \u2013 auswerten"
                              : "\uD83E\uDDE0 Alles diktieren (Name, Nummer, Adresse)"),
         kiHoert && /*#__PURE__*/React.createElement("div", {
-          style:{ fontSize:11, color:"#c62828", marginBottom:10, lineHeight:1.5 }
-        }, "Sprechen Sie in einem Satz: Name, Handynummer, Stra\u00dfe mit Hausnummer, PLZ und Ort. Dann auf \u201eFertig\u201c tippen."),
+          style:{ fontSize:11, color:"#c62828", marginBottom:6, lineHeight:1.5 }
+        }, "Sprechen Sie: Name, Handynummer, Stra\u00dfe mit Hausnummer, PLZ und Ort. "
+         + "Pausen sind in Ordnung. Danach auf \u201eFertig\u201c tippen."),
+        /* v438: Die Mitschrift. Sie zeigt sofort, ob das Mikrofon etwas
+           aufnimmt - ohne sie laesst sich "Mikrofon stumm" nicht von
+           "AI hat nichts erkannt" unterscheiden. */
+        (kiHoert || kiDenkt) && kiGehoert && /*#__PURE__*/React.createElement("div", {
+          style:{ fontSize:12.5, color:"#4a148c", background:"#f3e5f5",
+                  border:"1px solid #ce93d8", borderRadius:8,
+                  padding:"8px 10px", marginBottom:10, lineHeight:1.5 }
+        }, "\uD83D\uDC42 ", kiGehoert),
 
         /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 } },
           /*#__PURE__*/React.createElement("div", null,
@@ -25001,7 +25058,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v437"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v440"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -28060,6 +28117,22 @@ function App() {
                     }).join('  ');
                     _dg.push('Eigene Stempel: ' + _st);
                   } catch(e){}
+                  /* v440: Laeuft der geschuetzte Schreibweg? Wenn hier
+                     nichts steht, ist belks_state_setzen nicht erreichbar
+                     und die App schreibt auf dem alten, ungeschuetzten Weg. */
+                  try {
+                    var _sv = JSON.parse(localStorage.getItem('eatdesi_state_ver') || '{}');
+                    var _n = Object.keys(_sv).length;
+                    _dg.push('pos_state: ' + (_n
+                      ? 'mit Version (' + _n + ' Schluessel, geschuetzt)'
+                      : 'OHNE Version - alter Weg, bei mehreren Geraeten unsicher'));
+                    if (_n) {
+                      var _bsp = ['stornos','takeaway','customers','menu']
+                        .filter(function(k){ return _sv[k] != null; })
+                        .map(function(k){ return k + '=v' + _sv[k]; }).join('  ');
+                      if (_bsp) _dg.push('  ' + _bsp);
+                    }
+                  } catch(e){}
                   _dg.push('Belegnummer: aus der Datenbank (belks_next_bon)');
                   _dg.push('  Stand lokal: ' + (localStorage.getItem('eatdesi_bon_counter') || '0'));
                   if (_off.length)
@@ -28620,6 +28693,38 @@ function App() {
   ), view === "menu_import" && React.createElement(MenuImportExportView, {menuData:menuData,onUpdate:setMenuData}
   ), view === "test_center" && React.createElement(TestCenterView, {menuData:menuData,printerSettings:printerSettings,completedOrders:completedOrders}
   ),
+  /* ═══ v439: WARNUNG, WENN DIESES GERAET AUS DER REIHE LAEUFT ═══
+     Ein Geraet auf dem alten Tisch-Weg gleicht mit den anderen NICHT ab -
+     es sind zwei getrennte Ablagen. Das ist kein Fehler, sieht aber genauso
+     aus, und man merkt es erst, wenn ein Tisch fehlt.
+     Bisher stand es nur in der Diagnose. Ab jetzt auf dem Bildschirm. */
+  view === "home" && (function(){
+    try {
+      if (!window.belksTischModus || window.belksTischModus() === 'neu') return null;
+      return React.createElement("div", {
+        style:{ background:"#fff3e0", border:"2px solid #ff9800", borderRadius:12,
+                padding:"12px 14px", margin:"0 0 12px 0", color:"#e65100",
+                fontSize:13, lineHeight:1.55 }
+      },
+        React.createElement("div", { style:{ fontWeight:800, marginBottom:4 } },
+          "\u26A0\uFE0F Dieses Ger\u00e4t gleicht die Tische anders ab"),
+        React.createElement("div", null,
+          "Es l\u00e4uft auf dem alten Weg. Tische, die hier ge\u00f6ffnet oder "
+          + "geschlossen werden, erscheinen auf den anderen Ger\u00e4ten "
+          + "m\u00f6glicherweise nicht."),
+        React.createElement("button", {
+          onClick: function(){
+            window.belksTischModusSetzen('neu');
+            try { location.reload(); } catch(e){}
+          },
+          style:{ marginTop:10, width:"100%", padding:"11px", borderRadius:9,
+                  border:"none", background:"#e65100", color:"#fff",
+                  fontFamily:"inherit", fontWeight:700, fontSize:13, cursor:"pointer" }
+        }, "Jetzt auf den neuen Weg umstellen")
+      );
+    } catch(e){ return null; }
+  })(),
+
   /* v414: Das Pop-up nur auf der Startseite. Mitten in einer Bestellung oder
      an der Kasse waere es im Weg - dort wird gearbeitet. Wer morgens die App
      aufmacht, landet ohnehin hier. */
@@ -30079,8 +30184,14 @@ window.belksDiktat = function(opt){
                zustaendig - ab hier zaehlt die Stille nach dem letzten Wort. */
             if (gesamtWecker) { clearTimeout(gesamtWecker); gesamtWecker = null; }
             if (stilleTimer) clearTimeout(stilleTimer);
-            // nach 1,6 s Stille ist der Satz zu Ende
-            stilleTimer = setTimeout(beenden, 1600);
+            /* v438: Wie lange Stille darf sein, bevor der Satz als zu Ende
+               gilt. 1,6 Sekunden sind fuer "Tisch 5" richtig - fuer eine
+               Adresse oder einen ganzen Kundensatz viel zu kurz. Wer
+               "Unterdorf 14 ... Felsberg" sagt, macht dazwischen laenger
+               Pause, und das Diktat war zu Ende, bevor der Ort kam.
+               Der Aufrufer weiss, wie lang sein Satz wird - also entscheidet
+               er. */
+            stilleTimer = setTimeout(beenden, opt.stille || 1600);
           }
         });
         Plug.addListener('listeningState', function(st){
@@ -36896,6 +37007,60 @@ async function pushStateToSupabase(key, value) {
         if (_cnt === 0) { console.warn('pushState blockiert: leeres Menue wird nicht gesynct (' + key + ')'); return false; }
       } catch (e) {}
     }
+    /* ═══ v440: SCHREIBEN MIT VERSION ═══
+       Bis hierher galten alle Schutzregeln von v160 bis v206 - die bleiben.
+       NEU ist, WIE geschrieben wird.
+
+       Vorher: einfaches Ueberschreiben. Zwei Geraete, die im selben Moment
+       schreiben, loeschen sich gegenseitig die Aenderung. Bei einer LISTE,
+       die auf beiden waechst, ist der Eintrag des Langsameren weg.
+
+       Jetzt: mit Versionsnummer. Passt sie nicht, weist die Datenbank ab und
+       schickt den echten Stand mit. Fuer eine Liste fuehren wir dann NEU
+       zusammen und schicken noch einmal - zweimal zusammenfuehren aendert
+       nichts, das ist gefahrlos.
+       Fuer alles andere (Speisekarte, Firmendaten) gewinnt der eigene Stand:
+       wer gerade etwas geaendert hat, will es auch gespeichert sehen. */
+    try {
+      var _rk = key;
+      var _vers = belksStateVersionen();
+      var _wert = value;
+      for (var _versuch = 0; _versuch < 3; _versuch++) {
+        var _erg = await belksStateSchreiben(_rk, _wert, _vers[_rk]);
+        if (_erg.ok) {
+          belksStateVersionSetzen(_rk, _erg.version);
+          try { window.__pushFehler = null; } catch(e){}
+          return true;
+        }
+        if (_erg.fehler) break;                 /* nicht erreichbar: alter Weg */
+        if (!_erg.konflikt) break;
+
+        /* Abgewiesen. Der echte Stand kam mit. */
+        _vers[_rk] = _erg.konflikt.version;
+        belksStateVersionSetzen(_rk, _erg.konflikt.version);
+        var _fremd = null;
+        try { _fremd = JSON.parse(_erg.konflikt.value); } catch(e){}
+
+        if (MERGE_LIST_KEYS[_rk] && Array.isArray(_wert) && Array.isArray(_fremd)) {
+          /* Liste: neu zusammenfuehren und noch einmal versuchen. */
+          _wert = _mergeById(_wert, _fremd, !!MERGE_BY_NAME_KEYS[_rk]);
+          console.log('v440: ' + _rk + ' neu zusammengefuehrt (Version '
+            + _erg.konflikt.version + ')');
+          continue;
+        }
+        /* Kein Listen-Schluessel: eigener Stand gewinnt, aber mit der
+           richtigen Version - sonst wird er ewig abgewiesen. */
+        console.log('v440: ' + _rk + ' mit Version ' + _erg.konflikt.version + ' erneut');
+      }
+      /* Dreimal abgewiesen: das ist mehr als Zufall. Nicht endlos weiter -
+         der naechste Rundlauf versucht es ohnehin wieder. */
+      try { window.__pushFehler = key + ': Version dreimal abgewiesen'; } catch(e){}
+    } catch (eV) {
+      console.warn('v440 Schreiben mit Version:', eV && eV.message);
+      /* Faellt die neue Funktion aus (Datenbank noch nicht umgestellt),
+         geht es unten auf dem alten Weg weiter - nichts bleibt liegen. */
+    }
+
     var stamp = new Date().toISOString();
     var _ziel = SUPA_URL + '/rest/v1/pos_state?on_conflict=key';
     var _opt = {
@@ -36988,7 +37153,7 @@ async function pushStateToSupabase(key, value) {
 // State von Supabase laden
 async function pullStateFromSupabase(key) {
   try {
-    var resp = await supaFetch('/rest/v1/pos_state?key=eq.' + LOCATION_ID + '_' + key + '&select=value,updated_at');
+    var resp = await supaFetch('/rest/v1/pos_state?key=eq.' + LOCATION_ID + '_' + key + '&select=value,updated_at,version');   /* v440 */
     if (!resp.ok) return null;
     var data = await resp.json();
     if (data && data[0] && data[0].value) return JSON.parse(data[0].value);
@@ -37677,7 +37842,7 @@ async function belksStartLaden(){
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       window.belksStartFertig('offline'); return;
     }
-    var resp = await supaFetch('/rest/v1/pos_state?select=key,value,updated_at&key=like.' +
+    var resp = await supaFetch('/rest/v1/pos_state?select=key,value,updated_at,version&key=like.' +   /* v440 */
                                encodeURIComponent(loc + '_') + '*');
     if (!resp || !resp.ok) { window.belksStartFertig('Cloud nicht erreichbar'); return; }
     var rows = await resp.json();
@@ -38002,7 +38167,7 @@ async function syncTableOrders() {
     try {
       var _r = await supaFetch('/rest/v1/pos_state?key=in.(' +
         encodeURIComponent('"' + LOCATION_ID + '_tableOrders","' + LOCATION_ID + '_tableordersmeta"') +
-        ')&select=key,value,updated_at');
+        ')&select=key,value,updated_at,version');   /* v440 */
       if (_r && (_r.status === 401 || _r.status === 403)) {
         window.__belksRechteFehler = true;
         try { console.warn('Keine Berechtigung (' + _r.status + ') fuer Tische - Anmeldung pruefen'); } catch(e){}
@@ -38157,6 +38322,9 @@ var SYNC_BLACKLIST = [
   /* v432: Wann sich DIESES Geraet zuletzt naechtlich abgemeldet hat.
      In der Cloud wuerde ein Geraet die Abmeldung des anderen verhindern. */
   'eatdesi_last_logout',
+  /* v440: Mit welcher Version dieses Geraet jeden Schluessel zuletzt gesehen
+     hat. Gehoert dem Geraet - in der Cloud waere es Unsinn. */
+  'eatdesi_state_ver',
   /* v427, vom Wachhund gefunden: eine Warteschlange noch nicht gesendeter
      Tischnotizen. Sie stand im Abgleich und waere mit "der letzte gewinnt"
      verteilt worden - zwei Geraete haetten sich gegenseitig die eigenen
@@ -38263,6 +38431,43 @@ var BELKS_PFLICHT_KEYS = [
   'eatdesi_loyalty_settings'
 ];
 
+/* ═══ v440: DIE VERSIONEN VON pos_state ═══
+   Neben jedem Schluessel steht, mit welcher Version wir ihn zuletzt gesehen
+   haben. Beim Schreiben geht sie mit; passt sie nicht, weist die Datenbank
+   ab und wir fangen von vorn an. */
+function belksStateVersionen(){
+  try { return JSON.parse(localStorage.getItem('eatdesi_state_ver') || '{}') || {}; }
+  catch(e){ return {}; }
+}
+function belksStateVersionSetzen(remoteKey, v){
+  try {
+    var a = belksStateVersionen();
+    a[remoteKey] = v;
+    localStorage.setItem('eatdesi_state_ver', JSON.stringify(a));
+  } catch(e){}
+}
+
+/* Ein Schreibversuch mit Version. Rueckgabe:
+     { ok:true, version:n }                       geschrieben
+     { ok:false, konflikt:{ version, value } }    abgewiesen, echter Stand dabei
+     { ok:false, fehler:'…' }                     nicht erreichbar */
+async function belksStateSchreiben(remoteKey, wert, version){
+  var r = await fetch(SUPA_URL + '/rest/v1/rpc/belks_state_setzen', {
+    method: 'POST',
+    headers: window.belksSupaKopf(),
+    body: JSON.stringify({
+      p_key: LOCATION_ID + '_' + remoteKey,
+      p_value: JSON.stringify(wert),
+      p_version: (version === undefined ? null : version)
+    })
+  });
+  try { window.belksZeitMerken(r); } catch(e){}
+  if (!r.ok) return { ok: false, fehler: 'HTTP ' + r.status };
+  var erg = await r.json();
+  if (erg && erg.ok) return { ok: true, version: erg.version };
+  return { ok: false, konflikt: erg || null };
+}
+
 function _getSyncableKeys() {
   var keys = [];
   var drin = {};
@@ -38290,7 +38495,7 @@ function _setLocalStamp(remoteKey, ts) {
 // Pull mit updated_at, damit wir wissen ob Remote neuer ist
 async function pullStateWithTime(remoteKey) {
   try {
-    var resp = await supaFetch('/rest/v1/pos_state?key=eq.' + LOCATION_ID + '_' + remoteKey + '&select=value,updated_at');
+    var resp = await supaFetch('/rest/v1/pos_state?key=eq.' + LOCATION_ID + '_' + remoteKey + '&select=value,updated_at,version');   /* v440 */
   try { if (!resp || !resp.ok) window.__reqFehl = (window.__reqFehl||0) + 1; } catch(e){}
     // v192: 401/403 = keine gueltige Anmeldung bzw. keine Berechtigung.
     // Das MUSS auffallen, sonst haelt die App das Restaurant faelschlich fuer leer.
@@ -38305,6 +38510,15 @@ async function pullStateWithTime(remoteKey) {
       // v195: Dieser Schluessel wurde jetzt aus der Cloud gelesen.
       // Ab hier darf die App ihn auch ueberschreiben - vorher nicht.
       try { (window.__belksGelesen = window.__belksGelesen || {})[remoteKey] = true; } catch(e) {}
+      /* v440: Die Version merken, mit der wir diesen Stand gesehen haben.
+         Ohne sie schickt das Geraet beim naechsten Schreiben eine unbekannte
+         Version, wird abgewiesen und braucht einen zweiten Anlauf. Es
+         funktioniert, kostet aber jedes Mal eine Runde. */
+      try {
+        var _d0 = await resp.clone().json();
+        if (_d0 && _d0[0] && _d0[0].version != null)
+          belksStateVersionSetzen(remoteKey, _d0[0].version);
+      } catch(e) {}
       /* v429: Wurde waehrend der Sperre etwas geaendert, jetzt nachholen.
          Ohne das bliebe die Aenderung fuer immer lokal - sie waere zwar
          nicht verloren, aber das zweite Geraet saehe sie nie. */
