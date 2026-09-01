@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v440</title>
+<title>eatDeSi POS v442</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -16815,9 +16815,23 @@ function OrderListView({
     label
   } = getPeriodRange(period, customFrom, customTo);
   const PERIODS = [["heute", "Heute"], ["gestern", "Gestern"], ["woche", "Woche"], ["monat", "Monat"], ["alle", "Alle"]];
+  /* ═══ v441: DERSELBE VORGANG, ZWEI ABLAGEN ═══
+     Ein Storno vor der Zahlung steht seit v430 an zwei Stellen: in
+     eatdesi_stornos (mit Grund, Artikeln, TSE - daraus entsteht die Zeile
+     "Storno vor Zahlung") und als Buchung in eatdesi_orders, damit die
+     Belegnummer lueckenlos bleibt. Beides ist richtig. Falsch war nur, dass
+     die Liste beide zeigte: derselbe Tisch, dieselbe Nummer, zweimal.
+     Ausgeblendet wird die Buchung deshalb NUR, wenn der Vorgang wirklich
+     schon aus der Storno-Ablage kommt. Fehlt sie auf einem Geraet, bleibt
+     die Buchung stehen - lieber doppelt als unsichtbar. */
+  const stornoNummern = new Set((stornos || [])
+    .filter(x => x && x.art !== 'artikel' && x.bonNr)
+    .map(x => String(x.bonNr)));
+
   const filtered = completedOrders.filter(o => {
     if (isPendingOnline(o)) return false; // wartet auf Annahme -> nur in Online-Bestellungen
     if (typeof o.note === 'string' && o.note.indexOf('[ABGELEHNT]') !== -1) return false; // abgelehnt -> ausblenden
+    if (o.stornoVorZahlung && stornoNummern.has(String(o.bonNr))) return false;   // v441
     const d = new Date(o.time);
     return d >= from && d <= to;
   }).slice().reverse();
@@ -20944,7 +20958,12 @@ function CustomersView({
       try {
         const r = await fetch(window.RESTAURANT.SUPA_URL + "/rest/v1/rpc/belks_kunde_pw_reset", {
           method: "POST",
-          headers: { "apikey": window.RESTAURANT.SUPA_KEY, "Authorization": "Bearer " + window.RESTAURANT.SUPA_KEY, "Content-Type": "application/json" },
+          /* v442: Bis hierher lief dieser Aufruf als Rolle "anon" - er
+             funktionierte nur, weil die Datenbank das im Moment noch
+             erlaubt. Wird sie enger gefasst (und das gehoert vor dem
+             Verkauf getan), waere der Knopf still tot gewesen.
+             Jetzt geht die Anmeldung mit, wie ueberall sonst seit v431. */
+          headers: window.belksSupaKopf(),
           body: JSON.stringify({ p_loc: window.RESTAURANT.LOCATION_ID, p_phone: tel })
         });
         if (!r.ok) { setPwMsg({ idx: detailIdx, text: "\u274C Nicht erlaubt \u2013 bitte pr\xFCfen, ob die Anmeldung aktiv ist (\u25CF Online)." }); return; }
@@ -25058,7 +25077,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v440"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v442"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -36614,7 +36633,20 @@ var BELKS_EXTRA_FELDER = ['trinkgeld','rabatt','gutscheinVerkauf','gutscheinCode
                              Bestellung -> Beleg genau an der Stelle unterbrochen, an der
                              eine Kassennachschau sie nachfragt. Der Storno haelt beide
                              Nummern seit v356, der bezahlte Beleg jetzt auch. */
-                          'bestellNr'];
+                          'bestellNr',
+                          /* v441: Seit v430 wird ein Storno VOR der Zahlung auch als
+                             Buchung abgelegt, damit die Belegnummer lueckenlos bleibt.
+                             Woran man ihn erkennt, stand aber nur auf dem Geraet: die
+                             Tabelle hat keine Spalte dafuer und diese Liste kannte das
+                             Feld nicht. Beim naechsten Abgleich kam die Buchung ohne
+                             das Kennzeichen zurueck - uebrig blieb "storniert", also
+                             ein Storno NACH der Zahlung. Die beiden Schutzzeilen aus
+                             v430 (Bericht, Tagesabschluss) fragten danach ins Leere,
+                             und derselbe Vorgang wurde zweimal gezaehlt.
+                             Dieselbe Falle wie bei tse (v125), trinkgeld (v334) und
+                             bestellNr (v365): ein Feld ohne Spalte gehoert in diese
+                             Liste, sonst lebt es nur bis zum naechsten Abgleich. */
+                          'stornoVorZahlung'];
 
 function belksExtraBauen(order){
   if(!order) return null;
@@ -37361,8 +37393,13 @@ window.belksBestandLesen = function(){
     if (typeof fetch !== 'function') { window.belksBestandFreigeben('kein fetch'); return; }
     var url = window.RESTAURANT.SUPA_URL + '/rest/v1/pos_state?select=key&key=like.' +
               encodeURIComponent(loc + '_') + '*';
-    fetch(url, { headers:{ apikey: window.RESTAURANT.SUPA_KEY,
-                           Authorization: 'Bearer ' + window.RESTAURANT.SUPA_KEY } })
+    /* v442: Diese Abfrage lief als "anon" - und anon darf pos_state nicht
+       lesen. Sie kam also mit leerem Ergebnis zurueck, und die Freigabe
+       lief ueber "Abfrage ohne Ergebnis" statt ueber den echten Bestand.
+       Dieselbe Ursache wie v431, nur an einer Stelle, die niemand
+       nachgesehen hat. belksSupaKopf() faellt ohne Anmeldung weiterhin auf
+       den anonymen Schluessel zurueck - der Start bleibt also gleich. */
+    fetch(url, { headers: window.belksSupaKopf() })
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(rows){
         if (rows) {
