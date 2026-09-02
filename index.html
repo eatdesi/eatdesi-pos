@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v442</title>
+<title>eatDeSi POS v443</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -25077,7 +25077,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v442"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v443"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -39447,12 +39447,38 @@ localStorage.setItem = function(key, valueStr) {
        Die Eingabe eines Menschen wird nie weggeworfen. */
     if (!window._syncWriting && !_darfSchreiben(key)) {
       console.warn(key + ' wird lokal gespeichert, Hochladen wartet auf die Cloud');
+      /* ═══ v443: NUR ECHTE AENDERUNGEN NACHHOLEN ═══
+         Hier lag die Ursache fuer "nach jedem Hochladen ist die Speisekarte
+         wieder alt" - und fuer dasselbe bei den Firmendaten.
+
+         Beim Start schreibt jede Ansicht ihren eigenen Stand einmal zurueck.
+         Solange die Cloud noch nicht gelesen ist, greift die Sperre von
+         v429: lokal speichern, Hochladen nachholen. Das Nachholen nahm dann
+         den Wert aus dem lokalen Speicher - und das war immer noch der ALTE,
+         denn der Cloud-Stand war in dem Moment noch nicht eingetragen. Also
+         schob das Geraet seine alte Karte ueber die neue in der Cloud, mit
+         frischem Zeitstempel obendrauf.
+
+         Das Nachholen war fuer den Fall gedacht, dass ein Mensch in den
+         ersten Sekunden etwas aendert. Genau das erkennt es jetzt auch:
+         gemerkt wird nur, wenn sich der Inhalt WIRKLICH geaendert hat. Der
+         Rueckschreiber beim Start schreibt denselben Wert, der schon da war -
+         er hat nichts geaendert und wird deshalb nicht hochgeladen.
+
+         Wieder das alte Muster: in v429 habe ich die halbe Ursache repariert.
+         Die Eingabe eines Menschen wird weiterhin nie weggeworfen - sie ist
+         lokal gespeichert und wird weiterhin nachgeholt. */
+      var _vorherWert = null;
+      try { _vorherWert = _origGetItem(key); } catch(e1){}
       _origSetItem(key, valueStr);
-      /* Vormerken und nachholen, sobald die Cloud gelesen ist. */
-      try {
-        window.__belksNachholen = window.__belksNachholen || {};
-        window.__belksNachholen[key] = 1;
-      } catch(e){}
+      if (_vorherWert !== valueStr) {
+        try {
+          window.__belksNachholen = window.__belksNachholen || {};
+          window.__belksNachholen[key] = 1;
+        } catch(e){}
+      } else {
+        console.warn(key + ': unveraendert - wird NICHT hochgeholt (v443)');
+      }
       return;
     }
   } catch(e){}
