@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v444</title>
+<title>eatDeSi POS v446</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -548,6 +548,22 @@ window.belksKachelSichtbar = function(id){
     if(window.BELKS_DEMO_SICHTBAR) return true;
     return window.BELKS_NICHT_FERTIG.indexOf(id) < 0;
   }catch(e){ return true; }
+};
+
+/* ═══ v446: DER ARTIKELNAME SIEHT UEBERALL GLEICH AUS ═══
+   Auf dem Beleg und im Zahlungsfenster stand "211. Coca-Cola 0,33l", beim
+   Einzeln-Zahlen und beim Aufteilen nur "Coca-Cola 0,33l". Neue Mitarbeiter
+   suchen dann in der Karte nach dem Namen statt nach der Nummer.
+   Damit nicht wieder eine Liste die Nummer zeigt und die naechste nicht,
+   entscheidet ab jetzt EINE Funktion, wie ein Artikelname aussieht.
+   Fehlt die Nummer (aeltere Bestellungen, Webshop ohne Nummer), bleibt der
+   Name allein stehen - kein fuehrender Punkt. */
+window.belksArtikelName = function(i){
+  try{
+    if(!i) return '';
+    var nr = (i.nr === undefined || i.nr === null || i.nr === '') ? '' : (String(i.nr) + '. ');
+    return nr + String(i.name || '');
+  }catch(e){ return (i && i.name) ? String(i.name) : ''; }
 };
 
 window.BELKS_FIRMA_FELDER = ['name','address','phone','footer','googleLink',
@@ -10936,7 +10952,7 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
             style:{ background: isSelected ? gastColor+"12" : "#fff", borderRadius:8, padding:"11px 12px", marginBottom:6, border:`2px solid ${isSelected?gastColor:"#e0e0e0"}`, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }
           },
             /*#__PURE__*/React.createElement("div", { style:{ flex:1 } },
-              /*#__PURE__*/React.createElement("span", { style:{ fontSize:13, fontWeight:600, color:"#333" } }, item.qty, "\xD7 ", item.name),
+              /*#__PURE__*/React.createElement("span", { style:{ fontSize:13, fontWeight:600, color:"#333" } }, item.qty, "\xD7 ", window.belksArtikelName(item)),
               item.note && /*#__PURE__*/React.createElement("span", { style:{ fontSize:10, color:C.orange, marginLeft:4 } }, "(", item.note, ")")
             ),
             /*#__PURE__*/React.createElement("span", { style:{ fontWeight:700, color:C.green, fontSize:13, marginRight:8 } }, fmt(item.finalPrice*item.qty)),
@@ -11145,7 +11161,7 @@ function ArticleSplitSetup({
           // Item header
           /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
             /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "#333" } },
-              item.qty, "\xD7 ", item.name,
+              item.qty, "\xD7 ", window.belksArtikelName(item),
               item.note && /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, color: C.orange } }, " (", item.note, ")")
             ),
             /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: C.green, marginLeft: 8 } }, fmt(item.finalPrice * item.qty))
@@ -12217,7 +12233,7 @@ function OnlineOrdersView({ onAccept }) {
           /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#aaa" } }, new Date(o.time).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}))
         ),
         (o.items||[]).map((it,j) => /*#__PURE__*/React.createElement("div", { key:j, style:{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#555", marginBottom:2 } },
-          /*#__PURE__*/React.createElement("span", null, it.qty, "\xD7 ", it.name),
+          /*#__PURE__*/React.createElement("span", null, it.qty, "\xD7 ", window.belksArtikelName(it)),
           /*#__PURE__*/React.createElement("span", { style:{ fontWeight:600 } }, fmt(it.finalPrice*it.qty))
         )),
         o.note && /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:C.blue, marginTop:4 } }, "\uD83D\uDCDD ", o.note),
@@ -25102,7 +25118,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v444"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v446"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26051,8 +26067,23 @@ function App() {
         setPrinterSettings(function(alt){
           var neu = null;
           window.BELKS_FIRMA_FELDER.forEach(function(k){
+            /* ═══ v445: LEER IST AUCH EINE ANGABE ═══
+               Hier stand "w === '' -> return": ein GELEERTES Feld wurde nie
+               uebernommen. Die Ablage war nach dem Loeschen richtig leer,
+               aber printerSettings behielt den alten Wert im Speicher. Und
+               der Haken daneben (v214) schreibt printerSettings wieder in
+               die Ablage zurueck - damit war die geloeschte USt-ID wieder da.
+
+               Jetzt entscheidet, ob das Feld in der Ablage UEBERHAUPT steht:
+               steht es dort mit leerem Wert, hat jemand es geloescht und das
+               gilt auch hier. Fehlt es ganz, wird nichts angefasst - so
+               bleiben Geraete-Vorgaben unberuehrt.
+
+               Dieselbe Annahme wie in v429 und v444: "leer heisst, da war
+               nichts". Leer heisst aber: jemand hat geloescht. */
+            if(!Object.prototype.hasOwnProperty.call(f, k)) return;
             var w = f[k];
-            if(w === undefined || w === '') return;
+            if(w === undefined) return;
             if(alt && alt[k] === w) return;
             if(!neu) neu = Object.assign({}, alt || {});
             neu[k] = w;
