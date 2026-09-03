@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v443</title>
+<title>eatDeSi POS v444</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -687,11 +687,36 @@ window.belksFirmaSpeichern = function(neu){
     var paare = [['name','firmaName'],['street','firmaStrasse'],['city','firmaPlzOrt'],
                  ['stNr','firmaStNr'],['taxId','firmaUst'],['email','firmaEmail'],
                  ['phone','firmaPhone'],['web','firmaWeb'],['zusatz','firmaZusatz']];
+    /* ═══ v444: WER HAT WIRKLICH GETIPPT? ═══
+       "beide geschrieben: nichts abzuleiten" stimmte nicht. Die
+       Druckeinstellungen schicken den GANZEN Datensatz zurueck - also auch
+       Felder, die sie gar nicht anzeigen. Wer dort die USt-ID loescht,
+       schickt firmaUst leer, aber taxId faehrt mit dem alten Wert mit.
+       Beide waren "geschrieben", also blieb taxId stehen - und die
+       Auffuell-Funktion direkt danach trug den geloeschten Wert wieder in
+       firmaUst ein. Man konnte kein Feld loeschen.
+
+       Jetzt entscheidet, welche der beiden Schreibweisen sich gegenueber dem
+       GESPEICHERTEN Stand geaendert hat. Das ist die Eingabe des Menschen;
+       die andere ist nur mitgefahren. Aendern sich beide (oder keine von
+       beiden), gilt die lange Schreibweise - sie steht auf dem Bon.
+
+       In v429 habe ich den Angleich hier repariert, aber die
+       Auffuell-Funktion dahinter nicht angesehen. Wieder die halbe Ursache. */
+    var _txt = function(x){ return String(x == null ? '' : x); };
     paare.forEach(function(pr){
       var a = pr[0], b = pr[1];
       var hatA = neu && Object.prototype.hasOwnProperty.call(neu, a);
       var hatB = neu && Object.prototype.hasOwnProperty.call(neu, b);
-      if (hatA && hatB) return;          // beide geschrieben: nichts abzuleiten
+      if (hatA && hatB) {
+        if (_txt(neu[a]) === _txt(neu[b])) return;      // einig, nichts zu tun
+        var aNeu = _txt(neu[a]) !== _txt(alt[a]);
+        var bNeu = _txt(neu[b]) !== _txt(alt[b]);
+        if (bNeu && !aNeu)      z[a] = neu[b];          // lange Schreibweise getippt
+        else if (aNeu && !bNeu) z[b] = neu[a];          // kurze Schreibweise getippt
+        else                    z[a] = neu[b];          // unklar: der Bon gilt
+        return;
+      }
       if (hatA) z[b] = neu[a];
       else if (hatB) z[a] = neu[b];
     });
@@ -25077,7 +25102,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v443"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v444"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
