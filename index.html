@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v446</title>
+<title>eatDeSi POS v447</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8368,9 +8368,133 @@ function isOnlineDeliv(o){ return o && ((o.customerStreet) || (typeof o.note==='
    ob das Essen abgeholt oder gefahren wird - im KDS Pro stand es laengst
    richtig. Ab jetzt benutzen alle drei Ansichten dieselbe Beschriftung:
    Typ (Lieferung/Abholung) + die richtige Nummer. */
+/* ═══ v447: SCHLUESSEL UND NUMMER SIND ZWEIERLEI ═══
+   Bisher war beides dasselbe: die id wurde beim ANLEGEN vergeben, diente
+   als Schluessel und wurde als "#16" angezeigt. Daraus kamen zwei Fehler:
+
+   1. Ein verworfener Entwurf verbrauchte eine Nummer. In der Reihe blieb
+      eine Luecke, die niemand mehr fuellen konnte.
+   2. Schlimmer: die Nummer rechnete sich jedes Geraet selbst aus - hoechste
+      vorhandene plus eins. Zwei Geraete kommen dabei auf dieselbe Zahl.
+      Legen beide gleichzeitig eine Abholung an, tragen beide die 20, und
+      die Zusammenfuehrung ordnet ueber die id zu: aus zwei Bestellungen
+      wuerde eine, die andere waere weg. Genau der Fehler, den die
+      Belegnummern hatten, bevor sie den zentralen Zaehler bekamen.
+
+   Jetzt getrennt:
+   - id  = Schluessel, nie sichtbar. Aus der Serverzeit gebildet, deshalb
+           auf zwei Geraeten praktisch nie gleich. Bleibt eine Zahl, damit
+           alle bestehenden Stellen unveraendert weiterrechnen koennen.
+   - nr  = die sichtbare Nummer. Wird erst beim Speichern oder Bezahlen
+           gezogen, taeglich ab 1, aus der Datenbank mit Zeilensperre -
+           wie die Belegnummer. Ein Entwurf hat keine, also entsteht auch
+           keine Luecke, wenn er verworfen wird. */
+window.belksNeueTaId = function(){
+  var t = (window.belksJetzt ? window.belksJetzt() : Date.now());
+  /* Drei Teile, damit kein Schluessel zweimal entsteht:
+     - die Serverzeit in Millisekunden (nicht die Geraeteuhr),
+     - eine Zufallsbasis, die dieses Geraet beim Start einmal zieht,
+     - ein Zaehler, der bei jedem Anlegen weiterlaeuft.
+     Zwei Bestellungen auf DEMSELBEN Geraet in derselben Millisekunde
+     unterscheiden sich durch den Zaehler. Zwei Geraete in derselben
+     Millisekunde muessten zusaetzlich dieselbe Zufallsbasis gezogen
+     haben - eins zu tausend, und selbst dann faellt es sofort auf,
+     weil beide Bestellungen sichtbar waeren.
+     Die Zahl bleibt unter der Grenze, ab der JavaScript rundet. */
+  var basis = (window.__belksTaBasis = window.__belksTaBasis ||
+               Math.floor(Math.random() * 1000));
+  var lauf  = (window.__belksTaLauf  = ((window.__belksTaLauf || 0) + 1) % 1000);
+  return t * 1000 + ((basis + lauf) % 1000);
+};
+
+window.belksTaAnzeigeNr = function(t){
+  if(!t) return '';
+  var n = t.nr;
+  /* Altbestand: Bestellungen von vor v447 haben nur die kleine id.
+     Sie behalten die Nummer, die bisher auf dem Zettel stand. */
+  if((n === undefined || n === null || n === '') &&
+     typeof t.id === 'number' && t.id < 1000000) n = t.id;
+  if(n === undefined || n === null || n === '') return '';
+  return String(n) + (t.nrLokal ? '*' : '');
+};
+
+window.belksTaNrVonKey = function(tid){
+  try{
+    var id = String(tid || '').replace('ta_', '');
+    var liste = JSON.parse(localStorage.getItem('eatdesi_takeaway') || '[]') || [];
+    for(var i = 0; i < liste.length; i++){
+      if(String(liste[i] && liste[i].id) === id) return window.belksTaAnzeigeNr(liste[i]);
+    }
+  }catch(e){}
+  return '';
+};
+
+window.belksTaTitel = function(tid){
+  var n = window.belksTaNrVonKey(tid);
+  return 'Takeaway' + (n ? (' #' + n) : ' \u00B7 Entwurf');
+};
+
+window.belksTagStr = function(ms){
+  var d = new Date(ms || (window.belksJetzt ? window.belksJetzt() : Date.now()));
+  return d.getFullYear() + '-' +
+         String(d.getMonth() + 1).padStart(2, '0') + '-' +
+         String(d.getDate()).padStart(2, '0');
+};
+
+/* Zieht die naechste sichtbare Nummer. Ohne Netz gibt es eine oertliche,
+   die mit * gekennzeichnet wird - besser eine sichtbare Notloesung als eine
+   stille Doppelvergabe. */
+window.belksNextTaNr = async function(liste){
+  var tag = window.belksTagStr();
+  try{
+    var r = await fetch(SUPA_URL + '/rest/v1/rpc/belks_next_ta', {
+      method: 'POST',
+      headers: Object.assign({}, window.belksSupaKopf(), { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ p_loc: LOCATION_ID, p_tag: tag })
+    });
+    if(r.ok){
+      var n = await r.json();
+      if(typeof n === 'number' && n > 0) return { nr: n, lokal: false };
+    } else {
+      console.warn('Takeaway-Nummer: Server antwortet ' + r.status);
+    }
+  }catch(e){ console.warn('Takeaway-Nummer:', e && e.message); }
+  var hoechste = 0;
+  (liste || []).forEach(function(t){
+    if(!t) return;
+    var tt = t.time ? new Date(t.time) : null;
+    if(tt && !isNaN(tt.getTime()) && window.belksTagStr(tt.getTime()) !== tag) return;
+    var n = Number(t.nr);
+    if(!isNaN(n) && n > hoechste) hoechste = n;
+  });
+  return { nr: hoechste + 1, lokal: true };
+};
+
+/* Vergibt die Nummer genau einmal. Hat die Bestellung schon eine, passiert
+   nichts - Speichern, nochmal Speichern und Zahlen duerfen keine neue ziehen. */
+window.belksTaNummerSichern = async function(taId, liste, setTakeaway){
+  try{
+    var da = (liste || []).filter(function(x){ return x && x.id === taId; })[0];
+    if(da && da.nr) return da.nr;
+    var r = await window.belksNextTaNr(liste);
+    if(typeof setTakeaway === 'function'){
+      setTakeaway(function(t){
+        return (t || []).map(function(x){
+          return (x && x.id === taId && !x.nr)
+            ? Object.assign({}, x, { nr: r.nr, nrLokal: !!r.lokal })
+            : x;
+        });
+      });
+    }
+    return r.nr;
+  }catch(e){ console.warn('Takeaway-Nummer sichern:', e && e.message); return null; }
+};
+
 function belksTaLabel(t){
   var deliv = !!(t && (t.orderType === 'Lieferung' || t.customerStreet));
-  return (deliv ? '\uD83D\uDEF5 Lieferung' : '\uD83E\uDD61 Abholung') + ' #' + ((t && t.id) || '');
+  var nr = window.belksTaAnzeigeNr(t);
+  return (deliv ? '\uD83D\uDEF5 Lieferung' : '\uD83E\uDD61 Abholung') +
+         (nr ? (' #' + nr) : ' \u00B7 Entwurf');
 }
 function belksWsLabel(o){
   var deliv = isOnlineDeliv(o);
@@ -14687,7 +14811,7 @@ function OrderView({
   const [liefergebührOn, setLiefergebührOn] = useState(false);
   const [liefergebührAmt, setLiefergebührAmt] = useState(defaultLiefergebühr > 0 ? String(defaultLiefergebühr) : "2.00");
   const items = order?.items || [];
-  const label = isTakeaway ? `Takeaway #${String(tableId).replace("ta_", "")}` : `Tisch ${tableId}`;
+  const label = isTakeaway ? window.belksTaTitel(tableId) : `Tisch ${tableId}`;
   const itemsTotal = items.reduce((s, i) => s + i.finalPrice * i.qty, 0);
   const lieferFee = isTakeaway && liefergebührOn ? (parseFloat(liefergebührAmt)||0) : 0;
   const total = itemsTotal + lieferFee;
@@ -25118,7 +25242,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v446"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v447"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25808,11 +25932,10 @@ function App() {
     const interval = setInterval(checkAutoClose, 60000); // check every minute
     return () => clearInterval(interval);
   }, [completedOrders, expenses]);
-  const taRef = useRef(null);
-  if (taRef.current === null) {
-    const saved = LS.get("eatdesi_takeaway", []);
-    taRef.current = saved.reduce((m, t) => Math.max(m, t.id || 0), 0) + 1;
-  }
+  /* v447: Hier stand der Zaehler, der sich aus der eigenen Liste die
+     naechste Nummer ausrechnete - und auf zwei Geraeten dieselbe lieferte.
+     Schluessel kommen jetzt aus belksNeueTaId(), sichtbare Nummern aus der
+     Datenbank. */
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(t);
@@ -26174,7 +26297,7 @@ function App() {
             "Bitte oben im roten Balken auf \u201EErneut versuchen\u201C tippen.");
       return;
     }
-    const id = taRef.current++;
+    const id = window.belksNeueTaId();
     setTakeaway(t => [...t, {
       id,
       items: [],
@@ -26198,7 +26321,7 @@ function App() {
   const belksKiTakeaway = (daten) => {
     if (anmeldungTot) throw new Error("Keine Verbindung zur Zentrale \u2013 neue Bestellungen sind gesperrt.");
     const d = daten || {};
-    const id = taRef.current++;
+    const id = window.belksNeueTaId();
     setTakeaway(t => [...t, {
       id,
       items: d.items || [],
@@ -26473,12 +26596,17 @@ function App() {
     if (String(tid).startsWith("ta_")) {
       const taId = parseInt(String(tid).replace("ta_", ""));
       setTakeaway(t => t.map(x => x.id === taId ? { ...x, saved: true, bonNr, lieferFee } : x));
+      /* v447: Ab hier ist es kein Entwurf mehr - jetzt bekommt die
+         Bestellung ihre sichtbare Nummer. saveOrder wartet nicht darauf,
+         damit der Zettel sofort auf dem Bildschirm steht; die Nummer traegt
+         sich nach, sobald der Server geantwortet hat. */
+      window.belksTaNummerSichern(taId, takeaway, setTakeaway);
       const ta = takeaway.find(t => t.id === taId) || { items: [] };
       const itemsTotal = (ta.items || []).reduce((s, i) => s + i.finalPrice * i.qty, 0);
       const total = itemsTotal + lieferFee;
       setBonModal({
         tableId: tid,
-        label: `🥡 Takeaway #${taId}`,
+        label: `🥡 ${window.belksTaTitel('ta_' + taId)}`,
         items: ta.items || [],
         total,
         lieferFee,
@@ -26527,7 +26655,7 @@ function App() {
     }
   };
   const startPay = (tid, items, total, directSplit = false, lieferFee = 0) => {
-    const label = String(tid).startsWith("ta_") ? `Takeaway #${String(tid).replace("ta_", "")}` : `Tisch ${tid}`;
+    const label = String(tid).startsWith("ta_") ? window.belksTaTitel(tid) : `Tisch ${tid}`;
     /* v330: total enthaelt die Liefergebuehr bereits - der Betrag, den der
        Gast zahlt, stimmte immer. Falsch war die Buchung, weil completeOrder
        die Summe neu aus den Artikeln rechnete. Deshalb muss die Gebuehr
@@ -26685,6 +26813,14 @@ function App() {
     if (isTA) {
       const taId = parseInt(String(tid).replace("ta_", ""));
       const ta = takeaway.find(t => t.id === taId);
+      /* v447: Wird direkt kassiert, ohne vorher zu speichern, hat die
+         Bestellung noch keine Nummer. Hier warten wir darauf - sie steht
+         gleich auf dem Bon und wird dem Gast zugerufen. */
+      let _taNr = (ta && ta.nr) || null;
+      if (ta && !_taNr) {
+        _taNr = await window.belksTaNummerSichern(taId, takeaway, setTakeaway);
+      }
+      if (!_taNr) _taNr = window.belksTaAnzeigeNr(ta) || null;
       /* ═══ v368: HIER STAND DIE NUMMER IM FALSCHEN BLOCK ═══
          _bonNr wurde mit const in "if (ta) { ... }" angelegt, aber unten im
          setTakeaway gebraucht - hinter dem Block. const endet am Blockende,
@@ -26709,7 +26845,7 @@ function App() {
         let _tse = null;
         try { _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod, items: ta.items, tableId: null }); } catch (e) { console.warn("TSE Signatur Fehler:", e); }
         try { window.maybeOpenDrawer && window.maybeOpenDrawer(payMethod); } catch (e) {}
-        setCompletedOrders(p => [...p, { ...ta, time: new Date(), tableId: null, label: "Takeaway #"+taId, isTakeaway: true, orderType: (ta.customerStreet ? "Lieferung" : "Abholung"), payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse, gutscheinBetrag: gutscheinBetrag||0, lieferFee: _fee }]);
+        setCompletedOrders(p => [...p, { ...ta, time: new Date(), tableId: null, label: "Takeaway" + (_taNr ? (" #" + _taNr) : ""), isTakeaway: true, orderType: (ta.customerStreet ? "Lieferung" : "Abholung"), payMethod, trinkgeld, rabatt, bonNr: _bonNr, total: orderTotal, tse: _tse, gutscheinBetrag: gutscheinBetrag||0, lieferFee: _fee }]);
         // Zahlungs-Beleg automatisch drucken (mit Firma + MwSt + TSE).
         // Bei getrennter Zahlung NICHT (jeder Gast hat seinen eigenen Bon).
         if (payMethod !== "Getrennt") {
@@ -26727,7 +26863,7 @@ function App() {
                Auf dem Bon muss stehen, ob abgeholt oder geliefert wird. */
             const _taTyp = ta.customerStreet ? "Lieferung" : "Abholung";
             printBon("💳 ZAHLUNG — Takeaway " + _taTyp, bonLines,
-                     "Takeaway " + _taTyp + " #" + taId, _bonNr, new Date(),
+                     "Takeaway " + _taTyp + (_taNr ? (" #" + _taNr) : ""), _bonNr, new Date(),
                      delivery, printerSettings, _tse, 'kunde');
           } catch(e){ console.warn("Bondruck:", e); }
         }
@@ -26894,7 +27030,7 @@ function App() {
     if (!o) return;
     // War es ein Takeaway? -> als Takeaway reaktivieren
     if (o.isTakeaway || (!o.tableId && (o.label||"").toLowerCase().includes("takeaway"))) {
-      const newId = taRef.current++;
+      const newId = window.belksNeueTaId();
       setTakeaway(t => [...t, {
         id: newId,
         items: o.items || [],
