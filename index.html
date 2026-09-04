@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v448</title>
+<title>eatDeSi POS v449</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -25255,7 +25255,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v448"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v449"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26561,6 +26561,12 @@ function App() {
       delete k._entwurf;
       return k;
     });
+    /* v449: Ab hier beginnt der Vorgang im Sinne der KassenSichV - die
+       Kueche sieht die Artikel. Jetzt ist es kein Entwurf mehr, also
+       bekommt die Bestellung auch ihre sichtbare Nummer. Wir warten nicht
+       darauf: der Zettel soll sofort da sein, die Nummer traegt sich nach,
+       sobald der Server geantwortet hat. */
+    if (istTa) window.belksTaNummerSichern(taId, takeaway, setTakeaway);
     if (istTa) setTakeaway(t => t.map(x => x.id === taId ? Object.assign({}, x, {
       items: entmarken(x.items),
       /* Die ERSTE Nummer bleibt stehen - bestellt der Gast nach, gehoert das
@@ -26612,11 +26618,16 @@ function App() {
     if (String(tid).startsWith("ta_")) {
       const taId = parseInt(String(tid).replace("ta_", ""));
       setTakeaway(t => t.map(x => x.id === taId ? { ...x, saved: true, bonNr, lieferFee } : x));
-      /* v447: Ab hier ist es kein Entwurf mehr - jetzt bekommt die
-         Bestellung ihre sichtbare Nummer. saveOrder wartet nicht darauf,
-         damit der Zettel sofort auf dem Bildschirm steht; die Nummer traegt
-         sich nach, sobald der Server geantwortet hat. */
-      window.belksTaNummerSichern(taId, takeaway, setTakeaway);
+      /* ═══ v449: HIER DARF KEINE NUMMER GEZOGEN WERDEN ═══
+         In v447 stand die Nummer an dieser Stelle. saveOrder macht aber
+         zweierlei: es zeigt die Zwischenrechnung (Knopf "BON") UND es
+         speichert. Wer nur einmal auf die Vorschau sah, verbrauchte damit
+         schon eine Nummer - der Zettel sagte "Zwischenrechnung", die
+         Ueberschrift aber "#4".
+         Genau der Fehler, den v355 bei den Belegnummern hatte: jeder Blick
+         auf die Zwischenrechnung verbrauchte eine Nummer. Die Vorschau ist
+         kein Beleg. Die Takeaway-Nummer entsteht jetzt dort, wo auch die
+         Belegnummer entsteht - beim Senden - und sonst bei der Zahlung. */
       const ta = takeaway.find(t => t.id === taId) || { items: [] };
       const itemsTotal = (ta.items || []).reduce((s, i) => s + i.finalPrice * i.qty, 0);
       const total = itemsTotal + lieferFee;
