@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v450</title>
+<title>eatDeSi POS v451</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -12316,6 +12316,19 @@ function OnlineOrdersLive({ pendingOrders, onAccept, onReject }) {
 }
 
 function OnlineOrdersView({ onAccept }) {
+  /* ═══ v451: DIE LISTE GAB ES NICHT MEHR ═══
+     Diese Ansicht arbeitet an sieben Stellen mit "orders" und "setOrders" -
+     die Zeile, die beides anlegt, war bei einem frueheren Umbau verloren
+     gegangen. Damit stuerzte die Kasse JEDES MAL ab, sobald jemand die
+     Online-Bestellungen oeffnete. Nicht manchmal: immer.
+
+     Es ist genau das Muster aus den Notizen: nach einem Umbau fehlt
+     ploetzlich eine Kernfunktion, und es faellt erst auf, wenn jemand die
+     betroffene Ansicht anfasst. Der Waechter prueft jetzt zusaetzlich, ob
+     jede Ansicht die Namen kennt, mit denen sie arbeitet. */
+  const [orders, setOrders] = React.useState(function(){
+    try { return LS.get("eatdesi_online_orders", []) || []; } catch(e){ return []; }
+  });
   const [form, setForm] = React.useState({ name:"", phone:"", street:"", plz:"", city:"", items:"", source:"Online", note:"" });
   const [showForm, setShowForm] = React.useState(false);
   React.useEffect(() => { LS.set("eatdesi_online_orders", orders); }, [orders]);
@@ -14824,7 +14837,17 @@ function OrderView({
   const [liefergebührOn, setLiefergebührOn] = useState(false);
   const [liefergebührAmt, setLiefergebührAmt] = useState(defaultLiefergebühr > 0 ? String(defaultLiefergebühr) : "2.00");
   const items = order?.items || [];
-  const label = isTakeaway ? window.belksTaTitel(tableId) : `Tisch ${tableId}`;
+  /* v451: Hier stand belksTaTitel(tableId) - das liest die Ablage im
+     Browser. Die Nummer kommt aber vom Server und steht erst im Zustand,
+     bevor sie in der Ablage landet. In dieser Luecke zeigte die Kopfzeile
+     weiter "Entwurf", obwohl die Bestellung laengst gesendet war.
+     Der lebende Zustand liegt direkt vor uns - also nehmen wir den und
+     greifen nur auf die Ablage zurueck, wenn er nichts hergibt. */
+  const label = isTakeaway
+    ? (order && (order.nr || (typeof order.id === 'number' && order.id < 1000000))
+        ? ('Takeaway ' + window.belksTaKurz(order))
+        : window.belksTaTitel(tableId))
+    : `Tisch ${tableId}`;
   const itemsTotal = items.reduce((s, i) => s + i.finalPrice * i.qty, 0);
   const lieferFee = isTakeaway && liefergebührOn ? (parseFloat(liefergebührAmt)||0) : 0;
   const total = itemsTotal + lieferFee;
@@ -25260,7 +25283,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v450"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v451"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
