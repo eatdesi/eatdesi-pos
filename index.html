@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v449</title>
+<title>eatDeSi POS v450</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -25218,8 +25218,13 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
               darfLoeschen ? React.createElement("button", {
                 onClick: e => {
                   e.stopPropagation();
-                  if(!window.confirm("Bestellung #" + ta.id + " wirklich l\u00F6schen?\n\nSie verschwindet aus dem Tagesumsatz.")) return;
-                  deleteTakeaway(ta.id); setShowTaList(false);
+                  /* v450: Hier stand ein window.confirm mit dem Schluessel
+                     darin, und danach wurde ohne Storno geloescht. Jetzt
+                     geht auch dieser Weg durch denselben Dialog wie beim
+                     Tisch: Entwurf verschwindet stillschweigend, eine
+                     gesendete Bestellung verlangt einen Grund und wird
+                     gebucht. */
+                  setShowTaList(false); clearTable("ta_" + ta.id);
                 },
                 style:{ background:"#ffebee", color:"#c62828", border:"none", borderRadius:8, padding:"6px 9px", cursor:"pointer", fontSize:16, flexShrink:0 }
               }, "\u2715") : null
@@ -25255,7 +25260,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v449"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v450"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27733,8 +27738,37 @@ function App() {
     /* ═══ v346: ZWEI VERSCHIEDENE FAELLE, ZWEI VERSCHIEDENE FRAGEN ═══
        Bis v345 war die Frage identisch - egal ob nichts passiert war
        oder die Kueche schon gekocht hatte. */
-    var _o = tableOrders[clearConfirm] || { items: [] };
-    var _gesendet = belksTischGesendet(_o);
+    /* ═══ v450: DER DIALOG WAR BLIND FUER TAKEAWAY ═══
+       Hier stand nur "tableOrders[clearConfirm]". Bei einem Takeaway heisst
+       der Schluessel aber "ta_178..." - und den gibt es in tableOrders
+       nicht. Der Dialog sah also IMMER eine leere Bestellung, sagte "Nichts
+       wurde an die Kueche gesendet" und warf sie weg.
+
+       Damit verschwand eine Takeaway-Bestellung MIT Belegnummer und
+       TSE-Signatur spurlos: kein Grund, kein Eintrag in eatdesi_stornos,
+       keine Buchung in eatdesi_orders. In der Nummernfolge blieb eine
+       Luecke - genau das, was § 146a verbietet und was wir bei den Tischen
+       in v430 abgestellt haben.
+
+       Ein Tisch und eine Abholung sind derselbe Vorgang, nur an einem
+       anderen Ort. Also lesen wir beide aus derselben Sicht. */
+    var _istTaLoeschen = String(clearConfirm).startsWith("ta_");
+    var _taEintrag = _istTaLoeschen
+      ? (takeaway || []).filter(function(x){
+          return x && String(x.id) === String(clearConfirm).replace("ta_", "");
+        })[0] || null
+      : null;
+    var _o = _istTaLoeschen
+      ? (_taEintrag || { items: [] })
+      : (tableOrders[clearConfirm] || { items: [] });
+    /* Beim Takeaway gilt dasselbe Merkmal wie beim Tisch: hat der Vorgang
+       eine echte Belegnummer gezogen, ist er in der Welt. */
+    var _gesendet = _istTaLoeschen
+      ? !!(_o && _o.bestellNr && !/^[BS]-/.test(String(_o.bestellNr)))
+      : belksTischGesendet(_o);
+    var _titel = _istTaLoeschen
+      ? ("Takeaway " + window.belksTaKurz(_taEintrag))
+      : ("Tisch " + clearConfirm);
     var _summe = Math.round((_o.items || []).reduce(function(su,i){ return su + (i.finalPrice||0)*(i.qty||0); }, 0) * 100) / 100;
     var _gruende = BELKS_STORNO_GRUENDE;   // v347
 
@@ -27764,7 +27798,7 @@ function App() {
         } catch (e) { console.warn("TSE (Storno):", e); }
         setStornos(function(p){ return [...p, {
           id: Date.now(), zeit: new Date().toISOString(), tisch: String(tid),
-          label: "Tisch " + tid, grund: grund || "ohne Angabe",
+          label: _titel, grund: grund || "ohne Angabe",   /* v450 */
           betrag: _summe, anzahl: (_o.items || []).length,
           items: (_o.items || []).map(function(i){ return { name:i.name, nr:i.nr, qty:i.qty, preis:i.finalPrice }; }),
           mitarbeiter: (loggedInUser && loggedInUser.name) || "unbekannt",
@@ -27793,8 +27827,9 @@ function App() {
             id: Date.now() + 1,
             bonNr: _stornoNr,
             bestellNr: _o.bestellNr || _stornoNr,
-            label: "Tisch " + tid,
-            tableId: String(tid),
+            label: _titel,                       /* v450 */
+            tableId: _istTaLoeschen ? null : String(tid),
+            isTakeaway: _istTaLoeschen || undefined,
             items: (_o.items || []),
             total: _summe,
             payMethod: "",              /* kein Geld geflossen */
@@ -27813,8 +27848,16 @@ function App() {
           try { pushOrderToSupabase(_stornoBuchung); } catch(e) { console.warn("Storno-Buchung:", e); }
         } catch (e) { console.warn("v430 Storno-Buchung:", e); }
       }
-      setTableOrders(p => { const n = {...p}; delete n[tid]; return n; });
-      setView("tables");
+      /* v450: Eine Abholung liegt nicht in tableOrders. Sie bekommt die
+         Loeschmarke aus v433 - entfernt wird nie etwas, sonst schiebt ein
+         Geraet, das gerade offline war, den Eintrag spaeter zurueck. */
+      if (_istTaLoeschen) {
+        deleteTakeaway(parseInt(String(tid).replace("ta_", "")));
+        setView("takeaway");
+      } else {
+        setTableOrders(p => { const n = {...p}; delete n[tid]; return n; });
+        setView("tables");
+      }
       setActiveTable(null);
     };
 
@@ -27822,7 +27865,7 @@ function App() {
       /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:16, padding:24, width:"100%", maxWidth:360, boxShadow:"0 8px 32px #0004" } },
         /*#__PURE__*/React.createElement("div", { style:{ fontSize:36, textAlign:"center", marginBottom:8 } }, _gesendet ? "\u26A0\uFE0F" : "\uD83D\uDDD1\uFE0F"),
         /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:16, color:"#c62828", textAlign:"center", marginBottom:8 } },
-          "Tisch " + clearConfirm + (_gesendet ? " stornieren?" : " l\u00f6schen?")),
+          _titel + (_gesendet ? " stornieren?" : " l\u00f6schen?")),   /* v450 */
 
         _gesendet
           ? /*#__PURE__*/React.createElement("div", null,
