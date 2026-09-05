@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v458</title>
+<title>eatDeSi POS v460</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8162,6 +8162,16 @@ const BTPrint = {
     return { html: html, opt: { fett: true }, fc: 0x01 };
   },
 
+  /* v460: Der Weg, den ab jetzt ALLE Bons nehmen. printHtml() bleibt
+     bestehen (der Probedruck und aeltere Aufrufe benutzen ihn), aber wer
+     einen echten Bon druckt, nimmt diesen hier - dann kann die Rueckmeldung
+     nicht mehr vergessen werden. */
+  druckSicher: function(address, html, fontCmd, opt, was){
+    var self = this;
+    var starten = function(){ return self.printHtml(address, html, fontCmd, opt); };
+    return window.belksDruckWache(starten(), was, starten);
+  },
+
   printHtml: function(address, html, fontCmd, opt){
     var P=this._plugin();
     var self=this;
@@ -9905,7 +9915,12 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
          gross, Artikel und Notizen klein. Kueche, Bar und Webshop bleiben
          unveraendert: dort ist ohnehin alles gross und fett. */
       var _b = BTPrint.belegAufbereiten(html, fsz);          /* v457 */
-      BTPrint.printHtml(devId, _b.html, _b.fc, _b.opt).catch(e => { printHtml(html); });
+      /* v460: kein stiller Rueckfall mehr auf den Browser-Druckdialog - der
+         hat den Fehler jahrelang zugedeckt. */
+      var _wasBon = (bonType === 'kueche') ? 'K\u00fcchen-Bon'
+                  : (bonType === 'bar') ? 'Bar-Bon'
+                  : (bonType === 'webshop') ? 'Webshop-Bon' : 'Beleg';
+      BTPrint.druckSicher(devId, _b.html, _b.fc, _b.opt, _wasBon);
       return;
     }
     printHtml(html); return;
@@ -10222,7 +10237,8 @@ function BonModal({
         /* v457: HIER laeuft der Gaestebon durch - nicht ueber printBon.
            Genau deshalb war v456 auf dem Papier nicht zu sehen. */
         const _b = BTPrint.belegAufbereiten(html, fc);
-        BTPrint.printHtml(devId, _b.html, _b.fc, _b.opt).catch(e => { printHtml(html); });
+        BTPrint.druckSicher(devId, _b.html, _b.fc, _b.opt,
+          (fc === 0x00 ? 'G\u00e4ste-Bon' : 'K\u00fcchen-/Bar-Bon'));   /* v460 */
       } else {
         printHtml(html);
       }
@@ -13606,8 +13622,8 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
       /* v457: auch dieser Weg fragt die gemeinsame Stelle. Bei 0x01 aendert
          sie nichts - aber wenn sich die Regeln einmal aendern, aendern sie
          sich hier mit, statt zurueckzubleiben. */
-      if (speisen.length) { const _bk = BTPrint.belegAufbereiten(_priyaBonHtml("🍳 KÜCHE — SPEISEN", mkLines(speisen), selTable), 0x01); await BTPrint.printHtml(addr, _bk.html, _bk.fc, _bk.opt); }
-      if (getraenke.length) { const _bb = BTPrint.belegAufbereiten(_priyaBonHtml("🍺 BAR — GETRÄNKE", mkLines(getraenke), selTable), 0x01); await BTPrint.printHtml(addr, _bb.html, _bb.fc, _bb.opt); }
+      if (speisen.length) { const _bk = BTPrint.belegAufbereiten(_priyaBonHtml("🍳 KÜCHE — SPEISEN", mkLines(speisen), selTable), 0x01); await BTPrint.druckSicher(addr, _bk.html, _bk.fc, _bk.opt, 'K\u00fcchen-Bon');   /* v460 */ }
+      if (getraenke.length) { const _bb = BTPrint.belegAufbereiten(_priyaBonHtml("🍺 BAR — GETRÄNKE", mkLines(getraenke), selTable), 0x01); await BTPrint.druckSicher(addr, _bb.html, _bb.fc, _bb.opt, 'Bar-Bon');   /* v460 */ }
     } catch(e) { /* Druck-Fehler nicht blockierend */ }
   };
 
@@ -19131,7 +19147,7 @@ function PrinterSettingsView({
         /* v457: Der Probedruck muss aussehen wie der echte Beleg - sonst
            prueft man etwas anderes, als spaeter beim Gast landet. */
         const _bt = BTPrint.belegAufbereiten(testHtml, fsz);
-        await BTPrint.printHtml(devId, _bt.html, _bt.fc, _bt.opt);
+        await BTPrint.druckSicher(devId, _bt.html, _bt.fc, _bt.opt, 'Probedruck');   /* v460 */
         setBtStatus("✅ Testdruck gesendet!");
         return;
       }
@@ -25368,7 +25384,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v458"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v460"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -37984,7 +38000,23 @@ function belksZeilenStempeln(neu, alt){
   alt = Array.isArray(alt) ? alt : [];
   var altNach = {};
   alt.forEach(function(z){ if (z && z._iid) altNach[z._iid] = z; });
-  var jetzt = Date.now();
+  /* ═══ v459: KEINE GERAETEUHR IN STEMPELN ═══
+     Hier stand Date.now() - die Uhr des Handys. Die Loeschmarken derselben
+     Zeilen (idel) entstehen dagegen mit window.belksJetzt(), also mit der
+     vom Server abgeglichenen Zeit. Beim Zusammenfuehren werden beide
+     unmittelbar verglichen:
+
+         if (tot && tot >= (z._ts || 0)) return;   // Zeile faellt raus
+
+     Geht die Uhr des Geraets nach, liegt eine gerade getippte Zeile
+     rechnerisch in der Vergangenheit - und eine Loeschmarke schlaegt sie.
+     Der Artikel verschwindet direkt nach der Eingabe, und weil der Abgleich
+     den Zustand neu setzt, blinkt dabei die Ansicht.
+
+     Zwei Zeitquellen fuer dieselbe Entscheidung: dasselbe Muster wie bei den
+     Tischstempeln, das v421 schon einmal beseitigt hat - an dieser Stelle
+     war es stehengeblieben. */
+  var jetzt = (window.belksJetzt ? window.belksJetzt() : Date.now());
   return neu.map(function(z){
     if (!z) return z;
     if (!z._iid) {
@@ -39434,6 +39466,105 @@ window.runSync = runSync;
    Die vorherige Fassung meldete Fehler ueber toast(), das aber nur INNERHALB
    der React-Anwendung existiert. Von hier aus war es nie erreichbar; der
    try/catch schluckte den Fehler, und man sah gar nichts. */
+/* ═══ v460: KEIN DRUCK OHNE RUECKMELDUNG ═══
+   Bisher lief jeder Bluetooth-Druck so:
+
+       Druckauftrag abschicken und den Fehler mit einem Browser-Rueckfall
+       abfangen.
+
+   Der Fehler wurde verschluckt und ein Browser-Druckdialog geoeffnet, den
+   auf dem Tablet niemand sieht. Der Kellner sah "Bar ✓" und ging davon
+   aus, der Bon liege in der Bar - dabei war er nie angekommen.
+
+   Was hier ehrlich gesagt sein muss: Der TM-m30 meldet ueber Bluetooth nur
+   zurueck, dass die Daten ANGENOMMEN wurden. Ob Papier herauskam - Rolle
+   leer, Klappe offen, Stau - sagt er nicht. Erkannt wird also:
+   Drucker nicht verbunden, Bluetooth aus, Senden fehlgeschlagen, keine
+   Antwort innerhalb von 12 Sekunden. Das deckt die haeufigen Faelle ab,
+   aber es ist keine Garantie fuer bedrucktes Papier. Deshalb steht im
+   Fenster auch, was der Kellner pruefen soll. */
+window.belksDruckWache = function(versprechen, was, nochmal){
+  was = was || 'Bon';
+  var fertig = false;
+  var zeit = null;
+
+  function erfolg(){
+    if (fertig) return; fertig = true;
+    try { clearTimeout(zeit); } catch(e){}
+    try { window.belksHinweis('\uD83D\uDDA8\uFE0F ' + was + ' an den Drucker gesendet', '#2e7d32'); } catch(e){}
+  }
+
+  function fehler(grund){
+    if (fertig) return; fertig = true;
+    try { clearTimeout(zeit); } catch(e){}
+    try { console.warn('Druck fehlgeschlagen (' + was + '):', grund); } catch(e){}
+    window.belksDruckFehlerFenster(was, grund, nochmal);
+  }
+
+  try {
+    zeit = setTimeout(function(){ fehler('Der Drucker antwortet nicht (12 Sekunden gewartet)'); }, 12000);
+    if (versprechen && typeof versprechen.then === 'function') {
+      versprechen.then(erfolg, function(e){ fehler((e && e.message) || String(e)); });
+    } else {
+      erfolg();   // aelterer Weg ohne Rueckmeldung
+    }
+  } catch(e){ fehler((e && e.message) || String(e)); }
+  return versprechen;
+};
+
+/* Ein Fenster, das man nicht uebersieht. Der Hinweisbalken unten
+   verschwindet nach 12 Sekunden - ein nicht gedruckter Kuechenbon darf
+   nicht verschwinden, bevor jemand ihn gesehen hat. */
+window.belksDruckFehlerFenster = function(was, grund, nochmal){
+  try {
+    var alt = document.getElementById('belksDruckFehler');
+    if (alt) { try { alt.remove(); } catch(e){} }
+    var d = document.createElement('div');
+    d.id = 'belksDruckFehler';
+    d.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);'
+      + 'display:flex;align-items:center;justify-content:center;padding:18px;font-family:sans-serif';
+    var box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:16px;padding:20px;max-width:420px;width:100%;'
+      + 'box-shadow:0 10px 40px rgba(0,0,0,.35)';
+    var h = document.createElement('div');
+    h.style.cssText = 'font-weight:800;font-size:17px;color:#c62828;margin-bottom:8px';
+    h.textContent = '\u26A0\uFE0F ' + was + ' wurde NICHT gedruckt';
+    var t = document.createElement('div');
+    t.style.cssText = 'font-size:14px;color:#333;line-height:1.55;margin-bottom:6px';
+    t.textContent = grund || 'Unbekannter Fehler';
+    var hinweis = document.createElement('div');
+    hinweis.style.cssText = 'font-size:13px;color:#666;line-height:1.55;margin-bottom:16px';
+    hinweis.textContent = 'Bitte pruefen: Drucker eingeschaltet? Bluetooth an? '
+      + 'Papier eingelegt und Klappe zu? Danach noch einmal drucken.';
+    var reihe = document.createElement('div');
+    reihe.style.cssText = 'display:flex;gap:10px';
+    var zu = document.createElement('button');
+    zu.textContent = 'Schliessen';
+    zu.style.cssText = 'flex:1;padding:12px;border-radius:10px;border:2px solid #ddd;background:#fff;'
+      + 'font-family:inherit;font-weight:700;font-size:14px;cursor:pointer';
+    zu.onclick = function(){ try { d.remove(); } catch(e){} };
+    reihe.appendChild(zu);
+    if (typeof nochmal === 'function') {
+      var wieder = document.createElement('button');
+      wieder.textContent = '\uD83D\uDDA8\uFE0F Noch einmal drucken';
+      wieder.style.cssText = 'flex:1.4;padding:12px;border-radius:10px;border:none;background:#2e7d32;'
+        + 'color:#fff;font-family:inherit;font-weight:800;font-size:14px;cursor:pointer';
+      wieder.onclick = function(){
+        try { d.remove(); } catch(e){}
+        try { window.belksDruckWache(nochmal(), was, nochmal); } catch(e){
+          window.belksDruckFehlerFenster(was, (e && e.message) || String(e), nochmal);
+        }
+      };
+      reihe.appendChild(wieder);
+    }
+    box.appendChild(h); box.appendChild(t); box.appendChild(hinweis); box.appendChild(reihe);
+    d.appendChild(box);
+    document.body.appendChild(d);
+  } catch(e) {
+    try { alert(was + ' wurde NICHT gedruckt: ' + grund); } catch(e2){}
+  }
+};
+
 window.belksHinweis = function(text, farbe){
   try {
     var id = 'belksHinweisBalken';
@@ -39990,14 +40121,17 @@ function printAny(htmlContent, forceFontCmd) {
   var fsz = (typeof forceFontCmd==='number') ? forceFontCmd : (szMap[cfg.bonFontSize||'gross']??0x01);
   if (method === 'bluetooth' && cfg.btAddress && typeof BTPrint!=='undefined' && BTPrint.isNative()) {
     var _b = BTPrint.belegAufbereiten(htmlContent, fsz);   /* v457 */
-    BTPrint.printHtml(cfg.btAddress, _b.html, _b.fc, _b.opt).catch(function(e){ printHtml(htmlContent); });
+    BTPrint.druckSicher(cfg.btAddress, _b.html, _b.fc, _b.opt, 'Beleg');   /* v460 */
     return;
   }
   /* v316: Der Zahlungs- und der Bewirtungsbeleg kamen ueber diesen Weg und
      kannten nur Bluetooth. Wer auf WLAN umgestellt hatte, bekam sie gar
      nicht - sie landeten still im Browser-Druck. */
   if (method === 'wifi' && cfg.ip && typeof belksWlanDruck === 'function') {
-    belksWlanDruck(cfg, htmlContent, false).catch(function(e){ printHtml(htmlContent); });
+    /* v460: Auch der WLAN-Drucker (MUNBYN, Anschluss 9100) meldet sich jetzt.
+       Hier stand derselbe stille Rueckfall wie bei Bluetooth. */
+    window.belksDruckWache(belksWlanDruck(cfg, htmlContent, false), 'Beleg (WLAN)',
+      function(){ return belksWlanDruck(cfg, htmlContent, false); });
     return;
   }
   if (method === 'rawbt') {
