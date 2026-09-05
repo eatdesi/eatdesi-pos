@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v452</title>
+<title>eatDeSi POS v455</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9383,21 +9383,53 @@ function OptionModal({
   };
 
   const buildNote = () => {
-    const p = [];
+    /* v455: Zwei Koerbe. Was das Gericht BESCHREIBT (Auswahl) kommt nach
+       vorn, was DAZUKOMMT (Zusaetze) dahinter. So liest der Koch von links
+       nach rechts: erst was es ist, dann was noch drauf muss. */
+    const pAuswahl = [];
+    const pExtra = [];
+    const p = pExtra;
     // Legacy options
-    Object.entries(sel).filter(([k])=>!k.startsWith("_g_")).forEach(([k, v]) => p.push(`${k}: ${v}`));
-    Object.entries(extras).filter(([, v]) => v).forEach(([k]) => p.push(k));
+    Object.entries(sel).filter(([k])=>!k.startsWith("_g_")).forEach(([, v]) => pAuswahl.push(String(v)));   /* v455 */
+    /* ═══ v453: INTERNE SCHLUESSEL GEHOEREN NICHT AUF DEN ZETTEL ═══
+       "extras" haelt zweierlei: die alten Haekchen-Zusaetze (Schluessel ist
+       der Name, Wert true) UND die neuen Mehrfachgruppen (Schluessel
+       "_mg_90010", Wert eine Liste der gewaehlten Namen).
+       Diese Zeile nahm alles, was "wahr" ist - und eine Liste ist wahr.
+       Also stand "_mg_90010" als Zusatz auf dem Kuechenzettel, und drei
+       Zeilen weiter unten dieselbe Gruppe nochmal richtig: "Naan dazu:
+       Papadam". Der Koch sah beides.
+       Die Gruppen werden unten sauber ausgegeben - hier gehoeren nur die
+       alten Haekchen hin. */
+    /* ═══ v454: EIN ZUSATZ IST EIN PLUS, KEINE UEBERSCHRIFT ═══
+       Hier stand der Gruppenname vor jedem Zusatz: "Naan dazu: Papadam".
+       Der Koch braucht ihn nicht - er sieht das Gericht daneben und muss
+       nur wissen, was DAZUKOMMT. Also "+Papadam".
+
+       v455: Auch die Einfachauswahlen kurz - aber OHNE Plus. Ein Plus
+       heisst "kommt dazu"; eine Auswahl ist keine Zugabe, sondern sagt,
+       WIE das Gericht kommt. Also: "+Papadam" ist eine Beilage,
+       "6 Stueck" und "Beef" sind das Gericht selbst.
+       Damit steht auf dem Zettel nur noch, was der Koch braucht:
+
+           1x 140. Vindaloo
+           Beef · +Papadam · +Garnelen
+
+       statt vorher vier Angaben mit zwei internen Schluesseln darin. */
+    Object.entries(extras)
+      .filter(([k, v]) => v && !String(k).startsWith("_mg_") && !String(k).startsWith("_g_"))
+      .forEach(([k]) => p.push("+" + k));
     // New groups
     resolvedGroups.forEach(g => {
       const gKey = "_g_"+g.id;
       if (g.multiple) {
         const chosen = (extras["_mg_"+g.id]||[]);
-        if (chosen.length > 0) p.push(`${g.name}: ${chosen.join(", ")}`);
+        chosen.forEach(function(name){ p.push("+" + name); });
       } else {
-        if (sel[gKey]) p.push(`${g.name}: ${sel[gKey]}`);
+        if (sel[gKey]) pAuswahl.push(String(sel[gKey]));   /* v455: nur der Wert */
       }
     });
-    return p.join(" · ");
+    return pAuswahl.concat(pExtra).join(" · ");
   };
 
   return /*#__PURE__*/React.createElement("div", {
@@ -25283,7 +25315,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v452"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v455"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
