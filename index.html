@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v455</title>
+<title>eatDeSi POS v456</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7770,6 +7770,7 @@ var EposWiFi = {
   // HTML -> Zeilen-Objekte {text, align, bold, big}
   htmlToLines: function(html){
     var tmp = document.createElement('div'); tmp.innerHTML = html;
+
     var lines = [];
     var walk = function(node){
       for(var i=0;i<node.childNodes.length;i++){
@@ -8038,16 +8039,28 @@ const BTPrint = {
     var tmp = document.createElement('div'); tmp.innerHTML = html;
     // style + script Tags entfernen (sonst wird CSS mitgedruckt!)
     tmp.querySelectorAll('style,script').forEach(function(el){ el.parentNode && el.parentNode.removeChild(el); });
+    var ESCb='\x1B', GSb='\x1D';
+    /* ═══ v456: ZWEI GROESSEN AUF EINEM BON ═══
+       Die Schriftgroesse gilt bisher fuer den GANZEN Bon - ein Wert beim
+       Aufruf. Auf dem Kundenbeleg sollen aber Kopf, Kundendaten und Summe
+       groesser sein als die Artikelzeilen.
+       Der Drucker kann das: GS ! n gilt ab der Stelle, an der es im Text
+       steht. Genau so wird bei der GESAMT-Zeile schon "fett" gemacht.
+       "gross" heisst 0x01 (doppelte Hoehe, gleiche Breite) - die
+       Zeichenzahl pro Zeile bleibt also gleich und nichts bricht um. */
+    var GROSS = GSb+'!'+'\x01', KLEIN = GSb+'!'+'\x00';
+    var _grossOn = false;
+    try { _grossOn = (html||'').indexOf('data-zwei-groessen') !== -1; } catch(e){}
+    var _gross = function(t){ return _grossOn ? (GROSS + t + KLEIN) : t; };
     // info-row (Bon-Nr/Datum/Tisch): linksbündig "Label Wert" in EINER Zeile,
     // kein rechtsbündiges Auffüllen -> Wert kann nicht nach unten umbrechen.
     tmp.querySelectorAll('.row.info-row').forEach(function(r){
       var s=r.querySelectorAll('span');
-      if(s.length>=2){ r.textContent = A(s[0].textContent.trim())+' '+A(s[1].textContent.trim()); }
+      if(s.length>=2){ r.textContent = _gross(A(s[0].textContent.trim())+' '+A(s[1].textContent.trim())); }
     });
     // normale Preis-Zeilen: " EUR"/"€" aus dem Preis entfernen -> nur die Zahl
     // (EUR steht einmal oben rechts im Kopf). Name wird gekürzt, falls zu lang,
     // damit der Preis IMMER vollständig rechtsbündig steht und nie umbricht.
-    var ESCb='\x1B';
     tmp.querySelectorAll('.row:not(.info-row):not(.eur-note)').forEach(function(r){
       var s=r.querySelectorAll('span');
       if(s.length>=2){
@@ -8063,7 +8076,7 @@ const BTPrint = {
         // GESAMT-Zeile (.row.bold): nur DIESE Zeile fett -> ESC E 1 ... ESC E 0
         // direkt in den Text einbetten (Chain-API b.bold() greift auf TM-m30 nicht).
         var isBoldRow = r.className && (''+r.className).indexOf('bold') !== -1;
-        if(isBoldRow){ rowTxt = ESCb+'E'+'\x01' + rowTxt + ESCb+'E'+'\x00'; }
+        if(isBoldRow){ rowTxt = _gross(ESCb+'E'+'\x01' + rowTxt + ESCb+'E'+'\x00'); }   /* v456: Summe gross */
         r.textContent = rowTxt;
       }
     });
@@ -8097,7 +8110,18 @@ const BTPrint = {
       var p = Math.max(0, Math.floor((Wb - t.length) / 2));
       c.textContent = GSb+'!'+'\x11' + ' '.repeat(p) + t + GSb+'!'+'\x00';
     });
-    tmp.querySelectorAll('.center').forEach(function(c){var t=A(c.textContent.trim()),p=Math.max(0,Math.floor((W-t.length)/2));c.textContent=' '.repeat(p)+t;});
+    tmp.querySelectorAll('.center').forEach(function(c){
+      var t=A(c.textContent.trim()), p=Math.max(0,Math.floor((W-t.length)/2));
+      var zeile = ' '.repeat(p)+t;
+      /* v456: Kundendaten (Name, Strasse, Ort, Telefon) und die
+         Tisch-/Abholungszeile stehen als ".center bold" im Bon. Sie
+         gehoeren zu den grossen Angaben. Die Fussnote und der QR-Hinweis
+         sind nur ".center" und bleiben klein. Wichtig: erst zentrieren,
+         DANN die Befehle davorsetzen - sonst zaehlen sie als Zeichen mit
+         und der Text steht nicht mehr mittig. */
+      var istFett = c.className && (''+c.className).indexOf('bold') !== -1;
+      c.textContent = istFett ? _gross(zeile) : zeile;
+    });
     // Block-Elemente mit Zeilenumbruch trennen (nicht auf innerText verlassen)
     var out='';
     var kids = tmp.childNodes;
@@ -8123,7 +8147,11 @@ const BTPrint = {
     return this._toAscii(out);
   },
   // Komplett: HTML auf verbundenen Drucker drucken
-  printHtml: function(address, html, fontCmd){
+  /* v456: vierte Angabe "opt" - bisher entschied allein die Schriftgroesse
+     darueber, ob fett gedruckt wird (fc<>0 -> fett). Der Kundenbeleg soll
+     aber fett sein UND als Grundgroesse 12pt behalten. Beides ging mit
+     einem Wert nicht, also gibt es jetzt einen zweiten. */
+  printHtml: function(address, html, fontCmd, opt){
     var P=this._plugin();
     var self=this;
     if(!P) return Promise.reject(new Error('Drucker-Plugin nicht verfügbar'));
@@ -8168,7 +8196,7 @@ const BTPrint = {
            werden im Betrieb aus Entfernung und in Eile gelesen.
            Kunden- und Bewirtungsbeleg (fc=0) bleiben normal - dort zaehlt
            ein sauberes, ruhiges Schriftbild. */
-        var fett = (fc ? '\x01' : '\x00');
+        var fett = ((fc || (opt && opt.fett)) ? '\x01' : '\x00');   /* v456 */
         /* ESC 3 n = Zeilenabstand in Punkten (Vorgabe 30).
            Genau hier kam die Beschwerde "zu eng" her: bei doppelt hohen
            Zeichen und Standardabstand kleben die Zeilen aneinander.
@@ -8193,7 +8221,7 @@ const BTPrint = {
       }
       // Fallback: ältere API mit Einzelaufrufen (Objekt-Parameter)
       var ESC2='\x1B', GS2='\x1D';
-      var fett2 = (fc ? '\x01' : '\x00');
+      var fett2 = ((fc || (opt && opt.fett)) ? '\x01' : '\x00');   /* v456 */
       var zeil2 = fc ? (ESC2 + '3' + String.fromCharCode(55)) : '';
       var fontPrefix2 = zeil2 + ESC2+'E'+fett2 + GS2+'!'+String.fromCharCode(fc||0);
       return Promise.resolve()
@@ -9861,7 +9889,13 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   try {
     if (fsz && localStorage.getItem('eatdesi_kuechen_schrift') === 'gross') fsz = 0x11;
   } catch(e) {}
-      BTPrint.printHtml(devId, html, fsz).catch(e => { printHtml(html); });
+      /* v456: Kunden- und Bewirtungsbeleg werden fett gedruckt und tragen
+         die Markierung fuer zwei Groessen - Kopf, Kundendaten und Summe
+         gross, Artikel und Notizen klein. Kueche, Bar und Webshop bleiben
+         unveraendert: dort ist ohnehin alles gross und fett. */
+      var _gastBon = (bonType !== 'kueche' && bonType !== 'webshop' && bonType !== 'bar');
+      var _html2 = _gastBon ? html.replace('<body', '<body data-zwei-groessen="1"') : html;
+      BTPrint.printHtml(devId, _html2, fsz, { fett: _gastBon }).catch(e => { printHtml(html); });
       return;
     }
     printHtml(html); return;
@@ -25315,7 +25349,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v455"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v456"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
