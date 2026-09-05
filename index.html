@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v456</title>
+<title>eatDeSi POS v457</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8151,6 +8151,25 @@ const BTPrint = {
      darueber, ob fett gedruckt wird (fc<>0 -> fett). Der Kundenbeleg soll
      aber fett sein UND als Grundgroesse 12pt behalten. Beides ging mit
      einem Wert nicht, also gibt es jetzt einen zweiten. */
+  /* ═══ v457: EIN ORT ENTSCHEIDET, WIE EIN BELEG AUSSIEHT ═══
+     In v456 habe ich das nur in printBon() eingebaut - der Gaestebon wird
+     aber ueber doPrint() gedruckt, einen zweiten Weg. Die Aenderung kam
+     also nie auf dem Papier an. Es gibt drei Druckwege in dieser Datei
+     (printBon, doPrint, printAny), und jeder hatte seine eigene Meinung.
+     Deshalb fragen jetzt alle hier: Grundgroesse rein, fertiges Paket
+     zurueck. Kommt ein vierter Weg dazu, fragt er dieselbe Stelle. */
+  belegAufbereiten: function(html, fc){
+    /* fc 0x00 = Kunden-/Gaeste-/Bewirtungsbeleg. Alles andere (Kueche, Bar,
+       Webshop) ist ohnehin ganz gross und fett und bleibt unangetastet. */
+    var istGast = (!fc || fc === 0x00);
+    if(!istGast) return { html: html, opt: null };
+    var h = html;
+    try {
+      if(h.indexOf('data-zwei-groessen') === -1) h = h.replace('<body', '<body data-zwei-groessen="1"');
+    } catch(e){}
+    return { html: h, opt: { fett: true } };
+  },
+
   printHtml: function(address, html, fontCmd, opt){
     var P=this._plugin();
     var self=this;
@@ -9893,9 +9912,8 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
          die Markierung fuer zwei Groessen - Kopf, Kundendaten und Summe
          gross, Artikel und Notizen klein. Kueche, Bar und Webshop bleiben
          unveraendert: dort ist ohnehin alles gross und fett. */
-      var _gastBon = (bonType !== 'kueche' && bonType !== 'webshop' && bonType !== 'bar');
-      var _html2 = _gastBon ? html.replace('<body', '<body data-zwei-groessen="1"') : html;
-      BTPrint.printHtml(devId, _html2, fsz, { fett: _gastBon }).catch(e => { printHtml(html); });
+      var _b = BTPrint.belegAufbereiten(html, fsz);          /* v457 */
+      BTPrint.printHtml(devId, _b.html, fsz, _b.opt).catch(e => { printHtml(html); });
       return;
     }
     printHtml(html); return;
@@ -10209,7 +10227,10 @@ function BonModal({
       }catch(e){}
       if (devId && BTPrint.isNative()) {
         // fc kommt vom Aufrufer: Küche/Bar = 0x01 (14pt), Gästebon = 0x00 (12pt)
-        BTPrint.printHtml(devId, html, fc).catch(e => { printHtml(html); });
+        /* v457: HIER laeuft der Gaestebon durch - nicht ueber printBon.
+           Genau deshalb war v456 auf dem Papier nicht zu sehen. */
+        const _b = BTPrint.belegAufbereiten(html, fc);
+        BTPrint.printHtml(devId, _b.html, fc, _b.opt).catch(e => { printHtml(html); });
       } else {
         printHtml(html);
       }
@@ -13590,8 +13611,11 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
         return `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.name}</div><div>&nbsp;</div>`;
       }).join(""); };
       await BTPrint.connect(addr);
-      if (speisen.length) { await BTPrint.printHtml(addr, _priyaBonHtml("🍳 KÜCHE — SPEISEN", mkLines(speisen), selTable), 0x01); }
-      if (getraenke.length) { await BTPrint.printHtml(addr, _priyaBonHtml("🍺 BAR — GETRÄNKE", mkLines(getraenke), selTable), 0x01); }
+      /* v457: auch dieser Weg fragt die gemeinsame Stelle. Bei 0x01 aendert
+         sie nichts - aber wenn sich die Regeln einmal aendern, aendern sie
+         sich hier mit, statt zurueckzubleiben. */
+      if (speisen.length) { const _bk = BTPrint.belegAufbereiten(_priyaBonHtml("🍳 KÜCHE — SPEISEN", mkLines(speisen), selTable), 0x01); await BTPrint.printHtml(addr, _bk.html, 0x01, _bk.opt); }
+      if (getraenke.length) { const _bb = BTPrint.belegAufbereiten(_priyaBonHtml("🍺 BAR — GETRÄNKE", mkLines(getraenke), selTable), 0x01); await BTPrint.printHtml(addr, _bb.html, 0x01, _bb.opt); }
     } catch(e) { /* Druck-Fehler nicht blockierend */ }
   };
 
@@ -19112,7 +19136,10 @@ function PrinterSettingsView({
       if (BTPrint.isNative() && devId) {
         const szMap={klein:0x00,normal:0x00,gross:0x01,xl:0x11};
         const fsz=szMap[form.bonFontSize||'gross']??0x01;
-        await BTPrint.printHtml(devId, testHtml, fsz);
+        /* v457: Der Probedruck muss aussehen wie der echte Beleg - sonst
+           prueft man etwas anderes, als spaeter beim Gast landet. */
+        const _bt = BTPrint.belegAufbereiten(testHtml, fsz);
+        await BTPrint.printHtml(devId, _bt.html, fsz, _bt.opt);
         setBtStatus("✅ Testdruck gesendet!");
         return;
       }
@@ -25349,7 +25376,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v456"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v457"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -39970,7 +39997,8 @@ function printAny(htmlContent, forceFontCmd) {
   var szMap={klein:0x00,normal:0x00,gross:0x01,xl:0x11};
   var fsz = (typeof forceFontCmd==='number') ? forceFontCmd : (szMap[cfg.bonFontSize||'gross']??0x01);
   if (method === 'bluetooth' && cfg.btAddress && typeof BTPrint!=='undefined' && BTPrint.isNative()) {
-    BTPrint.printHtml(cfg.btAddress, htmlContent, fsz).catch(function(e){ printHtml(htmlContent); });
+    var _b = BTPrint.belegAufbereiten(htmlContent, fsz);   /* v457 */
+    BTPrint.printHtml(cfg.btAddress, _b.html, fsz, _b.opt).catch(function(e){ printHtml(htmlContent); });
     return;
   }
   /* v316: Der Zahlungs- und der Bewirtungsbeleg kamen ueber diesen Weg und
