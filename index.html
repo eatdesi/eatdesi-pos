@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v460</title>
+<title>eatDeSi POS v461</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -17459,7 +17459,12 @@ function OrderListView({
         color: "#fff",
         fontSize: 14
       }
-    }, "\uD83E\uDDFE Bestellung #", selected + 1), /*#__PURE__*/React.createElement("button", {
+    /* v461: Hier stand "Bestellung #" + (selected + 1) - das war die
+       POSITION in der Liste, keine Nummer, die irgendwo sonst vorkommt.
+       Bei 32 Belegen stand "Bestellung #32" ueber einem Beleg mit der
+       Nummer 20260906-0001. Jetzt steht dort, was auch auf dem Papier
+       steht. */
+    }, "\uD83E\uDDFE " + ((o && (o.label || o.bonNr)) || ("Bestellung #" + (selected + 1)))), /*#__PURE__*/React.createElement("button", {
       onClick: () => setSelected(null),
       style: {
         background: "none",
@@ -22709,7 +22714,7 @@ function DeliveryPersonView({ drivers, takeaway, completedOrders, onSave }) {
   };
 
   // Active takeaways not yet delivered
-  const activeTakeaways = window.belksTakeawayOffen(takeaway);
+  const activeTakeaways = window.belksTakeawayUnbezahlt(takeaway);   /* v461 */
   // Completed today
   const todayDeliveries = completedOrders.filter(o => {
     const d = new Date(o.time);
@@ -25384,7 +25389,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v460"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v461"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26812,6 +26817,27 @@ function App() {
   };
   const startPay = (tid, items, total, directSplit = false, lieferFee = 0) => {
     const label = String(tid).startsWith("ta_") ? window.belksTaTitel(tid) : `Tisch ${tid}`;
+    /* ═══ v461: NICHT ZWEIMAL KASSIEREN ═══
+       Eine Abholung bleibt nach der Zahlung absichtlich stehen, bis die
+       Kueche fertig ist. Sie war dadurch aber weiter anklickbar - und
+       "Zahlen" haette ein zweites Mal gebucht, mit einer zweiten
+       Belegnummer fuer denselben Vorgang.
+       Diese Sperre greift unabhaengig davon, WARUM die Bestellung wieder
+       sichtbar war. Wurde wirklich zu wenig kassiert, ist der Weg das
+       Reaktivieren in der Bestellliste - dort ist er dokumentiert. */
+    if (String(tid).startsWith("ta_")) {
+      const _taP = (takeaway || []).filter(function(x){
+        return x && String(x.id) === String(tid).replace("ta_", "");
+      })[0];
+      if (_taP && _taP.bezahlt) {
+        try {
+          window.belksHinweis('\u26A0\uFE0F ' + label + ' ist bereits bezahlt (Beleg '
+            + (_taP.bonNr || '\u2013') + '). Zum Korrigieren: Bestellliste \u2192 Reaktivieren.',
+            '#c62828');
+        } catch(e) {}
+        return;
+      }
+    }
     /* v330: total enthaelt die Liefergebuehr bereits - der Betrag, den der
        Gast zahlt, stimmte immer. Falsch war die Buchung, weil completeOrder
        die Summe neu aus den Artikeln rechnete. Deshalb muss die Gebuehr
@@ -27322,7 +27348,7 @@ function App() {
      Entwurfspruefung und benutzte isDrink() statt istBar(). */
   const pendingKitchen = belksStationOffen("kueche", tableOrders, takeaway, completedOrders);
   const pendingBar     = belksStationOffen("bar",    tableOrders, takeaway, completedOrders);
-  const active = Object.values(tableOrders).filter(o => o?.items?.length > 0).length + window.belksTakeawayOffen(takeaway).length;
+  const active = Object.values(tableOrders).filter(o => o?.items?.length > 0).length + window.belksTakeawayUnbezahlt(takeaway).length;   /* v461 */
   const MENU_ITEMS = [{
     id: "dashboard",
     l: "Dashboard",
@@ -36953,10 +36979,27 @@ window.belksZeitMerken = function(resp){
      deleted = seit v433: erledigt und aus der Arbeitsliste genommen
                (frueher wurde der Eintrag geworfen; ein Offline-Geraet
                 schob ihn dann zurueck) */
+/* ═══ v461: "OFFEN" HEISST ZWEIERLEI ═══
+   Diese Funktion beantwortet die Frage der KUECHE: laeuft der Vorgang noch?
+   Eine bezahlte Abholung laeuft weiter, bis das Essen fertig ist - sie muss
+   dort also sichtbar bleiben. Genau deshalb steht "bezahlt" hier nicht drin.
+
+   Die Kasse stellt aber eine ANDERE Frage: ist noch Geld offen? Dafuer gibt
+   es jetzt belksTakeawayUnbezahlt(). Bisher benutzten Fahreransicht und der
+   Zaehler auf der Startseite den Kuechen-Filter - eine laengst bezahlte
+   Bestellung stand dort weiter als offen. Direkt im Code darueber steht seit
+   jeher der Satz "bezahlt=true -> aus Offene Takeaways raus"; der Filter hat
+   ihn nie umgesetzt. Ich habe das in v433 eingebaut, als ich sechs
+   Filterstellen zu einer zusammengezogen habe - dabei ist "bezahlt"
+   verlorengegangen. */
 window.belksTakeawayOffen = function(liste){
   return (liste || []).filter(function(t){
     return t && !t.deleted && !t.done && (t.items || []).length > 0;
   });
+};
+
+window.belksTakeawayUnbezahlt = function(liste){
+  return window.belksTakeawayOffen(liste).filter(function(t){ return !t.bezahlt; });
 };
 
 window.belksSupaKopf = function(extra){
