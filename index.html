@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v462</title>
+<title>eatDeSi POS v463</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -23119,7 +23119,7 @@ function FahrerView({ takeaway, setTakeaway, completedOrders, setCompletedOrders
   const [feeEdit, setFeeEdit] = React.useState(null);   // { taId, wert }
   const speichereFee = (taId, wert) => {
     const f = Math.max(0, parseFloat(String(wert).replace(",", ".")) || 0);
-    setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? { ...x, lieferFee: f } : x));
+    setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? window.belksTaAendern(x, { lieferFee: f }) : x));
     setFeeEdit(null);
   };
   const ich = (loggedInUser && loggedInUser.name) || "Fahrer";
@@ -25389,7 +25389,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v462"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v463"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26587,7 +26587,7 @@ function App() {
     const t = String(text || '').trim();
     if (String(tid).startsWith('ta_')) {
       const taId = parseInt(String(tid).replace('ta_', ''));
-      setTakeaway(p => (p || []).map(x => window.belksTaIst(x, taId) ? Object.assign({}, x, { tischNote: t }) : x));
+      setTakeaway(p => (p || []).map(x => window.belksTaIst(x, taId) ? window.belksTaAendern(x, { tischNote: t }) : x));
       return;
     }
     setTableOrders(p => {
@@ -26599,11 +26599,9 @@ function App() {
   const updateOrder = (tid, items) => {
     if (String(tid).startsWith("ta_")) {
       const taId = parseInt(String(tid).replace("ta_", ""));
-      setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? {
-        ...x,
-        items,
-        time: x.time || new Date()
-      } : x));
+      setTakeaway(t => t.map(x => window.belksTaIst(x, taId)
+        ? window.belksTaAendern(x, { items, time: x.time || new Date() })   /* v463 */
+        : x));
     } else setTableOrders(p => {
       /* v290: Hier laufen ALLE Artikeländerungen eines Tisches zusammen -
          der richtige Ort, um jeder Zeile eine eigene Kennung und einen
@@ -26701,7 +26699,7 @@ function App() {
        darauf: der Zettel soll sofort da sein, die Nummer traegt sich nach,
        sobald der Server geantwortet hat. */
     if (istTa) window.belksTaNummerSichern(taId, takeaway, setTakeaway);
-    if (istTa) setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? Object.assign({}, x, {
+    if (istTa) setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? window.belksTaAendern(x, {   /* v463 */
       items: entmarken(x.items),
       /* Die ERSTE Nummer bleibt stehen - bestellt der Gast nach, gehoert das
          zum selben Vorgang und bekommt keine neue.
@@ -26751,7 +26749,7 @@ function App() {
     const bonNr = null;
     if (String(tid).startsWith("ta_")) {
       const taId = parseInt(String(tid).replace("ta_", ""));
-      setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? { ...x, saved: true, bonNr, lieferFee } : x));
+      setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? window.belksTaAendern(x, { saved: true, bonNr, lieferFee }) : x));
       /* ═══ v449: HIER DARF KEINE NUMMER GEZOGEN WERDEN ═══
          In v447 stand die Nummer an dieser Stelle. saveOrder macht aber
          zweierlei: es zeigt die Zwischenrechnung (Knopf "BON") UND es
@@ -26810,7 +26808,7 @@ function App() {
     const setzen = (liste) => (liste || []).map(i => ({ ...i, [key]: i.qty || 0 }));
     if (String(tid).startsWith("ta_")) {
       const taId = parseInt(String(tid).replace("ta_", ""));
-      setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? { ...x, items: setzen(x.items) } : x));
+      setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? window.belksTaAendern(x, { items: setzen(x.items) }) : x));
     } else {
       setTableOrders(p => p[tid] ? { ...p, [tid]: { ...p[tid], items: setzen(p[tid].items) } } : p);
     }
@@ -27078,7 +27076,10 @@ function App() {
            Richtig ist, die Nummer der Buchung zu uebernehmen. */
         /* v368: Wurde oben kein Takeaway gefunden, ist _bonNr null - dann
            darf die vorhandene Nummer nicht ueberschrieben werden. */
-        return Object.assign({}, x, { bezahlt:true, bonNr: _bonNr || x.bonNr || null });
+        /* v463: Der Stempel entscheidet, ob diese Fassung die Zusammen-
+           fuehrung ueberlebt. Ohne ihn holte der naechste Abgleich die
+           unbezahlte Fassung zurueck. */
+        return window.belksTaAendern(x, { bezahlt:true, bonNr: _bonNr || x.bonNr || null });
       }).filter(Boolean));
     } else {
       const o = tableOrders[tid];
@@ -28875,8 +28876,8 @@ function App() {
              auf "Kueche" gestellt war, wurde also angezeigt, liess sich aber
              nie abhaken - es blieb ewig stehen. */
           const ni = x.items.map(i => !istBar(i) ? {...i, _kitchenSent: true} : i);
-          return { ...x, kitchenDone: true, items: ni,
-                   kdsStatus: x.kdsStatus === 'delivered' ? 'delivered' : belksKdsStufeAus(ni) };
+          return window.belksTaAendern(x, { kitchenDone: true, items: ni,     /* v463 */
+                   kdsStatus: x.kdsStatus === 'delivered' ? 'delivered' : belksKdsStufeAus(ni) });
         }));
       } else setTableOrders(p => ({
         ...p,
@@ -28906,8 +28907,8 @@ function App() {
         setTakeaway(t => t.map(x => {
           if (!window.belksTaIst(x, taId)) return x;
           const ni = x.items.map(i => istBar(i) ? {...i, _barSent: true} : i);
-          return { ...x, barDone: true, items: ni,
-                   kdsStatus: x.kdsStatus === 'delivered' ? 'delivered' : belksKdsStufeAus(ni) };
+          return window.belksTaAendern(x, { barDone: true, items: ni,         /* v463 */
+                   kdsStatus: x.kdsStatus === 'delivered' ? 'delivered' : belksKdsStufeAus(ni) });
         }));
       } else setTableOrders(p => ({
         ...p,
@@ -37016,6 +37017,29 @@ window.belksTakeawayOffen = function(liste){
    und die vergleicht als Text. */
 window.belksTaIst = function(x, id){
   return !!x && String(x.id) === String(id);
+};
+
+/* ═══ v463: JEDE AENDERUNG BRAUCHT EINE UHRZEIT ═══
+   Die Zusammenfuehrung entscheidet ueber _zeitVon(): sie sucht das spaeteste
+   Zeitfeld eines Eintrags (geaendert, time, usedAt, deletedAt, ...). Beim
+   Bezahlen wurde KEINES davon gesetzt - "time" ist die Uhrzeit des Anlegens
+   und aendert sich nie.
+
+   Damit sahen die bezahlte und die unbezahlte Fassung fuer die
+   Zusammenfuehrung gleich alt aus, und bei Gleichstand gewinnt die zuerst
+   gesehene. Das Geraet schrieb "bezahlt", der naechste Abgleich holte die
+   alte Fassung zurueck. Die Abholung blieb offen - obwohl der Beleg richtig
+   gebucht war.
+
+   Genau deshalb hat das LOESCHEN immer funktioniert: dort wird deletedAt
+   gesetzt, also ein frisches Zeitfeld. Es fehlte nicht die Absicht, sondern
+   die Uhrzeit.
+
+   Ab jetzt bekommt jede Aenderung an einer Abholung "geaendert" mit der
+   SERVERZEIT (nicht der Geraeteuhr - siehe v459). */
+window.belksTaAendern = function(x, aenderungen){
+  return Object.assign({}, x, aenderungen || {},
+    { geaendert: (window.belksJetzt ? window.belksJetzt() : Date.now()) });
 };
 
 window.belksTakeawayUnbezahlt = function(liste){
