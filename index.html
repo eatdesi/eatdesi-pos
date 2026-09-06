@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v461</title>
+<title>eatDeSi POS v462</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8536,13 +8536,13 @@ window.belksNextTaNr = async function(liste){
    nichts - Speichern, nochmal Speichern und Zahlen duerfen keine neue ziehen. */
 window.belksTaNummerSichern = async function(taId, liste, setTakeaway){
   try{
-    var da = (liste || []).filter(function(x){ return x && x.id === taId; })[0];
+    var da = (liste || []).filter(function(x){ return window.belksTaIst(x, taId); })[0];
     if(da && da.nr) return da.nr;
     var r = await window.belksNextTaNr(liste);
     if(typeof setTakeaway === 'function'){
       setTakeaway(function(t){
         return (t || []).map(function(x){
-          return (x && x.id === taId && !x.nr)
+          return (window.belksTaIst(x, taId) && !x.nr)
             ? Object.assign({}, x, { nr: r.nr, nrLokal: !!r.lokal })
             : x;
         });
@@ -23119,7 +23119,7 @@ function FahrerView({ takeaway, setTakeaway, completedOrders, setCompletedOrders
   const [feeEdit, setFeeEdit] = React.useState(null);   // { taId, wert }
   const speichereFee = (taId, wert) => {
     const f = Math.max(0, parseFloat(String(wert).replace(",", ".")) || 0);
-    setTakeaway(t => t.map(x => x.id === taId ? { ...x, lieferFee: f } : x));
+    setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? { ...x, lieferFee: f } : x));
     setFeeEdit(null);
   };
   const ich = (loggedInUser && loggedInUser.name) || "Fahrer";
@@ -25389,7 +25389,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v461"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v462"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26587,7 +26587,7 @@ function App() {
     const t = String(text || '').trim();
     if (String(tid).startsWith('ta_')) {
       const taId = parseInt(String(tid).replace('ta_', ''));
-      setTakeaway(p => (p || []).map(x => x.id === taId ? Object.assign({}, x, { tischNote: t }) : x));
+      setTakeaway(p => (p || []).map(x => window.belksTaIst(x, taId) ? Object.assign({}, x, { tischNote: t }) : x));
       return;
     }
     setTableOrders(p => {
@@ -26599,7 +26599,7 @@ function App() {
   const updateOrder = (tid, items) => {
     if (String(tid).startsWith("ta_")) {
       const taId = parseInt(String(tid).replace("ta_", ""));
-      setTakeaway(t => t.map(x => x.id === taId ? {
+      setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? {
         ...x,
         items,
         time: x.time || new Date()
@@ -26637,7 +26637,7 @@ function App() {
   const belksBestellen = async (tid) => {
     const istTa = String(tid).startsWith("ta_");
     const taId = istTa ? parseInt(String(tid).replace("ta_", "")) : null;
-    const quelle = istTa ? (takeaway.find(t => t.id === taId) || { items: [] })
+    const quelle = istTa ? (takeaway.find(t => window.belksTaIst(t, taId)) || { items: [] })
                          : (tableOrders[tid] || { items: [] });
     const neue = (quelle.items || []).filter(i => i._entwurf);
     if (!neue.length) return;
@@ -26701,7 +26701,7 @@ function App() {
        darauf: der Zettel soll sofort da sein, die Nummer traegt sich nach,
        sobald der Server geantwortet hat. */
     if (istTa) window.belksTaNummerSichern(taId, takeaway, setTakeaway);
-    if (istTa) setTakeaway(t => t.map(x => x.id === taId ? Object.assign({}, x, {
+    if (istTa) setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? Object.assign({}, x, {
       items: entmarken(x.items),
       /* Die ERSTE Nummer bleibt stehen - bestellt der Gast nach, gehoert das
          zum selben Vorgang und bekommt keine neue.
@@ -26751,7 +26751,7 @@ function App() {
     const bonNr = null;
     if (String(tid).startsWith("ta_")) {
       const taId = parseInt(String(tid).replace("ta_", ""));
-      setTakeaway(t => t.map(x => x.id === taId ? { ...x, saved: true, bonNr, lieferFee } : x));
+      setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? { ...x, saved: true, bonNr, lieferFee } : x));
       /* ═══ v449: HIER DARF KEINE NUMMER GEZOGEN WERDEN ═══
          In v447 stand die Nummer an dieser Stelle. saveOrder macht aber
          zweierlei: es zeigt die Zwischenrechnung (Knopf "BON") UND es
@@ -26762,7 +26762,7 @@ function App() {
          auf die Zwischenrechnung verbrauchte eine Nummer. Die Vorschau ist
          kein Beleg. Die Takeaway-Nummer entsteht jetzt dort, wo auch die
          Belegnummer entsteht - beim Senden - und sonst bei der Zahlung. */
-      const ta = takeaway.find(t => t.id === taId) || { items: [] };
+      const ta = takeaway.find(t => window.belksTaIst(t, taId)) || { items: [] };
       const itemsTotal = (ta.items || []).reduce((s, i) => s + i.finalPrice * i.qty, 0);
       const total = itemsTotal + lieferFee;
       setBonModal({
@@ -26810,7 +26810,7 @@ function App() {
     const setzen = (liste) => (liste || []).map(i => ({ ...i, [key]: i.qty || 0 }));
     if (String(tid).startsWith("ta_")) {
       const taId = parseInt(String(tid).replace("ta_", ""));
-      setTakeaway(t => t.map(x => x.id === taId ? { ...x, items: setzen(x.items) } : x));
+      setTakeaway(t => t.map(x => window.belksTaIst(x, taId) ? { ...x, items: setzen(x.items) } : x));
     } else {
       setTableOrders(p => p[tid] ? { ...p, [tid]: { ...p[tid], items: setzen(p[tid].items) } } : p);
     }
@@ -26994,7 +26994,7 @@ function App() {
     }
     if (isTA) {
       const taId = parseInt(String(tid).replace("ta_", ""));
-      const ta = takeaway.find(t => t.id === taId);
+      const ta = takeaway.find(t => window.belksTaIst(t, taId));
       /* v447: Wird direkt kassiert, ohne vorher zu speichern, hat die
          Bestellung noch keine Nummer. Hier warten wir darauf - sie steht
          gleich auf dem Bon und wird dem Gast zugerufen. */
@@ -27068,7 +27068,7 @@ function App() {
       // bezahlt=true -> aus "Offene Takeaways" raus, aber Küchen-Prozess (KDS) läuft weiter.
       // Falls Küche schon fertig war (kdsHidden), jetzt ganz entfernen.
       setTakeaway(t => t.map(x => {
-        if (x.id !== taId) return x;
+        if (!window.belksTaIst(x, taId)) return x;
         if (x.kdsHidden) return null; // Küche bereits fertig -> komplett raus
         /* ═══ v358: HIER WURDE EINE ZWEITE NUMMER GEZOGEN ═══
            Die Buchung hat oben schon _bonNr bekommen. Seit v357 steht
@@ -27198,7 +27198,7 @@ function App() {
        Bestellung vom 25.08. wieder in der Cloud.
        Dasselbe Mittel wie bei den Tischen: nichts verschwindet, es wird
        gekennzeichnet. Der Tagesabschluss raeumt spaeter auf. */
-    setTakeaway(t => (t || []).map(x => x.id === taId
+    setTakeaway(t => (t || []).map(x => window.belksTaIst(x, taId)
       ? Object.assign({}, x, {
           deleted: true,
           deletedAt: new Date((window.belksJetzt ? window.belksJetzt() : Date.now())).toISOString()
@@ -27333,7 +27333,7 @@ function App() {
     };
     if (isTakeaway) {
       const taId = parseInt(String(activeTable).replace("ta_", ""));
-      return takeaway.find(t => t.id === taId) || {
+      return takeaway.find(t => window.belksTaIst(t, taId)) || {
         items: []
       };
     }
@@ -28868,7 +28868,7 @@ function App() {
       } else if (String(id).startsWith("ta_")) {
         const taId = parseInt(String(id).replace("ta_", ""));
         setTakeaway(t => t.map(x => {
-          if (x.id !== taId) return x;
+          if (!window.belksTaIst(x, taId)) return x;
           /* v297: istBar statt isDrink. Die Anzeige entscheidet mit istBar
              (beachtet auch den handgesetzten Bon-Weg eines Artikels), das
              Abhaken tat es mit isDrink (reine Steuerfrage). Ein Getraenk, das
@@ -28904,7 +28904,7 @@ function App() {
       } else if (String(id).startsWith("ta_")) {
         const taId = parseInt(String(id).replace("ta_", ""));
         setTakeaway(t => t.map(x => {
-          if (x.id !== taId) return x;
+          if (!window.belksTaIst(x, taId)) return x;
           const ni = x.items.map(i => istBar(i) ? {...i, _barSent: true} : i);
           return { ...x, barDone: true, items: ni,
                    kdsStatus: x.kdsStatus === 'delivered' ? 'delivered' : belksKdsStufeAus(ni) };
@@ -36996,6 +36996,26 @@ window.belksTakeawayOffen = function(liste){
   return (liste || []).filter(function(t){
     return t && !t.deleted && !t.done && (t.items || []).length > 0;
   });
+};
+
+/* ═══ v462: EIN VERGLEICH FUER ALLE ═══
+   Vierzehn Stellen suchten eine Abholung ueber einen strengen Vergleich der
+   Kennung. Die gesuchte Kennung entsteht aus parseInt(...) und ist eine
+   ZAHL. Die Kennung in der Liste ist aber nicht immer eine: sie geht durch
+   JSON in die Cloud und zurueck, durch die Zusammenfuehrung, durch
+   Objektschluessel. Kommt sie einmal als Text zurueck, findet der strenge
+   Vergleich nichts - lautlos.
+
+   Genau das passt zum Fall: Die Zahlung fand die Abholung nicht mehr. Der
+   Beleg wurde richtig gebucht (die Artikel kommen aus dem Zahlungsfenster),
+   aber die Abholung wurde nie auf "bezahlt" gesetzt und blieb offen. Dass
+   im Fenstertitel "Takeaway" OHNE Nummer stand, obwohl die Bestellung als
+   #2 gefuehrt wurde, ist derselbe fehlgeschlagene Vergleich.
+
+   Ab jetzt entscheidet eine Funktion, ob zwei Kennungen dieselbe sind -
+   und die vergleicht als Text. */
+window.belksTaIst = function(x, id){
+  return !!x && String(x.id) === String(id);
 };
 
 window.belksTakeawayUnbezahlt = function(liste){
