@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v465</title>
+<title>eatDeSi POS v466</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -14899,6 +14899,7 @@ function OrderView({
   onWechseln,
   onNotiz,          // v385
   tischNotiz,       // v385
+  onLieferFee,      // v466: Liefergebuehr sofort in die Bestellung schreiben
   onArtikelStorno,  // v392
   users,            // v394: fuer die PIN-Pruefung
   onPay,
@@ -14949,8 +14950,24 @@ function OrderView({
   const [splitQty, setSplitQty] = React.useState(1);
   // Liefergeb_hr
   const defaultLiefergebühr = parseFloat(printerSettings?.liefergebühr) || 0;
-  const [liefergebührOn, setLiefergebührOn] = useState(false);
-  const [liefergebührAmt, setLiefergebührAmt] = useState(defaultLiefergebühr > 0 ? String(defaultLiefergebühr) : "2.00");
+  /* ═══ v466: DIE GEBUEHR GEHOERT ZUR BESTELLUNG, NICHT ZUM BILDSCHIRM ═══
+     Hier stand ein fester Startwert. Die Liefergebuehr lebte damit nur im
+     Bildschirm und wurde erst beim Speichern oder Zahlen weitergereicht.
+     Wer die Bestellung schloss und wieder oeffnete, sah "Kein" - die 4,50 €
+     waren weg, und mit ihnen die 19% auf die Gebuehr.
+     Jetzt ist der Startwert das, was in der Bestellung steht. */
+  const _gebGespeichert = Math.max(0, Number(order && order.lieferFee) || 0);
+  const [liefergebührOn, setLiefergebührOn] = useState(_gebGespeichert > 0);
+  const [liefergebührAmt, setLiefergebührAmt] = useState(
+    _gebGespeichert > 0 ? String(_gebGespeichert)
+    : (defaultLiefergebühr > 0 ? String(defaultLiefergebühr) : "2.00"));
+  /* Wird die Bestellung gewechselt, gilt deren Gebuehr - nicht die der
+     vorherigen. */
+  React.useEffect(function(){
+    const g = Math.max(0, Number(order && order.lieferFee) || 0);
+    setLiefergebührOn(g > 0);
+    if (g > 0) setLiefergebührAmt(String(g));
+  }, [tableId]);
   const items = order?.items || [];
   /* v451: Hier stand belksTaTitel(tableId) - das liest die Ablage im
      Browser. Die Nummer kommt aber vom Server und steht erst im Zustand,
@@ -15714,7 +15731,12 @@ function OrderView({
     window.belksLieferStufen().map(amt =>
       /*#__PURE__*/React.createElement("button", {
         key: amt,
-        onClick: () => { setLiefergebührOn(amt > 0); setLiefergebührAmt(String(amt)); },
+        onClick: () => {
+          setLiefergebührOn(amt > 0); setLiefergebührAmt(String(amt));
+          /* v466: sofort in die Bestellung schreiben - sonst ist die Angabe
+             beim naechsten Oeffnen wieder weg. */
+          try { if (typeof onLieferFee === 'function') onLieferFee(tableId, amt); } catch(e){}
+        },
         style: {
           padding:"4px 10px", borderRadius:8, border:"none", cursor:"pointer",
           fontFamily:"inherit", fontWeight:700, fontSize:12,
@@ -25406,7 +25428,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v465"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v466"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26738,6 +26760,19 @@ function App() {
         tseBestellung: _tse || alt.tseBestellung || null
       })});
     });
+  };
+
+  /* v466: Die Liefergebuehr wird sofort in die Bestellung geschrieben, nicht
+     erst beim Speichern. Ein Tisch kennt keine Liefergebuehr - dort passiert
+     nichts. Und wie jede Aenderung an einer Abholung bekommt sie eine
+     Uhrzeit, sonst holt der naechste Abgleich die alte Fassung zurueck
+     (siehe v463). */
+  const setLieferGebuehr = (tid, betrag) => {
+    if (!String(tid).startsWith("ta_")) return;
+    const taId = parseInt(String(tid).replace("ta_", ""));
+    const f = Math.max(0, Number(betrag) || 0);
+    setTakeaway(t => (t || []).map(x =>
+      window.belksTaIst(x, taId) ? window.belksTaAendern(x, { lieferFee: f }) : x));
   };
 
   const saveOrder = (tid, lieferFee=0) => {
@@ -28853,6 +28888,7 @@ function App() {
     isTakeaway: isTakeaway,
     order: getCurrentOrder(),
     onUpdate: updateOrder,
+    onLieferFee: setLieferGebuehr,   /* v466 */
     onSave: saveOrder,
     onBestellen: belksBestellen,   // v344
     onWechseln: setWechselVon,     // v351
