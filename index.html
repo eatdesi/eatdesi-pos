@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v463</title>
+<title>eatDeSi POS v465</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -7688,7 +7688,7 @@ var RohDruck = {
     return out;
   },
   /* Baut aus den Zeilen (dieselben, die auch ePOS bekommt) einen ESC/POS-Strom. */
-  bytes: function(lines, kitchen, codepage){
+  bytes: function(lines, kitchen, codepage, gross, fett){   /* v465 */
     var b = [];
     var push = function(a){ for(var i = 0; i < a.length; i++) b.push(a[i]); };
     push([0x1B, 0x40]);                                   // ESC @  Drucker zuruecksetzen
@@ -7697,10 +7697,20 @@ var RohDruck = {
       var ln = lines[i] || {};
       var al = ln.align === 'center' ? 1 : (ln.align === 'right' ? 2 : 0);
       push([0x1B, 0x61, al]);                             // ESC a  Ausrichtung
-      var dh = kitchen ? true : !!ln.big;                 // doppelte Hoehe
-      var dw = (kitchen && ln.big) ? true : false;        // doppelte Breite
+      /* ═══ v465: DERSELBE BON, DERSELBE DRUCK ═══
+         Hier stand: doppelte Hoehe nur fuer Kuechenbons, sonst nur bei einer
+         ausdruecklich als "big" markierten Zeile. Unsere Gaestebons haben
+         keine solche Zeile - auf der MUNBYN kam deshalb alles klein heraus,
+         waehrend die TM-m30 seit v458 gross druckte.
+
+         Der Grund ist wieder derselbe: zwei Druckwege, zwei Meinungen. Die
+         Groesse entscheidet fuer Bluetooth belegAufbereiten(); der WLAN-Weg
+         hat dort nie gefragt. Jetzt bekommt er dieselbe Angabe mit -
+         ENTSCHIEDEN wird sie weiterhin an einer Stelle. */
+      var dh = kitchen ? true : (gross ? true : !!ln.big);   // doppelte Hoehe
+      var dw = (kitchen && ln.big) ? true : false;           // doppelte Breite
       var mode = 0;
-      if(ln.bold) mode |= 0x08;
+      if(ln.bold || fett) mode |= 0x08;
       if(dh) mode |= 0x10;
       if(dw) mode |= 0x20;
       push([0x1B, 0x21, mode]);                           // ESC !  Schriftbild
@@ -7719,14 +7729,14 @@ var RohDruck = {
   },
   /* Verbinden, senden, trennen. Der Drucker antwortet nicht - deshalb gilt
      "gesendet ohne Fehler" als Erfolg. */
-  print: function(ip, port, html, kitchen, codepage){
+  print: function(ip, port, html, kitchen, codepage, gross, fett){   /* v465 */
     var self = this;
     var P = self.plugin();
     if(!P) return Promise.reject(new Error(
       "Roh-Druck (Port 9100) geht nur in der Android-App, nicht im Browser. " +
       "Der Browser darf keine direkte Druckerverbindung oeffnen."));
     var lines = EposWiFi.htmlToLines(html);
-    var daten = self.b64(self.bytes(lines, kitchen, codepage));
+    var daten = self.b64(self.bytes(lines, kitchen, codepage, gross, fett));   /* v465 */
     var klient = null;
     return Promise.resolve(P.connect({ ipAddress: ip, port: (port || 9100) }))
       .then(function(r){
@@ -7751,11 +7761,18 @@ var RohDruck = {
 };
 
 /* Eine Stelle entscheidet, welcher WLAN-Weg genommen wird. */
-function belksWlanDruck(cfg, html, kitchen){
+function belksWlanDruck(cfg, html, kitchen, opt){
+  /* v465: Ohne eigene Angabe gilt fuer jeden Nicht-Kuechenbon dasselbe wie
+     ueber Bluetooth: gross und fett. Wer es anders will, sagt es hier. */
+  var _b = (window.BTPrint && window.BTPrint.belegAufbereiten)
+    ? window.BTPrint.belegAufbereiten(html, kitchen ? 0x01 : 0x00) : null;
+  var gross = opt && opt.gross !== undefined ? !!opt.gross : (!kitchen);
+  var fett  = opt && opt.fett  !== undefined ? !!opt.fett
+            : !!(_b && _b.opt && _b.opt.fett);
   var ip = cfg && cfg.ip;
   if(!ip) return Promise.reject(new Error("Keine IP hinterlegt."));
   if((cfg.wifiProto || 'epos') === 'raw'){
-    return RohDruck.print(ip, cfg.wifiPort || 9100, html, kitchen, cfg.wifiCp);
+    return RohDruck.print(ip, cfg.wifiPort || 9100, html, kitchen, cfg.wifiCp, gross, fett);   /* v465 */
   }
   return EposWiFi.print(ip, html, kitchen);
 }
@@ -8543,7 +8560,7 @@ window.belksTaNummerSichern = async function(taId, liste, setTakeaway){
       setTakeaway(function(t){
         return (t || []).map(function(x){
           return (window.belksTaIst(x, taId) && !x.nr)
-            ? Object.assign({}, x, { nr: r.nr, nrLokal: !!r.lokal })
+            ? window.belksTaAendern(x, { nr: r.nr, nrLokal: !!r.lokal })   /* v464 */
             : x;
         });
       });
@@ -23209,13 +23226,13 @@ function FahrerView({ takeaway, setTakeaway, completedOrders, setCompletedOrders
       return;
     }
     setTakeaway(p => p.map(t => {
-    if (t.id !== id) return t;
+    if (!window.belksTaIst(t, id)) return t;              /* v464 */
     const nimmt = t.fahrer !== ich;                       // sonst: abgeben
     const st = t.kdsStatus || 'new';
-    return { ...t,
+    return window.belksTaAendern(t, {                     /* v464 */
       fahrer: nimmt ? ich : null,
       fahrerZeit: new Date().toISOString(),
-      kdsStatus: (nimmt && st === 'new') ? 'working' : st };
+      kdsStatus: (nimmt && st === 'new') ? 'working' : st });
   }));
   };
 
@@ -23238,11 +23255,11 @@ function FahrerView({ takeaway, setTakeaway, completedOrders, setCompletedOrders
        "ausgeliefert" und verschwindet - niemand muss sie ein zweites Mal von
        Hand weiterschieben. Die Bestellung selbst bleibt vollstaendig
        erhalten, samt kassiertem Bargeld fuer die Fahrerabrechnung. */
-    setTakeaway(p => p.map(x => x.id === t.id
-      ? { ...x,
+    setTakeaway(p => p.map(x => window.belksTaIst(x, t.id)     /* v464 */
+      ? window.belksTaAendern(x, {
           geliefert: { von: ich, zeit: new Date().toISOString(), bar: bar },
           kdsStatus: 'delivered',
-          kdsHidden: true } : x));
+          kdsHidden: true }) : x));
   };
 
   const knopf = (text, hg, farbe, onClick) => /*#__PURE__*/React.createElement("button", {
@@ -25389,7 +25406,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v463"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v465"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -36371,7 +36388,7 @@ function KdsProView({ tableOrders, takeaway, setTableOrders, completedOrders, se
       setCompletedOrders(function(list){ return list.map(function(x){ return String(x.bonNr)===String(ticket.bonNr)?Object.assign({},x,{note:newNote}):x; }); });
       if (typeof updateOrderNoteInSupabase==='function') updateOrderNoteInSupabase(ticket.bonNr, newNote);
     } else if (ticket.kind === 'takeaway') {
-      setTakeaway(function(t){ return t.map(function(x){ return x.id===ticket.taId?Object.assign({},x,{kdsStatus:newStatus}):x; }); });
+      setTakeaway(function(t){ return t.map(function(x){ return window.belksTaIst(x, ticket.taId)?window.belksTaAendern(x,{kdsStatus:newStatus}):x; })   /* v464 */; });
     } else if (ticket.kind === 'table' && setTableOrders) {
       setTableOrders(function(p){ var n=Object.assign({},p); if(n[ticket.tableId]) n[ticket.tableId]=Object.assign({},n[ticket.tableId],{kdsStatus:newStatus}); return n; });
     }
@@ -36388,9 +36405,9 @@ function KdsProView({ tableOrders, takeaway, setTableOrders, completedOrders, se
       // Ausgeliefert: wenn schon bezahlt -> komplett aus Liste (ist bereits in geschlossener Order-Liste).
       // Wenn noch nicht bezahlt -> nur aus KDS ausblenden, bleibt in Takeaway-Ansicht zur Bezahlung.
       setTakeaway(function(t){ return t.map(function(x){
-        if (x.id!==ticket.taId) return x;
+        if (!window.belksTaIst(x, ticket.taId)) return x;                    /* v464 */
         if (x.bezahlt) return null; // bezahlt + ausgeliefert -> ganz raus
-        return Object.assign({}, x, { kdsStatus:'delivered', kdsHidden:true }); // noch offen -> nur KDS aus
+        return window.belksTaAendern(x, { kdsStatus:'delivered', kdsHidden:true }); // noch offen -> nur KDS aus
       }).filter(Boolean); });
     } else if (ticket.kind === 'table' && setTableOrders) {
       setTableOrders(function(p){ var n=Object.assign({},p); if(n[ticket.tableId]) n[ticket.tableId]=Object.assign({},n[ticket.tableId],{kdsStatus:'delivered',kdsHidden:true}); return n; });
