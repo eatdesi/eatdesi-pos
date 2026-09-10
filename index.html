@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v469</title>
+<title>eatDeSi POS v470</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -25312,7 +25312,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v469"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v470"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -38419,9 +38419,20 @@ try {
 /* Welcher Weg gilt? 'neu' oder 'alt'.
    Geraetelokal - so kann ein einzelnes Geraet zurueckgeschaltet werden,
    ohne den ganzen Betrieb umzustellen. */
+/* === v470: DER NEUE WEG IST JETZT DER NORMALFALL ===
+   Der Weg ueber die Datenbank steht seit v424 fertig da - nur die
+   Voreinstellung war 'alt'. Ein neu eingerichtetes Geraet lief damit
+   automatisch auf dem alten Weg, und niemand merkte es, ausser man sah in
+   die Diagnose. Genau daraus entstand am 01.09. der Fall, dass ein Geraet
+   auf NEU und eines auf ALT stand und die Tische sich nicht sahen.
+
+   Ab jetzt gilt: NEU, ausser jemand hat ausdruecklich zurueckgeschaltet.
+   'alt' bleibt als Rueckfalltuer bestehen - wer sie braucht, findet sie in
+   der Diagnose, und die Kasse greift von selbst darauf zurueck, wenn die
+   Datenbankfunktionen fehlen (siehe belksTischRpc). */
 window.belksTischModus = function(){
-  try { return localStorage.getItem('eatdesi_tischmodus') === 'neu' ? 'neu' : 'alt'; }
-  catch(e){ return 'alt'; }
+  try { return localStorage.getItem('eatdesi_tischmodus') === 'alt' ? 'alt' : 'neu'; }
+  catch(e){ return 'neu'; }
 };
 window.belksTischModusSetzen = function(m){
   try {
@@ -38452,7 +38463,25 @@ async function belksTischRpc(name, args){
     body: JSON.stringify(args)
   });
   try { window.belksZeitMerken(r); } catch(e){}
-  if (!r.ok) throw new Error(name + ': HTTP ' + r.status);
+  if (!r.ok) {
+    /* === v470: WENN ES DIE FUNKTION NICHT GIBT, NICHT STILL WARTEN ===
+       Ohne diese Stelle wuerde ein fehlendes belks_tisch_setzen wie ein
+       Funkloch aussehen: jede Buchung ginge in die Warteschlange und
+       nichts kaeme je an. Der Kellner saehe seine Tische, die Kueche
+       nicht - und niemand wuesste warum.
+       404 und 42883 heissen beide: die Datenbank kennt diese Funktion
+       nicht. Dann sofort zurueck auf den alten Weg und laut sagen. */
+    var _txt = '';
+    try { _txt = await r.text(); } catch(e){}
+    if (r.status === 404 || (_txt && _txt.indexOf('42883') > -1)) {
+      try {
+        window.belksTischModusSetzen('alt');
+        window.belksHinweis('\u26A0\uFE0F Tisch-Abgleich: Datenbankfunktion fehlt \u2013 '
+          + 'zurueck auf den alten Weg. Bitte melden.', '#e65100');
+      } catch(e){}
+    }
+    throw new Error(name + ': HTTP ' + r.status);
+  }
   return await r.json();
 }
 
