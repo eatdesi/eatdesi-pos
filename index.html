@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v466</title>
+<title>eatDeSi POS v469</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -11042,19 +11042,23 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
   const cashChange = (parseFloat(cashGiven)||0) - totalWithTG;
   const gastColor = PCOLORS[gastNr % PCOLORS.length];
 
-  const confirmPay = (method) => {
+  const confirmPay = (method, sofortDrucken) => {
     const cashInfo = method === "Bar" ? { cashGiven: parseFloat(cashGiven)||0, change: cashChange } : null;
-    /* v325: Bei Karte bucht die Kasse sofort eine eigene Bestellung und
-       druckt dort den richtigen Zahlungsbeleg MIT TSE-Signatur. Ein
-       zusaetzlicher Gast-Bon ohne Signatur waere ein zweiter Beleg fuer
-       dieselbe Zahlung - deshalb hier nur noch bei Bar drucken. */
-    if (method !== "Karte") {
-      printGastBon(selItems, selTotal, tgVal, method, gastNr+1, label, printerSettings, rabattAmt);
-    }
+    /* === v469: KEIN ZETTEL OHNE SIGNATUR ===
+       Hier wurde bei Bar IMMER ein Gast-Bon gedruckt - und zwar BEVOR
+       gebucht war. Der Ausdruck trug deshalb keine TSE-Signatur: ein
+       Zettel, kein Beleg. Der Knopf hiess "Bezahlt - Bon drucken" und tat
+       das Gegenteil von dem, was er versprach: drucken ja, buchen nein.
+
+       Jetzt entscheidet der Kellner:
+       - "Bezahlt"             -> kein Druck, Buchung beim Tisch-Freigeben
+       - "Bezahlt und drucken" -> sofort gebucht, Beleg MIT Signatur
+       Den signierten Beleg druckt belksTeilzahlung, nicht diese Stelle -
+       dort ist die Signatur vorhanden. */
     /* Der Rabatt muss mitgereicht werden: die Buchung rechnet sonst wieder
        die vollen Artikelpreise zusammen - der Gast zahlt 19 EUR und die
        Kasse bucht 21,20 EUR. */
-    onGastPaid(selItems, method, tgVal, cashInfo, rabattAmt);
+    onGastPaid(selItems, method, tgVal, cashInfo, rabattAmt, !!sofortDrucken);   /* v469 */
     setSel({});
     setPayMethod(null);
     setCashGiven("");
@@ -11323,158 +11327,28 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
         /*#__PURE__*/React.createElement("button", { onClick:()=>{setPayMethod(null);setCashGiven("");},
           style:{ flex:1, padding:11, borderRadius:10, border:"2px solid #ddd", background:"#fff", color:"#666", cursor:"pointer", fontFamily:"inherit", fontWeight:600 }
         }, "← Zurück"),
+        /* === v469: ZWEI KNOEPFE STATT EINEM ===
+           "Bezahlt" spart Papier und laesst den Tisch weiterlaufen.
+           "Bezahlt und drucken" schliesst diesen Gast sofort ab. */
         /*#__PURE__*/React.createElement("button", {
-          onClick:()=>confirmPay("Bar"),
+          onClick:()=>confirmPay("Bar", false),
           disabled:!cashGiven||cashChange<0,
-          style:{ flex:2, padding:11, borderRadius:10, border:"none", background:(!cashGiven||cashChange<0)?"#ccc":C.green, color:(!cashGiven||cashChange<0)?"#999":"#fff", cursor:(!cashGiven||cashChange<0)?"not-allowed":"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
-        }, "✅ Bezahlt — Bon drucken")
+          style:{ flex:1, padding:11, borderRadius:10, border:"2px solid "+((!cashGiven||cashChange<0)?"#ccc":C.green), background:"#fff", color:(!cashGiven||cashChange<0)?"#ccc":C.green, cursor:(!cashGiven||cashChange<0)?"default":"pointer", fontFamily:"inherit", fontWeight:800, fontSize:13 }
+        }, "\u2705 Bezahlt"),
+        /*#__PURE__*/React.createElement("button", {
+          onClick:()=>confirmPay("Bar", true),
+          disabled:!cashGiven||cashChange<0,
+          style:{ flex:1.4, padding:11, borderRadius:10, border:"none", background:(!cashGiven||cashChange<0)?"#ccc":C.green, color:"#fff", cursor:(!cashGiven||cashChange<0)?"default":"pointer", fontFamily:"inherit", fontWeight:800, fontSize:13 }
+        }, "\uD83D\uDDA8\uFE0F Bezahlt und drucken")
       )
     )
   );
 }
 
-function ArticleSplitSetup({
-  items,
-  onStart,
-  onBack
-}) {
-  const [artPersons, setArtPersons] = useState(2);
-  // artAssign: { _key: { [pi]: qty } } - supports partial qty per person
-  const [artAssign, setArtAssign] = useState({});
-  const PCOLORS = ["#1565c0", "#2e7d32", "#e65100", "#880e4f", "#4a148c", "#bf360c"];
-  const PNAMES = ["P1", "P2", "P3", "P4", "P5", "P6"];
-
-  // How many of this item already assigned across all persons
-  const assignedQty = key => Object.values(artAssign[key] || {}).reduce((s, v) => s + v, 0);
-  const unassignedQty = item => item.qty - assignedQty(item._key);
-  const allAssigned = items.every(i => unassignedQty(i) === 0);
-
-  const getPersonTotal = pi => items.reduce((s, item) => {
-    const q = (artAssign[item._key] || {})[pi] || 0;
-    return s + item.finalPrice * q;
-  }, 0);
-
-  const setItemPerson = (key, pi, qty, maxQty) => {
-    setArtAssign(a => {
-      const prev = { ...(a[key] || {}) };
-      if (qty <= 0) { delete prev[pi]; }
-      else { prev[pi] = Math.min(qty, maxQty); }
-      return { ...a, [key]: prev };
-    });
-  };
-
-  // Quick assign all remaining of an item to a person
-  const assignRemaining = (item, pi) => {
-    const rem = unassignedQty(item);
-    if (rem <= 0) return;
-    setArtAssign(a => {
-      const prev = { ...(a[item._key] || {}) };
-      prev[pi] = (prev[pi] || 0) + rem;
-      return { ...a, [item._key]: prev };
-    });
-  };
-
-  return /*#__PURE__*/React.createElement("div", null,
-    // Persons selector
-    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#555", marginBottom: 8, fontWeight: 600 } }, "Anzahl Personen"),
-    /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 14 } },
-      [2, 3, 4, 5, 6].map(n => /*#__PURE__*/React.createElement("button", {
-        key: n, onClick: () => { setArtPersons(n); setArtAssign({}); },
-        style: { flex: 1, padding: "9px 0", borderRadius: 8, border: `2px solid ${artPersons === n ? C.blue : "#ddd"}`, background: artPersons === n ? C.blue : "#fff", color: artPersons === n ? "#fff" : "#555", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 14 }
-      }, n))
-    ),
-    // Quick assign buttons
-    /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" } },
-      Array.from({ length: artPersons }, (_, pi) => /*#__PURE__*/React.createElement("button", {
-        key: pi,
-        onClick: () => {
-          const a = {};
-          items.forEach(i => { a[i._key] = { [pi]: i.qty }; });
-          setArtAssign(a);
-        },
-        style: { padding: "5px 12px", borderRadius: 8, border: `2px solid ${PCOLORS[pi]}44`, background: PCOLORS[pi] + "18", color: PCOLORS[pi], cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 11 }
-      }, "Alle \u2192 ", PNAMES[pi])),
-      /*#__PURE__*/React.createElement("button", { onClick: () => setArtAssign({}),
-        style: { padding: "5px 12px", borderRadius: 8, border: "2px solid #ddd", background: "#fff", color: "#888", cursor: "pointer", fontFamily: "inherit", fontSize: 11 }
-      }, "Reset")
-    ),
-    // Items list
-    /*#__PURE__*/React.createElement("div", { style: { maxHeight: 280, overflowY: "auto", marginBottom: 10 } },
-      items.map(item => {
-        const totalAssigned = assignedQty(item._key);
-        const remaining = item.qty - totalAssigned;
-        const isFullyAssigned = remaining === 0;
-        return /*#__PURE__*/React.createElement("div", { key: item._key,
-          style: { background: "#fff", borderRadius: 8, padding: "9px 10px", marginBottom: 6, border: `2px solid ${isFullyAssigned ? C.green : remaining < item.qty ? C.orange : "#e0e0e0"}` }
-        },
-          // Item header
-          /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 } },
-            /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "#333" } },
-              item.qty, "\xD7 ", window.belksArtikelName(item),
-              item.note && /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, color: C.orange } }, " (", item.note, ")")
-            ),
-            /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: C.green, marginLeft: 8 } }, fmt(item.finalPrice * item.qty))
-          ),
-          // Per-person qty assignment
-          /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" } },
-            Array.from({ length: artPersons }, (_, pi) => {
-              const qtyForPi = (artAssign[item._key] || {})[pi] || 0;
-              return /*#__PURE__*/React.createElement("div", { key: pi, style: { display: "flex", alignItems: "center", gap: 3, background: qtyForPi > 0 ? PCOLORS[pi] + "15" : "#f5f5f5", borderRadius: 10, padding: "3px 6px", border: `2px solid ${qtyForPi > 0 ? PCOLORS[pi] : "#ddd"}` } },
-                /*#__PURE__*/React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: qtyForPi > 0 ? PCOLORS[pi] : "#aaa", minWidth: 20 } }, PNAMES[pi]),
-                // Minus button
-                item.qty > 1 && /*#__PURE__*/React.createElement("button", {
-                  onClick: () => setItemPerson(item._key, pi, qtyForPi - 1, item.qty),
-                  disabled: qtyForPi === 0,
-                  style: { width: 20, height: 20, borderRadius: "50%", border: "none", background: qtyForPi > 0 ? PCOLORS[pi] : "#ddd", color: "#fff", cursor: qtyForPi > 0 ? "pointer" : "not-allowed", fontFamily: "inherit", fontWeight: 900, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, padding: 0 }
-                }, "−"),
-                item.qty > 1 && /*#__PURE__*/React.createElement("span", { style: { fontSize: 13, fontWeight: 900, color: qtyForPi > 0 ? PCOLORS[pi] : "#ccc", minWidth: 14, textAlign: "center" } }, qtyForPi),
-                // Plus button
-                item.qty > 1 && /*#__PURE__*/React.createElement("button", {
-                  onClick: () => setItemPerson(item._key, pi, qtyForPi + 1, item.qty),
-                  disabled: remaining === 0 && qtyForPi === 0,
-                  style: { width: 20, height: 20, borderRadius: "50%", border: "none", background: remaining > 0 ? PCOLORS[pi] : "#ddd", color: "#fff", cursor: remaining > 0 ? "pointer" : "not-allowed", fontFamily: "inherit", fontWeight: 900, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, padding: 0 }
-                }, "+"),
-                // For qty=1 items: simple toggle
-                item.qty === 1 && /*#__PURE__*/React.createElement("button", {
-                  onClick: () => setItemPerson(item._key, pi, qtyForPi > 0 ? 0 : 1, 1),
-                  style: { width: 20, height: 20, borderRadius: "50%", border: "none", background: qtyForPi > 0 ? PCOLORS[pi] : (remaining > 0 ? "#e0e0e0" : "#ddd"), color: qtyForPi > 0 ? "#fff" : "#888", cursor: remaining > 0 || qtyForPi > 0 ? "pointer" : "not-allowed", fontFamily: "inherit", fontWeight: 700, fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }
-                }, qtyForPi > 0 ? "✓" : "+")
-              );
-            }),
-            // Remaining indicator
-            remaining > 0 && /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, color: C.orange, fontWeight: 700, marginLeft: 4 } }, remaining > 0 ? `noch ${remaining}×` : "")
-          )
-        );
-      })
-    ),
-    // Person totals summary
-    /*#__PURE__*/React.createElement("div", { style: { background: "#f5f5f5", borderRadius: 8, padding: 10, marginBottom: 10 } },
-      Array.from({ length: artPersons }, (_, pi) => /*#__PURE__*/React.createElement("div", { key: pi,
-        style: { display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 12 }
-      },
-        /*#__PURE__*/React.createElement("span", { style: { color: PCOLORS[pi], fontWeight: 700 } }, PNAMES[pi]),
-        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: getPersonTotal(pi) > 0 ? C.green : "#bbb" } }, fmt(getPersonTotal(pi)))
-      )),
-      !allAssigned && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: C.orange, marginTop: 4, borderTop: "1px solid #ddd", paddingTop: 4 } },
-        "\u26A0\uFE0F ", items.reduce((s, i) => s + unassignedQty(i), 0), " Stück noch nicht zugewiesen!"
-      )
-    ),
-    // Buttons
-    /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10 } },
-      /*#__PURE__*/React.createElement("button", { onClick: onBack,
-        style: { flex: 1, padding: 11, borderRadius: 10, border: "2px solid #ddd", background: "#fff", color: "#666", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }
-      }, "\u2190 Zur\xFCck"),
-      /*#__PURE__*/React.createElement("button", {
-        disabled: !allAssigned,
-        onClick: () => {
-          const amounts = Object.fromEntries(Array.from({ length: artPersons }, (_, pi) => [pi, getPersonTotal(pi).toFixed(2)]));
-          onStart(artPersons, amounts);
-        },
-        style: { flex: 2, padding: 11, borderRadius: 10, border: "none", background: allAssigned ? C.blue : "#ccc", color: allAssigned ? "#fff" : "#999", cursor: allAssigned ? "pointer" : "not-allowed", fontFamily: "inherit", fontWeight: 700, fontSize: 13 }
-      }, !allAssigned ? `\u26A0\uFE0F noch nicht fertig` : "\uD83D\uDCB3 Zahlung starten")
-    )
-  );
-}
+/* v468: Hier stand ArticleSplitSetup - die Vorab-Zuweisung fuer den
+   entfernten Modus "Nach Artikeln". Ohne Aufrufer war es toter Code.
+   Toter Code ist nicht harmlos: er sieht aus wie ein gangbarer Weg, wird
+   bei jeder Suche mitgefunden und kostet beim naechsten Fehler Zeit. */
 
 function CheckoutModal({ label, items, total, directSplit, printerSettings, onClose, onComplete, onTeilzahlung, onNurKarte, gutscheine, setGutscheine, customers, loyaltySettings, setCustomers }) {
   const sumupMode = printerSettings?.sumupMode || "same"; // "same" | "other"
@@ -11698,7 +11572,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
       ),
       /*#__PURE__*/React.createElement("div", { style:{ padding:14 } },
         // Items summary (shown on most steps)
-        step !== "done" && step !== "split_pay" && step !== "split" && step !== "split_artikel" && step !== "einzeln" &&
+        step !== "done" && step !== "split_pay" && step !== "split" && step !== "einzeln" &&   /* v468 */
         /*#__PURE__*/React.createElement("div", { style:{ background:"#f9f9f9", borderRadius:10, padding:12, marginBottom:12, border:"1px solid #eee" } },
           items.map((i,idx) => /*#__PURE__*/React.createElement("div", { key:idx, style:{ display:"flex", justifyContent:"space-between", fontSize:11, color:"#555", marginBottom:2 } },
             /*#__PURE__*/React.createElement("span", null, i.qty, "\xD7 ", i.nr, ". ", i.name, i.note ? ` (${i.note})` : ""),
@@ -11976,12 +11850,14 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
               /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13 } }, "\uD83E\uDDD1 Einzeln abkassieren"),
               /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#666", marginTop:3 } }, "Gast f\xFCr Gast — jeder w\xE4hlt & bezahlt sofort, eigener Bon")
             ),
-            /*#__PURE__*/React.createElement("button", { onClick:()=>setStep("split_artikel"),
-              style:{ padding:"14px 16px", borderRadius:12, border:"2px solid #1565c0", background:"#e3f2fd", color:C.blue, cursor:"pointer", fontFamily:"inherit", textAlign:"left" }
-            },
-              /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13 } }, "\uD83C\uDF7D\uFE0F Nach Artikeln"),
-              /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#666", marginTop:3 } }, "Alle Artikel vorab zuweisen")
-            ),
+            /* ═══ v468: "NACH ARTIKELN" ENTFERNT ═══
+               Der Modus machte dasselbe wie "Einzeln abkassieren", nur mit
+               dem Umweg, alle Artikel vorab zuzuweisen und erst danach zu
+               kassieren. Zwei Wege zum selben Ziel bedeuten zwei Wege, die
+               auseinanderlaufen koennen - und einer davon wurde im Betrieb
+               nie benutzt. Wer Artikel je Gast abrechnen will, nimmt
+               "Einzeln abkassieren": dort waehlt und zahlt jeder Gast
+               sofort, mit eigenem Beleg. */
             /*#__PURE__*/React.createElement("button", { onClick:()=>{setSplitMode("gleich");setStep("split_gleich");},
               style:{ padding:"14px 16px", borderRadius:12, border:"2px solid #ddd", background:"#fff", color:"#333", cursor:"pointer", fontFamily:"inherit", textAlign:"left" }
             },
@@ -11998,13 +11874,6 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
           /*#__PURE__*/React.createElement("button", { onClick:()=>setStep("main"),
             style:{ width:"100%", padding:11, borderRadius:10, border:"2px solid #ddd", background:"#fff", color:"#666", cursor:"pointer", fontFamily:"inherit", fontWeight:600 }
           }, "\u2190 Zur\xFCck")
-        ),
-
-        step === "split_artikel" && /*#__PURE__*/React.createElement(React.Fragment, null,
-          /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:C.blue, marginBottom:10 } }, "\uD83C\uDF7D\uFE0F Artikel zuweisen"),
-          /*#__PURE__*/React.createElement(ArticleSplitSetup, { items:items, onBack:()=>setStep("split"),
-            onStart:(n,amounts)=>{ setSplitPersons(n); setCustomAmounts(amounts); setSplitMode("custom"); setSplitPaid([]); setStep("split_pay"); }
-          })
         ),
 
         step === "split_gleich" && /*#__PURE__*/React.createElement(React.Fragment, null,
@@ -12059,7 +11928,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
           gastNr: einzelnGast,
           label: label,
           printerSettings: printerSettings,
-          onGastPaid: (gastItems, method, tg, cashInfo, gastRabatt) => {
+          onGastPaid: (gastItems, method, tg, cashInfo, gastRabatt, sofortDrucken) => {   /* v469 */
             /* v319: was der Gast wirklich bezahlt hat - Artikel minus Rabatt. */
             const roh = gastItems.reduce((s,i)=>s+i.finalPrice*i.qty,0);
             const amt = Math.max(0, Math.round((roh - (gastRabatt||0)) * 100) / 100);
@@ -12075,8 +11944,15 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
                Artikel verlassen den Tisch sofort. Barzahlungen sammeln sich
                weiter und werden bei "Tisch freigeben" als EINE Buchung
                abgeschlossen. Damit faellt splitDetails (v320) weg. */
-            if (method === "Karte" && typeof onTeilzahlung === "function") {
-              onTeilzahlung(gastItems, tg, (gastRabatt||0), einzelnGast+1);
+            /* === v469: SOFORT BUCHEN, WENN GEDRUCKT WIRD ===
+               Karte wird wie bisher immer sofort gebucht. Bar nur dann,
+               wenn der Kellner "Bezahlt und drucken" gewaehlt hat - denn
+               ein gedruckter Beleg muss signiert sein. Bei "Bezahlt"
+               sammelt sich die Barzahlung weiter und wird beim
+               Tisch-Freigeben in einem Zug gebucht, wie bisher. */
+            const _sofort = (method === "Karte") || !!sofortDrucken;
+            if (_sofort && typeof onTeilzahlung === "function") {
+              onTeilzahlung(gastItems, tg, (gastRabatt||0), einzelnGast+1, method);
             }
             // remove paid items from remaining
             const paidKeys = new Set(gastItems.map(i=>i._key));
@@ -12146,10 +12022,18 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
           ),
           /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:10 } },
             /*#__PURE__*/React.createElement("button", { onClick:()=>setStep("main"), style:{ flex:1, padding:12, borderRadius:10, border:"2px solid #ddd", background:"#fff", color:"#666", cursor:"pointer", fontFamily:"inherit", fontWeight:600 } }, "\u2190 Zur\xFCck"),
+            /* === v469: DIESELBEN ZWEI KNOEPFE WIE BEIM EINZELN-ABKASSIEREN ===
+               Bis v468 stand hier "Bestaetigen" - und ob ein Beleg kam,
+               entschied die Kasse selbst. Jetzt entscheidet der Kellner,
+               und zwar auf beiden Bildschirmen gleich. */
+            /*#__PURE__*/React.createElement("button", { onClick:()=>{ if(parseFloat(cashGiven)>=totalWithTG) finishFull("Bar",{cashGiven:parseFloat(cashGiven),change:cashChange,ohneBon:true}); },
+              disabled: !cashGiven || cashChange < 0,
+              style:{ flex:1, padding:12, borderRadius:10, border:"2px solid "+((!cashGiven||cashChange<0)?"#ccc":C.green), background:"#fff", color:(!cashGiven||cashChange<0)?"#ccc":C.green, cursor:(!cashGiven||cashChange<0)?"not-allowed":"pointer", fontFamily:"inherit", fontWeight:800, fontSize:14 }
+            }, "\u2705 Bezahlt"),
             /*#__PURE__*/React.createElement("button", { onClick:()=>{ if(parseFloat(cashGiven)>=totalWithTG) finishFull("Bar",{cashGiven:parseFloat(cashGiven),change:cashChange}); },
               disabled: !cashGiven || cashChange < 0,
-              style:{ flex:2, padding:12, borderRadius:10, border:"none", background:(!cashGiven||cashChange<0)?"#ccc":C.green, color:(!cashGiven||cashChange<0)?"#999":"#fff", cursor:(!cashGiven||cashChange<0)?"not-allowed":"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
-            }, "\u2705 Best\xE4tigen")
+              style:{ flex:1.4, padding:12, borderRadius:10, border:"none", background:(!cashGiven||cashChange<0)?"#ccc":C.green, color:(!cashGiven||cashChange<0)?"#999":"#fff", cursor:(!cashGiven||cashChange<0)?"not-allowed":"pointer", fontFamily:"inherit", fontWeight:800, fontSize:14 }
+            }, "\uD83D\uDDA8\uFE0F Bezahlt und drucken")
           )
         ),
 
@@ -12260,7 +12144,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
                      waere als Kundennummer gespeichert worden, und beim
                      naechsten Besuch haette die Kasse ihn nicht wiedergefunden. */
                   ((foundCustomer && (foundCustomer.phone || foundCustomer.kundenNr))
-                    || loyaltyPhone || null), redeemedPts||0, done.splitDetails||null);
+                    || loyaltyPhone || null), redeemedPts||0, done.splitDetails||null, !!done.ohneBon);   /* v469 */
               }
             },
             style:{ width:"100%", padding:14, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:15 }
@@ -25428,7 +25312,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v466"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v469"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26085,15 +25969,44 @@ function App() {
          Sieben Tage sind reichlich: so lange darf ein Geraet aus sein.
          Danach hat die Marke ihre Aufgabe erfuellt. */
       try {
-        var _taGrenze = (window.belksJetzt ? window.belksJetzt() : Date.now()) - 7 * 86400000;
+        var _jetztTa = (window.belksJetzt ? window.belksJetzt() : Date.now());
+        var _taGrenze = _jetztTa - 7 * 86400000;
+        /* ═══ v467: BEZAHLTE ABHOLUNGEN NACH EINEM TAG WEGRAEUMEN ═══
+           Eine bezahlte Abholung bleibt absichtlich stehen, bis die Kueche
+           fertig ist. Setzt niemand sie auf "ausgeliefert", bleibt sie fuer
+           immer liegen. Am 06.09. lagen neun Stueck in der Liste, die
+           aelteste vom 31. Juli.
+
+           Das kostet nicht nur Platz: Die sichtbare Nummer beginnt taeglich
+           bei 1, alte Eintraege behalten ihre. Dadurch gab es die #5
+           zweimal - und die Doppeldeutigkeit hat bei der Fehlersuche eine
+           ganze Runde gekostet.
+
+           Eine Grenze von einem Tag ist sicher: Der Tagesabschluss laeuft
+           nachts, alles vom laufenden Tag bleibt unangetastet. Und der
+           Beleg liegt ohnehin in eatdesi_orders - das ist die steuerliche
+           Ablage. Diese Liste hier ist nur der Arbeitsstand.
+
+           Entfernt wird nur, was BEZAHLT ist. Eine unbezahlte Bestellung
+           bleibt liegen, egal wie alt - dort kann noch Geld offen sein. */
+        var _bezahltGrenze = _jetztTa - 1 * 86400000;
         setTakeaway(function(p){
           return (p || []).filter(function(t){
-            if (!t || !t.deleted) return true;
-            var w = new Date(t.deletedAt || 0).getTime();
-            return !(w > 0 && w < _taGrenze);
+            if (!t) return false;
+            if (t.deleted) {
+              var w = new Date(t.deletedAt || 0).getTime();
+              return !(w > 0 && w < _taGrenze);
+            }
+            if (t.bezahlt) {
+              /* Wann wurde zuletzt etwas an ihr geaendert? "geaendert" gibt
+                 es seit v463, aeltere Eintraege haben nur "time". */
+              var z = new Date(t.geaendert || t.time || 0).getTime();
+              if (z > 0 && z < _bezahltGrenze) return false;
+            }
+            return true;
           });
         });
-      } catch (e) { console.warn("v433 Takeaway aufraeumen:", e); }
+      } catch (e) { console.warn("v433/v467 Takeaway aufraeumen:", e); }
 
       /* ═══ v424: UMSTELLUNG AUF DEN NEUEN TISCH-ABGLEICH ═══
          Um 04:00 ist kein Tisch offen - es gibt nichts zu uebernehmen, die
@@ -26966,7 +26879,13 @@ function App() {
      eigene TSE-Signatur, eigener Zahlungsbeleg. Danach werden genau die
      bezahlten Mengen vom Tisch abgezogen, damit der Tisch mit dem
      Restbetrag weiterlaeuft. */
-  const belksTeilzahlung = async (tid, gastItems, trinkgeld, rabatt, gastNr) => {
+  /* === v469: DIE ZAHLART GEHOERT ZUR ZAHLUNG ===
+     Hier stand die Zahlart fest auf "Karte" - weil bis v468 nur Karten
+     sofort gebucht wurden. Jetzt kann auch eine Barzahlung sofort gebucht
+     werden ("Bezahlt und drucken"), und dann muss auf dem Beleg und im
+     Tagesbericht Bar stehen. Eine falsche Zahlart faellt beim Kassensturz
+     auf: die Schublade stimmt dann nicht mit dem Bericht ueberein. */
+  const belksTeilzahlung = async (tid, gastItems, trinkgeld, rabatt, gastNr, payMethod = "Karte") => {
     try {
       if (String(tid).startsWith("ta_")) return;      // nur Tische, kein Takeaway
       const o = tableOrders[tid];
@@ -26977,19 +26896,19 @@ function App() {
       const _bonNr = await genNr();      /* v420 */
       let _tse = null;
       try {
-        _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod: "Karte", items: gastItems, tableId: tid });
+        _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod: payMethod, items: gastItems, tableId: tid });   /* v469 */
       } catch (e) { console.warn("TSE Signatur Fehler (Teilzahlung):", e); }
 
       const _label = (o.label || ("Tisch " + tid)) + " · Gast " + gastNr;
       setCompletedOrders(p => [...p, Object.assign({}, o, {
         items: gastItems.map(i => Object.assign({}, i)),
         time: new Date(), tableId: tid, label: _label,
-        payMethod: "Karte", trinkgeld: trinkgeld || 0, rabatt: rabatt || 0,
+        payMethod: payMethod, trinkgeld: trinkgeld || 0, rabatt: rabatt || 0,   /* v469 */
         bonNr: _bonNr, total: orderTotal, tse: _tse, teilzahlung: true
       })]);
 
       try {
-        const bonLines = buildZahlungLines(gastItems, orderTotal, trinkgeld || 0, "Karte");
+        const bonLines = buildZahlungLines(gastItems, orderTotal, trinkgeld || 0, payMethod);   /* v469 */
         printBon("💳 ZAHLUNG — " + _label, bonLines, _label, _bonNr, new Date(), null, printerSettings, _tse, 'kunde');
       } catch (e) { console.warn("Bondruck (Teilzahlung):", e); }
 
@@ -27023,7 +26942,11 @@ function App() {
     setActiveTable(null);
   };
 
-  const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0, loyaltyPhone = null, redeemedPts = 0, splitDetails = null, gutscheinBetrag = 0, lieferFee = 0) => {
+  /* v469: "ohneBon" kommt vom Knopf "Bezahlt". Gebucht und signiert wird
+     genau wie sonst - nur der Ausdruck bleibt aus. Das spart Papier, wenn
+     der Gast keinen Beleg will. Die Belegausgabepflicht nach
+     Sec. 146a Abs. 2 AO bleibt Sache des Betreibers. */
+  const completeOrder = async (tid, payMethod, trinkgeld = 0, rabatt = 0, loyaltyPhone = null, redeemedPts = 0, splitDetails = null, gutscheinBetrag = 0, lieferFee = 0, ohneBon = false) => {
     const isTA = String(tid).startsWith("ta_");
     // Auto-deduct inventory: match item names to inventory articles
     const autoDeductItems = isTA
@@ -27094,7 +27017,8 @@ function App() {
             /* v296: "Takeaway" allein sagt dem Fahrer und dem Gast nichts.
                Auf dem Bon muss stehen, ob abgeholt oder geliefert wird. */
             const _taTyp = ta.customerStreet ? "Lieferung" : "Abholung";
-            printBon("💳 ZAHLUNG — Takeaway " + _taTyp, bonLines,
+
+            if (!ohneBon) printBon("💳 ZAHLUNG — Takeaway " + _taTyp, bonLines,
                      "Takeaway " + _taTyp + (_taNr ? (" #" + _taNr) : ""), _bonNr, new Date(),
                      delivery, printerSettings, _tse, 'kunde');
           } catch(e){ console.warn("Bondruck:", e); }
@@ -27156,7 +27080,7 @@ function App() {
           try {
             const bonLines = buildZahlungLines(o.items||[], orderTotal, trinkgeld, payMethod);
             const delivery = o.customerName ? {name:o.customerName,phone:o.customerPhone,street:o.customerStreet,city:o.customerCity} : null;
-            printBon("💳 ZAHLUNG — Tisch " + tid, bonLines, o.label||("Tisch "+tid), _bonNr, new Date(), delivery, printerSettings, _tse, 'kunde');
+            if (!ohneBon) printBon("💳 ZAHLUNG — Tisch " + tid, bonLines, o.label||("Tisch "+tid), _bonNr, new Date(), delivery, printerSettings, _tse, 'kunde');   /* v469 */
           } catch(e){ console.warn("Bondruck:", e); }
         }
         // Auto Loyalty Points: Eingabe kann Telefon ODER Kundennummer (KD-xxxx) sein
@@ -29350,7 +29274,7 @@ function App() {
         });
       } catch(e) { console.warn('v423 Bon-Merker:', e); }
     },
-    onComplete: (method, tg, rabatt, usedGutschein, loyaltyPhone, redeemedPts, splitDetails) => {
+    onComplete: (method, tg, rabatt, usedGutschein, loyaltyPhone, redeemedPts, splitDetails, ohneBon) => {   /* v469 */
       if(usedGutschein && setGutscheine) {
         setGutscheine(prev => prev.map(g => g.id === usedGutschein.id ? {
           ...g,
@@ -29370,9 +29294,9 @@ function App() {
           return n;
         });
       } catch(e){}
-      completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts, splitDetails, usedGutschein ? (usedGutschein.rabatt||0) : 0, checkout.lieferFee || 0);   // v330
+      completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts, splitDetails, usedGutschein ? (usedGutschein.rabatt||0) : 0, checkout.lieferFee || 0, !!ohneBon);   // v330 / v469
     },
-    onTeilzahlung: (gastItems, tg, rabatt, gastNr) => belksTeilzahlung(checkout.tableId, gastItems, tg, rabatt, gastNr),
+    onTeilzahlung: (gastItems, tg, rabatt, gastNr, payMethod) => belksTeilzahlung(checkout.tableId, gastItems, tg, rabatt, gastNr, payMethod),   /* v469 */
     onNurKarte: () => belksTischOhneBuchung(checkout.tableId),
     gutscheine: gutscheine,
     setGutscheine: setGutscheine,
