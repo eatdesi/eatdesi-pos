@@ -819,8 +819,11 @@ footer .fl:hover{color:var(--gold)}
 <script>
 /* ====================================================================
    eatDeSi WEBSITE · Teil 1 (Public)
-   Webshop-Bestellungen -> Supabase eatdesi_orders (source WEBSHOP)
-   Anfragen (Catering/Buffet/Feier/Reservierung) -> pos_state Queue
+   Webshop-Bestellungen -> Serverfunktion belks_webshop_bestellen
+     (Rueckfall auf eatdesi_orders nur, solange die Funktion fehlt)
+   Anfragen (Catering/Buffet/Feier/Reservierung) -> belks_anfrage_neu
+   Admin-Einstellungen -> belks_website_config_speichern (PIN auf dem Server)
+   Stand v2026-09-11a
    ==================================================================== */
 
 const SUPA_URL = 'https://myaidcfmssfhzdatsqiv.supabase.co';
@@ -1465,8 +1468,7 @@ async function placeOrder(){
     customer_email:email||null,
     customer_street:addr||null,note:orderNote,source:'WEBSHOP',created_at:new Date().toISOString(),storniert:false};
   try{
-    const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders',{method:'POST',
-      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r=await belksBestellungPosten(body);
     if(r.ok||r.status===201||r.status===409){
       var consent=true; try{ var cb=document.getElementById('f_saveacct'); if(cb) consent=!!cb.checked; }catch(e){}
       cart=[];updateCart();window._redeemWanted=false;showDone(bonNr,total,isDeliv);
@@ -1484,9 +1486,7 @@ async function placeOrder(){
   }catch(e){btn.disabled=false;btn.textContent='Erneut absenden';toast('⚠️ Senden fehlgeschlagen');console.warn(e);}
 }
 async function retryMinimal(bonNr,tableId,items,total,pay,name,phone,note){
-  try{const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders',{method:'POST',
-    headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
-    body:JSON.stringify({location_id:LOCATION_ID,bon_nr:bonNr,table_id:tableId+' · '+note,items:JSON.stringify(items),total,payment:pay,customer_name:name,customer_phone:phone,source:'WEBSHOP',created_at:new Date().toISOString(),storniert:false})});
+  try{const r=await belksBestellungPosten({location_id:LOCATION_ID,bon_nr:bonNr,table_id:tableId+' · '+note,items:JSON.stringify(items),total,payment:pay,customer_name:name,customer_phone:phone,source:'WEBSHOP',created_at:new Date().toISOString(),storniert:false});
     return r.ok||r.status===201||r.status===409;}catch(e){return false;}
 }
 function showDone(bonNr,total,isDeliv){
@@ -1503,7 +1503,7 @@ function showDone(bonNr,total,isDeliv){
 }
 
 /* ====================================================================
-   LIVE-STATUS-TRACKING: liest note-Marker aus Supabase eatdesi_orders
+   LIVE-STATUS-TRACKING: fragt belks_bestellstatus (nur Marker + Zeit)
    [NEU] -> wird geprüft | [OK:min] -> bestätigt | [KOCHT] -> Küche
    [FERTIG] -> fertig | [GELIEFERT]/[ABGELEHNT] -> Ende
    ==================================================================== */
@@ -1848,6 +1848,68 @@ async function kundeRPC(fn, body){
     if(!r.ok){ console.warn('RPC '+fn+' HTTP '+r.status); return null; }
     return await r.json();
   }catch(e){ console.warn('RPC '+fn, e); return null; }
+}
+
+/* ═══ v2026-09-11a: SCHREIBEN NUR NOCH UEBER DEN SERVER ═══
+   Bestellungen und Admin-Einstellungen gingen bisher mit dem anonymen
+   Schluessel direkt in die Tabellen. Deshalb mussten diese Tabellen fuer
+   JEDEN offen stehen. Jetzt prueft eine Serverfunktion, was hinein darf -
+   dann koennen die Tabellen fuer Fremde geschlossen werden.
+
+   Rueckfall auf den alten Weg NUR, wenn die Funktion noch nicht existiert
+   (404 / PGRST202 / 42883). Bei jedem anderen Fehler NICHT - sonst wuerde
+   eine abgelehnte Bestellung heimlich am Server vorbei geschrieben. */
+async function belksRpcRoh(fn, body){
+  try{
+    const r=await fetch(SUPA_URL+'/rest/v1/rpc/'+fn,{method:'POST',
+      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify(body)});
+    let j=null; try{ j=await r.json(); }catch(e){}
+    const code=(j&&j.code)?String(j.code):'';
+    const fehlt=(r.status===404||code==='PGRST202'||code==='42883');
+    return {ok:r.ok, http:r.status, json:j, fehlt:fehlt};
+  }catch(e){ return {ok:false, http:0, json:null, fehlt:false}; }
+}
+/* Die Zeit setzt der Server. Die Uhr im Handy des Gastes kann falsch gehen -
+   genau der Fehler, der in der Kasse Artikel verschwinden liess (v459). */
+async function belksBestellungPosten(body){
+  const daten=Object.assign({},body);
+  delete daten.created_at; delete daten.source; delete daten.storniert;
+  const a=await belksRpcRoh('belks_webshop_bestellen',{p_daten:daten});
+  if(a.ok && a.json && a.json.ok) return {ok:true, status:201};
+  if(!a.fehlt){
+    console.warn('Webshop-Bestellung nicht angenommen', a.http, a.json);
+    return {ok:false, status:0, grund:(a.json&&a.json.grund)||('HTTP '+a.http)};
+  }
+  const r=await fetch(SUPA_URL+'/rest/v1/eatdesi_orders',{method:'POST',
+    headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify(body)});
+  return {ok:r.ok, status:r.status};
+}
+async function belksConfigSchreiben(cfg){
+  const wert=JSON.stringify(cfg);
+  if(!window._adminAltweg){
+    const a=await belksRpcRoh('belks_website_config_speichern',{p_loc:LOCATION_ID,p_pin:String(window._adminPin||''),p_wert:wert});
+    if(a.ok && a.json && a.json.ok) return {ok:true, status:200};
+    if(!a.fehlt){
+      const g=(a.json&&a.json.grund)||'';
+      if(g==='falsch'||g==='gesperrt'||g==='kein_pin'){ window._adminAuthed=false; window._adminPin=null; }
+      return {ok:false, status:0, grund:g||('HTTP '+a.http)};
+    }
+  }
+  const r=await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
+    headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
+    body:JSON.stringify({key:CONFIG_KEY,value:wert,updated_at:new Date().toISOString()})});
+  return {ok:r.ok, status:r.status};
+}
+function belksSpeicherFehler(r, mitFenster){
+  const g=(r&&r.grund)||'';
+  const pinWeg=(g==='falsch'||g==='gesperrt'||g==='kein_pin');
+  const text=pinWeg ? 'Nicht gespeichert: Der PIN gilt nicht mehr. Bitte neu anmelden.'
+                    : 'Nicht gespeichert ('+(g||('Status '+(r&&r.status)))+'). Internet prüfen und nochmal versuchen.';
+  toast('⚠️ '+text);
+  if(mitFenster) alert('⚠️ '+text);
+  if(pinWeg){ try{ drawLogin(); }catch(e){} }
 }
 // Gibt es diese Nummer? -> {bekannt, hatPasswort, name}  (mehr nicht)
 async function kundeBekannt(phone){
@@ -2539,15 +2601,13 @@ async function loadMenuFromCloud(){
 async function saveConfig(){
   const cfg={zones:ZONES,offers:OFFERS,events:EVENTS,hours:HOURS_CFG,aiKey:AI_KEY,company:COMPANY,gallery:GALLERY,deliveryCfg:DELIVERY_CFG,restLoc:REST_LOC,services:SERVICES};
   try{
-    const r=await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
-      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
-      body:JSON.stringify({key:CONFIG_KEY,value:JSON.stringify(cfg),updated_at:new Date().toISOString()})});
+    const r=await belksConfigSchreiben(cfg);
     if(r.ok||r.status===201||r.status===409){
       toast('✓ Gespeichert');
       try{ var _sb=document.getElementById('adminSaveTop'); if(_sb){ _sb.textContent='✓ Gespeichert'; setTimeout(function(){ _sb.textContent='💾 Speichern'; },1600); } }catch(e){}
       renderOffers();renderEvents();checkOpen();applyCompany();renderGallery();
     }
-    else toast('⚠️ Speichern fehlgeschlagen');
+    else belksSpeicherFehler(r);
   }catch(e){toast('⚠️ Speichern fehlgeschlagen');}
 }
 function renderOffers(){
@@ -2667,7 +2727,11 @@ function legalAGB(){
 /* ====================================================================
    ADMIN PANEL
    ==================================================================== */
-const ADMIN_PIN='0000';
+/* v2026-09-11a: Der PIN wird auf dem Server geprueft (belks_website_pin_pruefen),
+   mit Sperre nach 5 Fehlversuchen. Frueher stand er hier im Klartext - jeder
+   konnte ihn im Quelltext lesen, und gespeichert wurde ohnehin mit dem
+   anonymen Schluessel. '0000' gilt NUR, solange die Serverfunktion noch fehlt. */
+const ADMIN_PIN_ALT='0000';
 let pinBuf='', adminTabCur='reports';
 function openAdmin(){$('#admin').classList.add('show');document.body.style.overflow='hidden';
   if(window._adminAuthed){showAdminTabs();adminTab(adminTabCur);} else drawLogin();}
@@ -2688,9 +2752,34 @@ function updatePinDots(){const d=$('#pinDots');if(!d)return;d.querySelectorAll('
 function pinPush(n){if(pinBuf.length>=4)return;pinBuf+=n;updatePinDots();if(pinBuf.length===4)setTimeout(checkPin,150);}
 function pinDel(){pinBuf=pinBuf.slice(0,-1);updatePinDots();}
 function pinClear(){pinBuf='';updatePinDots();}
-function checkPin(){
-  if(pinBuf===ADMIN_PIN){window._adminAuthed=true;showAdminTabs();adminTab('reports');}
-  else{toast('Falscher PIN');pinBuf='';updatePinDots();}
+async function checkPin(){
+  if(window._pinLaeuft) return;
+  window._pinLaeuft=true;
+  const eingabe=pinBuf;
+  try{
+    const a=await belksRpcRoh('belks_website_pin_pruefen',{p_loc:LOCATION_ID,p_pin:eingabe});
+    if(a.ok && a.json && a.json.ok){
+      window._adminPin=eingabe; window._adminAltweg=false; window._adminAuthed=true;
+      showAdminTabs(); adminTab('reports'); return;
+    }
+    if(a.fehlt){
+      /* Serverfunktion noch nicht eingerichtet: alter Weg, aber laut. */
+      if(eingabe===ADMIN_PIN_ALT){
+        window._adminPin=null; window._adminAltweg=true; window._adminAuthed=true;
+        showAdminTabs(); adminTab('reports');
+        toast('⚠️ Server-PIN ist noch nicht eingerichtet');
+        return;
+      }
+      toast('Falscher PIN');
+    } else {
+      const g=a.json&&a.json.grund;
+      if(g==='gesperrt') toast('Zu viele Fehlversuche. In '+((a.json&&a.json.minuten)||15)+' Min erneut versuchen.');
+      else if(g==='kein_pin') toast('Für diesen Standort ist noch kein Admin-PIN eingerichtet.');
+      else if(g==='falsch') toast('Falscher PIN'+((a.json&&a.json.rest)?(' – noch '+a.json.rest+' Versuche'):''));
+      else toast('PIN konnte nicht geprüft werden. Internet prüfen.');
+    }
+    pinBuf=''; updatePinDots();
+  } finally { window._pinLaeuft=false; }
 }
 
 function adminTab(t){adminTabCur=t;document.querySelectorAll('#adminTabs button').forEach(b=>b.classList.toggle('on',b.dataset.at===t));
@@ -3185,9 +3274,7 @@ async function saveAiKey(){
   // bestehende Config laden, aiKey ergaenzen, zurueckschreiben -> nichts geht verloren
   const cfg={zones:ZONES,offers:OFFERS,events:EVENTS,hours:HOURS_CFG,aiKey:AI_KEY,company:COMPANY,gallery:GALLERY,deliveryCfg:DELIVERY_CFG,restLoc:REST_LOC,services:SERVICES};
   try{
-    const r=await fetch(SUPA_URL+'/rest/v1/pos_state?on_conflict=key',{method:'POST',
-      headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},
-      body:JSON.stringify({key:CONFIG_KEY,value:JSON.stringify(cfg),updated_at:new Date().toISOString()})});
+    const r=await belksConfigSchreiben(cfg);
     if(r.ok||r.status===201||r.status===409){
       // Gegenpruefung: wirklich in Supabase angekommen?
       let ok=false;
@@ -3199,8 +3286,7 @@ async function saveAiKey(){
       if(ok) alert('✓ Gemini-Key gespeichert und geprueft.\n\nDie Assistentin fuehrt jetzt freie Gespraeche. Lade die Gaeste-Seite einmal neu, damit der Key dort aktiv wird.');
       else alert('✓ Gespeichert, aber Gegenpruefung unklar.\n\nBitte teste im Gaeste-Chat. Falls dort weiter Standardantworten kommen, Seite neu laden.');
     } else {
-      toast('⚠️ Speichern fehlgeschlagen');
-      alert('⚠️ Speichern fehlgeschlagen (Status '+r.status+').\n\nInternet pruefen und nochmal versuchen.');
+      belksSpeicherFehler(r, true);
     }
   }catch(e){
     toast('⚠️ Speichern fehlgeschlagen');
