@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v472</title>
+<title>eatDeSi POS v473</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -25413,7 +25413,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v472"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v473"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27145,7 +27145,15 @@ function App() {
             setCompletedOrders(p => p.map(o => o.bonNr === _bonNr
               ? Object.assign({}, o, { punkteVergeben: pts, punkteKunde: (_kd && _kd.id) || null })
               : o));
-            setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts} : c));
+            /* v473: KUNDENPUNKTE - DIESELBE LEHRE WIE BEI DEN ABHOLUNGEN (v463) ===
+     Ein Kunde ist EIN Datensatz. Aendert Geraet A die Punkte und Geraet B
+     kurz danach den Namen, gewinnt beim Zusammenfuehren die GANZE neuere
+     Fassung - die Punkte-Aenderung von A war dann weg, obwohl niemand sie
+     zurueckgenommen hat. Ohne eigenen Zeitstempel zaehlte hier sogar ein
+     zufaelliges anderes Feld (sonst 0) als Zeitpunkt - der aelteste Datensatz
+     haette dann IMMER verloren. Jede Punkte-Aenderung bekommt jetzt ihre
+     eigene Uhrzeit, wie jede Abholungs-Aenderung seit v463. */
+setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, geaendert: window.belksJetzt()} : c));
           }
         }
       }
@@ -27212,12 +27220,12 @@ function App() {
             setCompletedOrders(p => p.map(o => o.bonNr === _bonNr
               ? Object.assign({}, o, { punkteVergeben: pts, punkteKunde: (_kd && _kd.id) || null })
               : o));
-            setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:Math.max(0,(c.points||0) - (redeemedPts||0) + pts), visits:(c.visits||0)+1, lastVisit:new Date().toISOString(), pointsHistory:[...(c.pointsHistory||[]), ...(redeemedPts>0?[{date:new Date().toLocaleDateString("de-DE"),pts:-redeemedPts,note:"Eingelöst beim Kauf"}]:[]), {date:new Date().toLocaleDateString("de-DE"),pts:pts,note:"Gesammelt"}]} : c));
+            setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:Math.max(0,(c.points||0) - (redeemedPts||0) + pts), visits:(c.visits||0)+1, lastVisit:new Date().toISOString(), geaendert: window.belksJetzt(), pointsHistory:[...(c.pointsHistory||[]), ...(redeemedPts>0?[{date:new Date().toLocaleDateString("de-DE"),pts:-redeemedPts,note:"Eingelöst beim Kauf"}]:[]), {date:new Date().toLocaleDateString("de-DE"),pts:pts,note:"Gesammelt"}]} : c));
           } else {
             // neuen Stammkunden anlegen (nur wenn es wie eine Telefonnummer aussieht)
             const looksLikePhone = /^[+]?\d{5,}$/.test(norm);
             if (looksLikePhone) {
-              setCustomers(p => [...p, { id:"c_"+Date.now(), kundenNr:lookup, name:(o.customerName||"Gast "+lookup.slice(-4)), phone:lookup, points:pts, visits:1, lastVisit:new Date().toISOString(), since:new Date().toISOString(), time:new Date().toISOString() }]);
+              setCustomers(p => [...p, { id:"c_"+Date.now(), kundenNr:lookup, name:(o.customerName||"Gast "+lookup.slice(-4)), phone:lookup, points:pts, visits:1, lastVisit:new Date().toISOString(), geaendert: window.belksJetzt(), since:new Date().toISOString(), time:new Date().toISOString() }]);
             }
           }
         }
@@ -27377,6 +27385,9 @@ function App() {
               if (ci !== _idx) return c;
               return Object.assign({}, c, {
                 points: Math.max(0, (c.points||0) - _pts),
+                /* v473: siehe Begruendung oben - auch die Ruecknahme beim Storno
+                   braucht ihre eigene Uhrzeit. */
+                geaendert: window.belksJetzt(),
                 /* Besuche runter, aber nie unter null - sonst kippt der
                    Zaehler ins Minus, wenn zweimal storniert wird. */
                 visits: Math.max(0, (c.visits||0) - 1),
