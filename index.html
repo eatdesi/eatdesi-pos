@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v471</title>
+<title>eatDeSi POS v472</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -10929,10 +10929,11 @@ function SplitPersonPay({
       color: "#888"
     }
   }, fmt(personTotal))), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      setPStep("sumup");
-      setTimeout(() => onPaid("Karte", tgP), 1800);
-    },
+    /* v472: Hier bestaetigte sich die Karte nach 1,8 Sekunden SELBST -
+       "SumUp Terminal aktiv..." war nur eine Animation. Die Zahlung galt
+       als erhalten, ohne dass jemand bezahlt hatte. Jetzt bestaetigt der
+       Kellner, und zwar mit denselben zwei Knoepfen wie ueberall. */
+    onClick: () => setPStep("sumup"),
     style: {
       background: "#fff",
       border: `2px solid ${C.orange}`,
@@ -10979,23 +10980,21 @@ function SplitPersonPay({
       fontSize: 12,
       marginTop: 6
     }
-  }, "SumUp Terminal aktiv..."), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      justifyContent: "center",
-      gap: 6,
-      marginTop: 10
-    }
-  }, [0, 1, 2].map(i => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: {
-      width: 8,
-      height: 8,
-      borderRadius: "50%",
-      background: C.orange,
-      animation: `bl 1s ${i * .3}s infinite`
-    }
-  })))));
+  }, "Karte am SumUp bezahlen \u2013 danach hier best\u00e4tigen"),
+  /*#__PURE__*/React.createElement("button", {
+    onClick: () => { try { window.sumupPay(personTotal, "Person " + (personIdx + 1)); } catch (e) {} },
+    style: { width: "100%", padding: "12px 0", marginTop: 12, borderRadius: 12, border: "none", background: C.orange, color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 800, fontSize: 14 }
+  }, "\uD83D\uDCB3 SumUp \u00f6ffnen \u2014 ", fmt(personTotal)),
+  /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 12 } },
+    /*#__PURE__*/React.createElement("button", { onClick: () => setPStep("pay"),
+      style: { flex: 1, padding: 11, borderRadius: 10, border: "2px solid #ddd", background: "#fff", color: "#666", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }
+    }, "\u2190 Zur\u00fcck"),
+    /*#__PURE__*/React.createElement("button", { onClick: () => onPaid("Karte", tgP, true),
+      style: { flex: 1, padding: 11, borderRadius: 10, border: "2px solid " + C.green, background: "#fff", color: C.green, cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }
+    }, "\u2705 Bezahlt"),
+    /*#__PURE__*/React.createElement("button", { onClick: () => onPaid("Karte", tgP, false),
+      style: { flex: 1.4, padding: 11, borderRadius: 10, border: "none", background: C.green, color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }
+    }, "\uD83D\uDDA8\uFE0F Bezahlt und drucken"))));
 }
 
 // --- Item Assignment for Split (Article Mode) ---------------------------------
@@ -11329,7 +11328,7 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
         /*#__PURE__*/React.createElement("button", { onClick:()=>setPayMethod("Bar"),
           style:{ padding:"13px 0", borderRadius:12, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
         }, "💵 Bar"),
-        /*#__PURE__*/React.createElement("button", { onClick:()=>confirmPay("Karte"),
+        /*#__PURE__*/React.createElement("button", { onClick:()=>setPayMethod("Karte"),   /* v472: erst waehlen, dann buchen */
           style:{ padding:"13px 0", borderRadius:12, border:"none", background:C.orange, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
         }, "💳 Karte"),
         /*#__PURE__*/React.createElement("button", { onClick:()=>{ try{ window.sumupPay((Number(selTotal)||0)+(Number(tgVal)||0), String(label||'')+" · Gast "+(gastNr+1)); }catch(e){} },
@@ -11378,6 +11377,34 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
           onClick:()=>confirmPay("Bar", true),
           disabled:!cashGiven||cashChange<0,
           style:{ flex:1.4, padding:11, borderRadius:10, border:"none", background:(!cashGiven||cashChange<0)?"#ccc":C.green, color:"#fff", cursor:(!cashGiven||cashChange<0)?"default":"pointer", fontFamily:"inherit", fontWeight:800, fontSize:13 }
+        }, "\uD83D\uDDA8\uFE0F Bezahlt und drucken")
+      )
+    ),
+
+    /* === v472: KARTE JE GAST - DIESELBEN ZWEI KNOEPFE WIE BAR ===
+       Bisher buchte ein Tipp auf "Karte" sofort UND druckte immer. Jetzt:
+       Betrag sehen, SumUp oeffnen, dann "Bezahlt" (gebucht und signiert,
+       kein Ausdruck) oder "Bezahlt und drucken". Die Karte wird in beiden
+       Faellen sofort gebucht - wie bisher. */
+    payMethod === "Karte" && /*#__PURE__*/React.createElement("div", null,
+      /*#__PURE__*/React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", background:gastColor+"15", borderRadius:8, padding:"10px 12px", marginBottom:12, fontWeight:700, color:gastColor, fontSize:15 } },
+        /*#__PURE__*/React.createElement("span", null, "Gast ", gastNr+1, " \u2014 Karte"),
+        /*#__PURE__*/React.createElement("span", null, fmt(totalWithTG))
+      ),
+      /*#__PURE__*/React.createElement("button", { onClick:()=>{ try{ window.sumupPay(totalWithTG, String(label||'')+" \u00b7 Gast "+(gastNr+1)); }catch(e){} },
+        style:{ width:"100%", padding:"13px 0", borderRadius:12, border:"none", background:C.orange, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:15, marginBottom:8 }
+      }, "\uD83D\uDCB3 SumUp \u00f6ffnen \u2014 ", fmt(totalWithTG)),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#e65100", fontWeight:700, textAlign:"center", marginBottom:12 } },
+        "Nach der Kartenzahlung hier best\u00e4tigen."),
+      /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:10 } },
+        /*#__PURE__*/React.createElement("button", { onClick:()=>setPayMethod(null),
+          style:{ flex:1, padding:11, borderRadius:10, border:"2px solid #ddd", background:"#fff", color:"#666", cursor:"pointer", fontFamily:"inherit", fontWeight:600 }
+        }, "\u2190 Zur\u00fcck"),
+        /*#__PURE__*/React.createElement("button", { onClick:()=>confirmPay("Karte", false),
+          style:{ flex:1, padding:11, borderRadius:10, border:"2px solid "+C.green, background:"#fff", color:C.green, cursor:"pointer", fontFamily:"inherit", fontWeight:700 }
+        }, "\u2705 Bezahlt"),
+        /*#__PURE__*/React.createElement("button", { onClick:()=>confirmPay("Karte", true),
+          style:{ flex:1.4, padding:11, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700 }
         }, "\uD83D\uDDA8\uFE0F Bezahlt und drucken")
       )
     )
@@ -11582,7 +11609,11 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
   const finishFull = (method, extra = {}) => {
     setDone({ method, total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: tg, totalWithTG, gutschein: gutscheinAbzug, ...extra });
     setStep("done");
-    rawbtZahlBon(method, totalNachRabatt, tg, items, label);
+    /* v472: Dieser Zusatz-Druck lief bei JEDER Zahlung - auch nach "Bezahlt",
+       wo gar nichts gedruckt werden soll. Er traegt keine Signatur. Nach
+       "Bezahlt" bleibt er jetzt aus; der signierte Beleg kommt wie bisher
+       beim Tisch-Freigeben. */
+    if (!extra || !extra.ohneBon) rawbtZahlBon(method, totalNachRabatt, tg, items, label);
   };
   const finishMix = () => {
     const bar = parseFloat(mixBarAmt) || 0;
@@ -11590,13 +11621,17 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
     setDone({ method: "Bar+Karte", total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: tg, totalWithTG, gutschein: gutscheinAbzug, mixBar: bar, mixKarte: karte });
     setStep("done");
   };
-  const handleSplitPaid = (method, personTG = 0) => {
+  const handleSplitPaid = (method, personTG = 0, ohneBon = false) => {   /* v472 */
     const amt = isLastSplit ? Math.round(splitRemaining * 100) / 100 : getSplitAmount(currentPersonIdx);
-    const newPaid = [...splitPaid, { amount: amt, method, trinkgeld: personTG }];
+    const newPaid = [...splitPaid, { amount: amt, method, trinkgeld: personTG, ohneBon: !!ohneBon }];
     setSplitPaid(newPaid);
     if (newPaid.length === splitPersons) {
       const totalTG = newPaid.reduce((s, p) => s + p.trinkgeld, 0);
-      setDone({ method: "Getrennt", total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: totalTG, totalWithTG: zuZahlen + totalTG, gutschein: gutscheinAbzug, splitDetails: newPaid });
+      /* v472: Ein gemeinsamer Beleg fuer alle. Er entfaellt nur, wenn JEDER mit
+         Karte und "Bezahlt" gezahlt hat. Sobald jemand bar zahlt, bleibt es
+         wie bisher (Beleg), und wer "Bezahlt und drucken" waehlt, bekommt ihn. */
+      const _ohneBon = newPaid.every(p => p.method === "Karte" && p.ohneBon);
+      setDone({ method: "Getrennt", total: totalNachRabatt, rabatt: rabattGesamt, trinkgeld: totalTG, totalWithTG: zuZahlen + totalTG, gutschein: gutscheinAbzug, splitDetails: newPaid, ohneBon: _ohneBon });
       setStep("done");
     }
   };
@@ -11991,7 +12026,11 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
                Tisch-Freigeben in einem Zug gebucht, wie bisher. */
             const _sofort = (method === "Karte") || !!sofortDrucken;
             if (_sofort && typeof onTeilzahlung === "function") {
-              onTeilzahlung(gastItems, tg, (gastRabatt||0), einzelnGast+1, method);
+              /* v472: Bar wird hier nur mit "drucken" sofort gebucht - also
+                 immer mit Beleg. Karte wird immer sofort gebucht, gedruckt
+                 aber nur, wenn der Kellner es gewaehlt hat. */
+              const _drucken = (method === "Karte") ? !!sofortDrucken : true;
+              onTeilzahlung(gastItems, tg, (gastRabatt||0), einzelnGast+1, method, _drucken);
             }
             // remove paid items from remaining
             const paidKeys = new Set(gastItems.map(i=>i._key));
@@ -12114,9 +12153,17 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
             /*#__PURE__*/React.createElement("button", { onClick:()=>setStep("main"),
               style:{ flex:1, padding:12, borderRadius:10, border:"2px solid #ddd", background:"#fff", color:"#666", cursor:"pointer", fontFamily:"inherit", fontWeight:600, fontSize:13 }
             }, "\u2190 Zur\xFCck"),
+            /* === v472: KARTE WIE BAR - ZWEI KNOEPFE ===
+               Bisher gab es nur "Karte bezahlt - Bestaetigen", und der Beleg
+               wurde immer gedruckt. Jetzt entscheidet der Kellner wie bei Bar:
+               "Bezahlt" bucht und signiert ohne Ausdruck, "Bezahlt und drucken"
+               bucht, signiert und druckt. Gebucht wird in beiden Faellen gleich. */
+            /*#__PURE__*/React.createElement("button", { onClick:()=>finishFull("Karte", { ohneBon:true }),
+              style:{ flex:1, padding:12, borderRadius:10, border:"2px solid "+C.green, background:"#fff", color:C.green, cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
+            }, "\u2705 Bezahlt"),
             /*#__PURE__*/React.createElement("button", { onClick:()=>finishFull("Karte"),
-              style:{ flex:2, padding:12, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
-            }, "\u2705 Karte bezahlt \u2014 Best\xE4tigen")
+              style:{ flex:1.4, padding:12, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
+            }, "\uD83D\uDDA8\uFE0F Bezahlt und drucken")
           )
         ),
 
@@ -25366,7 +25413,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v471"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v472"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26947,7 +26994,7 @@ function App() {
      werden ("Bezahlt und drucken"), und dann muss auf dem Beleg und im
      Tagesbericht Bar stehen. Eine falsche Zahlart faellt beim Kassensturz
      auf: die Schublade stimmt dann nicht mit dem Bericht ueberein. */
-  const belksTeilzahlung = async (tid, gastItems, trinkgeld, rabatt, gastNr, payMethod = "Karte") => {
+  const belksTeilzahlung = async (tid, gastItems, trinkgeld, rabatt, gastNr, payMethod = "Karte", drucken = true) => {   /* v472 */
     try {
       if (String(tid).startsWith("ta_")) return;      // nur Tische, kein Takeaway
       const o = tableOrders[tid];
@@ -26969,7 +27016,9 @@ function App() {
         bonNr: _bonNr, total: orderTotal, tse: _tse, teilzahlung: true
       })]);
 
-      try {
+      /* v472: Gebucht und signiert ist oben - der Ausdruck ist die Wahl des
+         Kellners ("Bezahlt" oder "Bezahlt und drucken"). */
+      if (drucken !== false) try {
         const bonLines = buildZahlungLines(gastItems, orderTotal, trinkgeld || 0, payMethod);   /* v469 */
         printBon("💳 ZAHLUNG — " + _label, bonLines, _label, _bonNr, new Date(), null, printerSettings, _tse, 'kunde');
       } catch (e) { console.warn("Bondruck (Teilzahlung):", e); }
@@ -29358,7 +29407,7 @@ function App() {
       } catch(e){}
       completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts, splitDetails, usedGutschein ? (usedGutschein.rabatt||0) : 0, checkout.lieferFee || 0, !!ohneBon);   // v330 / v469
     },
-    onTeilzahlung: (gastItems, tg, rabatt, gastNr, payMethod) => belksTeilzahlung(checkout.tableId, gastItems, tg, rabatt, gastNr, payMethod),   /* v469 */
+    onTeilzahlung: (gastItems, tg, rabatt, gastNr, payMethod, drucken) => belksTeilzahlung(checkout.tableId, gastItems, tg, rabatt, gastNr, payMethod, drucken),   /* v472 */   /* v469 */
     onNurKarte: () => belksTischOhneBuchung(checkout.tableId),
     gutscheine: gutscheine,
     setGutscheine: setGutscheine,
