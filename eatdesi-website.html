@@ -572,7 +572,7 @@ footer .fl:hover{color:var(--gold)}
       </div>
       <div class="hero-badges">
         <div>⏱️ <b>25–35 Min</b> Zubereitung</div>
-        <div>🛵 Lieferung <b>ab 9,90 €</b></div>
+        <div>🛵 Lieferung <b id="badgeLiefer">ab 9,90 €</b></div>
         <div data-co-street>📍 <b>Brunnenallee 30</b></div>
       </div>
     </div>
@@ -580,10 +580,10 @@ footer .fl:hover{color:var(--gold)}
       <span class="ribbon">Jetzt geöffnet?</span>
       <h3 data-co-heute>eatDeSi heute</h3>
       <div class="statusline" id="openStatus"><span class="dot"></span><span>Lädt…</span></div>
-      <div class="hc-row"><span class="k">Öffnungszeiten</span><span class="v">11:30 – 21:30</span></div>
-      <div class="hc-row"><span class="k">Ruhetag</span><span class="v">Dienstag</span></div>
+      <div class="hc-row"><span class="k">Öffnungszeiten</span><span class="v" id="hcZeiten">11:30 – 21:30</span></div>
+      <div class="hc-row"><span class="k">Ruhetag</span><span class="v" id="hcRuhetag">Dienstag</span></div>
       <div class="hc-row"><span class="k">Abholung</span><span class="v">Kostenlos</span></div>
-      <div class="hc-row"><span class="k">Lieferung ab</span><span class="v">9,90 € · Zone 1</span></div>
+      <div class="hc-row"><span class="k">Lieferung ab</span><span class="v" id="hcLiefer">9,90 € · Zone 1</span></div>
       <button class="btn-pri" style="width:100%;margin-top:18px" onclick="openShopFromHero()">Bestellung starten →</button>
     </div>
   </div>
@@ -714,7 +714,7 @@ footer .fl:hover{color:var(--gold)}
       </div>
       <div>
         <h4>Öffnungszeiten</h4>
-        <p>Mo · 11:30 – 21:30<br><span style="color:var(--red)">Di · Ruhetag</span><br>Mi–So · 11:30 – 21:30</p>
+        <p id="footZeiten">Mo · 11:30 – 21:30<br><span style="color:var(--red)">Di · Ruhetag</span><br>Mi–So · 11:30 – 21:30</p>
       </div>
       <div>
         <h4>Kontakt</h4>
@@ -823,7 +823,7 @@ footer .fl:hover{color:var(--gold)}
      (Rueckfall auf eatdesi_orders nur, solange die Funktion fehlt)
    Anfragen (Catering/Buffet/Feier/Reservierung) -> belks_anfrage_neu
    Admin-Einstellungen -> belks_website_config_speichern (PIN auf dem Server)
-   Stand v2026-09-11a
+   Stand v2026-09-11b
    ==================================================================== */
 
 const SUPA_URL = 'https://myaidcfmssfhzdatsqiv.supabase.co';
@@ -1076,9 +1076,50 @@ function checkOpen(){
   const isOpen = d!==HOURS.closedDay && cur>=oh*60+om && cur<=ch*60+cm;
   const el=$('#openStatus');
   if(isOpen){ el.innerHTML='<span class="dot"></span><span style="color:#a4c46f">Jetzt geöffnet · bis '+HOURS.close+' Uhr</span>'; }
-  else if(d===HOURS.closedDay){ el.innerHTML='<span class="dot off"></span><span style="color:var(--red)">Heute Ruhetag (Dienstag)</span>'; }
+  else if(d===HOURS.closedDay){ el.innerHTML='<span class="dot off"></span><span style="color:var(--red)">Heute Ruhetag</span>'; }
   else { el.innerHTML='<span class="dot off"></span><span style="color:var(--red)">Aktuell geschlossen · ab '+HOURS.open+' Uhr</span>'; }
   window._isOpen=isOpen;
+  try{ belksZeitenAnzeigen(); }catch(e){}
+}
+
+/* v2026-09-11b: ZEITEN UND LIEFERUNG AUF DER STARTSEITE AUS DEN EINSTELLUNGEN.
+   Die Zeilen "Oeffnungszeiten", "Ruhetag", "Lieferung ab" und die Zeiten im
+   Fuss standen FEST im HTML (die Werte von Bad Wildungen). Die Pruefung
+   "geoeffnet/geschlossen" rechnete schon mit den gespeicherten Zeiten - die
+   Anzeige daneben nicht. Zwei Orte, die dasselbe wissen muessen.
+   Gesetzt wird nur Text (textContent), nie HTML aus den Einstellungen. */
+function belksZeitenAnzeigen(){
+  var TAGE=['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+  var KURZ=['So','Mo','Di','Mi','Do','Fr','Sa'];
+  var auf=String(HOURS.open||''), zu=String(HOURS.close||'');
+  var ruhe=(typeof HOURS.closedDay==='number' && HOURS.closedDay>=0 && HOURS.closedDay<=6) ? HOURS.closedDay : -1;
+  var spanne=auf+' – '+zu;
+  var e;
+  if((e=document.getElementById('hcZeiten'))) e.textContent=spanne;
+  if((e=document.getElementById('hcRuhetag'))) e.textContent=(ruhe>=0?TAGE[ruhe]:'Kein Ruhetag');
+  var z=(Array.isArray(ZONES)&&ZONES[0])?ZONES[0]:null;
+  if(z && z.min!=null && !isNaN(Number(z.min))){
+    var betrag=Number(z.min).toFixed(2).replace('.',',')+' €';
+    if((e=document.getElementById('hcLiefer'))) e.textContent=betrag+(z.name?(' · '+z.name):'');
+    if((e=document.getElementById('badgeLiefer'))) e.textContent='ab '+betrag;
+  }
+  var fuss=document.getElementById('footZeiten');
+  if(fuss){
+    /* Woche ab Montag; offene Tage am Stueck zusammenfassen (Mi–So). */
+    var folge=[1,2,3,4,5,6,0], zeilen=[], i=0;
+    while(i<folge.length){
+      if(folge[i]===ruhe){ zeilen.push({t:KURZ[folge[i]]+' · Ruhetag', rot:true}); i++; continue; }
+      var j=i; while(j+1<folge.length && folge[j+1]!==ruhe) j++;
+      var name=(i===j)?KURZ[folge[i]]:(KURZ[folge[i]]+'–'+KURZ[folge[j]]);
+      zeilen.push({t:name+' · '+spanne, rot:false}); i=j+1;
+    }
+    fuss.textContent='';
+    zeilen.forEach(function(z2,k){
+      if(k) fuss.appendChild(document.createElement('br'));
+      if(z2.rot){ var s=document.createElement('span'); s.style.color='var(--red)'; s.textContent=z2.t; fuss.appendChild(s); }
+      else fuss.appendChild(document.createTextNode(z2.t));
+    });
+  }
 }
 
 /* ====================================================================
