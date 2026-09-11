@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v470</title>
+<title>eatDeSi POS v471</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8074,10 +8074,33 @@ const BTPrint = {
         // mindestens 1 Leerzeichen zwischen Name und Preis -> Name max. (W - Preislänge - 1)
         var maxName = W - ri.length - 1;
         if(maxName < 1) maxName = 1;
-        if(l.length > maxName){ l = l.slice(0, maxName); }
-        var p = W - l.length - ri.length;   // Füll-Leerzeichen
-        if(p < 1) p = 1;
-        var rowTxt = l + ' '.repeat(p) + ri;
+        var rowTxt;
+        if(!ri && l.length > W){
+          /* ═══ v471: EINE NOTIZ WIRD UMGEBROCHEN, NICHT ABGESCHNITTEN ═══
+             Hier wurde jede Zeile auf die Breite gekuerzt - richtig fuer
+             "Artikel ... Preis", falsch fuer eine Zeile OHNE Preis. Genau das
+             sind Notizen: "Allergie Nuss, bitte ohne Sesam und ohne
+             Erdnussoel" kam als "Allergie Nuss, bitte ohne Sesam und ohne Er"
+             in der Kueche an. Der wichtigste Teil stand oft hinten. */
+          var _zl = [], _z = '', _breite = W;
+          l.split(/\s+/).forEach(function(wd){
+            while (wd.length > _breite) {
+              if (_z) { _zl.push(_z); _z = ''; _breite = W - 2; }
+              _zl.push(wd.slice(0, _breite)); wd = wd.slice(_breite); _breite = W - 2;
+            }
+            if (!wd) return;
+            if (!_z) _z = wd;
+            else if ((_z + ' ' + wd).length <= _breite) _z += ' ' + wd;
+            else { _zl.push(_z); _z = wd; _breite = W - 2; }
+          });
+          if (_z) _zl.push(_z);
+          rowTxt = _zl.map(function(t, k){ return (k ? '  ' : '') + t; }).join('\n');
+        } else {
+          if(l.length > maxName){ l = l.slice(0, maxName); }
+          var p = W - l.length - ri.length;   // Füll-Leerzeichen
+          if(p < 1) p = 1;
+          rowTxt = l + ' '.repeat(p) + ri;
+        }
         // GESAMT-Zeile (.row.bold): nur DIESE Zeile fett -> ESC E 1 ... ESC E 0
         // direkt in den Text einbetten (Chain-API b.bold() greift auf TM-m30 nicht).
         var isBoldRow = r.className && (''+r.className).indexOf('bold') !== -1;
@@ -10008,6 +10031,22 @@ function printOnlineBons(order, prepMin, printerCfg) {
       // nach jedem Artikel eine Leerzeile -> mehr Abstand, besser lesbar (wie Küche-Bon)
       return '<div class="row"><span>'+(it.qty||1)+'× '+(it.nr?it.nr+'. ':'')+it.name+'</span><span>'+fmt(lineTotal)+'</span></div>'+optLines(it)+'<div>&nbsp;</div>';
     }).join('');
+    /* ═══ v471: DER HINWEIS DES GASTES GEHOERT AUF DEN BELEG ═══
+       Die Website legt Bestellweg, Wunschzeit und die Notiz des Gastes
+       ("Allergie Nuss", "bitte klingeln") in order.note ab. Gedruckt wurde
+       davon nichts - nur die Artikel. Interne Marken ([NEU], [OK:20]) und die
+       E-Mail-Adresse bleiben weg. */
+    try {
+      var _hinweis = String(order.note || '')
+        .replace(/\[[A-Z]+(:[^\]]*)?\]/g, '')
+        .split(' \u00b7 ').map(function(s){ return s.trim(); })
+        .filter(function(s){ return s && s.indexOf('\u2709') !== 0; })
+        .join(' \u00b7 ');
+      if (_hinweis) {
+        cLines += '<div class="line"></div><div class="row bold"><span>Hinweis:</span><span></span></div>'
+               +  '<div class="row"><span>' + _hinweis.replace(/</g, '&lt;') + '</span><span></span></div>';
+      }
+    } catch(eH) {}
     cLines += '<div class="line"></div>';
     var t7 = calcTax7(items), t19 = calcTax19(items);
     var _wsMwst = true; try { var _wc=getBonConfig(); if(_wc && _wc.webshop) _wsMwst = _wc.webshop.mwst !== false; } catch(e){}
@@ -12965,7 +13004,8 @@ SPRACHERKENNUNG: Mikrofon macht Fehler bei Gericht-Namen (englisch/indisch). "sc
 
 BESTELLUNG AUFNEHMEN:
 - Bei Bestellung hänge am ENDE diesen versteckten Block an (Gast sieht ihn nicht):
-{"order":[{"name":"Artikelname","qty":1,"price":8.90}]}
+{"order":[{"name":"Artikelname","qty":1,"price":8.90,"notiz":"ohne Zwiebeln"}]}
+- "notiz" NUR, wenn der Gast zu diesem Artikel einen Wunsch hat (ohne Zwiebeln, extra scharf, Allergie). Sonst weglassen.
 - Mehrere Artikel möglich. Bei Gerichten wo der Preis von einer Wahl abhängt (z.B. Curry-Protein), frage kurz nach der Wahl.
 
 BESTÄTIGUNG (SEHR WICHTIG — immer so machen):
@@ -13323,9 +13363,10 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
             if (!ni || !ni.name) return;
             var menge = parseInt(ni.qty, 10);
             if (!(menge > 0)) menge = 1;
-            var schon = neu.find(function(x){ return x.name === ni.name; });
+            var _nz = ni.notiz ? String(ni.notiz).trim() : '';   /* v471 */
+            var schon = neu.find(function(x){ return x.name === ni.name && (x.notiz || '') === _nz; });
             if (schon) schon.qty += menge;                 // KI nennt denselben Artikel zweimal
-            else neu.push({ name: ni.name, qty: menge, price: ni.price });
+            else neu.push({ name: ni.name, qty: menge, price: ni.price, notiz: _nz });
           });
           setOrder(neu);
         }
@@ -13517,7 +13558,11 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
       var speisen = items.filter(function(i){ return !istBar(i); });
       var getraenke = items.filter(function(i){ return istBar(i); });
       var mkLines = function(list){ return list.map(function(i){
-        return `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.name}</div><div>&nbsp;</div>`;
+        /* v471: Hier stand nur Menge und Name. Auswahl und Notiz des Gastes
+           kamen bei Priya-Bestellungen nie in der Kueche an. */
+        var _opt = (i.note && i.note !== 'AI Bestellung') ? `<div class="row"><span>${i.note}</span><span></span></div>` : '';
+        var _kn  = i.kitchenNote ? `<div class="row"><span>** ${i.kitchenNote} **</span><span></span></div>` : '';
+        return `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.name}</div>${_opt}${_kn}<div>&nbsp;</div>`;
       }).join(""); };
       await BTPrint.connect(addr);
       /* v457: auch dieser Weg fragt die gemeinsame Stelle. Bei 0x01 aendert
@@ -13532,7 +13577,7 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
     if (order.length === 0) return;
     const posItems = order.map((o,i) => {
       const menuItem = Object.values(menuData||MENU).flat().find(m=>m.name===o.name) || {id:9000+i,nr:"AI",name:o.name,price:o.price||0};
-      return {...menuItem, qty:o.qty, finalPrice:o.price||menuItem.price, _key:`ai_${menuItem.id}_${i}`, note:"AI Bestellung", kitchenNote:""};
+      return {...menuItem, qty:o.qty, finalPrice:o.price||menuItem.price, _key:`ai_${menuItem.id}_${i}`, note:"AI Bestellung", kitchenNote:(o.notiz||"")};   /* v471 */
     });
     setTableOrders(p=>({...p, [selTable]:{items:[...(p[selTable]?.items||[]),...posItems], time:new Date()}}));
     // Küche/Bar Bon automatisch drucken
@@ -13561,7 +13606,7 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
     }
     const posItems = order.map((o,i) => {
       const menuItem = Object.values(menuData||MENU).flat().find(m=>m.name===o.name) || {id:9000+i,nr:"AI",name:o.name,price:o.price||0};
-      return {...menuItem, qty:o.qty, finalPrice:o.price||menuItem.price, _key:`ai_ta_${menuItem.id}_${i}_${Date.now()}`, note:"AI Bestellung", kitchenNote:""};
+      return {...menuItem, qty:o.qty, finalPrice:o.price||menuItem.price, _key:`ai_ta_${menuItem.id}_${i}_${Date.now()}`, note:"AI Bestellung", kitchenNote:(o.notiz||"")};   /* v471 */
     });
     const k = taKundeRef.current || {};
     const istLieferung = taTypRef.current === "lieferung";
@@ -14894,7 +14939,7 @@ function OrderView({
   const handleClick = (item, catHint) => {
     // Resolve option groups for this item
     const groups = (item.selectedGroups||[])
-      .map(gid => (optionGroups||[]).find(g=>g.id===gid))
+      .map(gid => (optionGroups||[]).find(g=>g.id===gid && !g.deleted))   /* v471 */
       .filter(Boolean);
     // Also keep legacy item.options
     const hasOpts = (item.options?.length > 0) || groups.length > 0;
@@ -18734,10 +18779,11 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                 );
               }),
               // Bestehende Option-Gruppen waehlen (Dip, Beilage, Patty ...)
-              (optionGroups||[]).length > 0 && R.createElement('div',{style:{marginTop:10,marginBottom:6}},
+              (optionGroups||[]).filter(function(g){return g&&!g.deleted;}).length > 0 && R.createElement('div',{style:{marginTop:10,marginBottom:6}},
                 R.createElement('div',{style:{fontSize:11,fontWeight:700,color:'#888',marginBottom:6}},'Bestehende Gruppen antippen zum Hinzufügen:'),
                 R.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:6}},
                   (optionGroups||[]).map(function(g){
+                    if (!g || g.deleted) return null;   /* v471 */
                     var sel=(form.selectedGroups||[]).indexOf(g.id)>=0;
                     return R.createElement('button',{
                       key:g.id,
@@ -18831,7 +18877,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
     React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 } },
       React.createElement("div", null,
         React.createElement("div", { style:{ fontWeight:800, fontSize:16 } }, "⚙️ Option-Gruppen"),
-        React.createElement("div", { style:{ fontSize:12, color:"#999", marginTop:2 } }, (optionGroups||[]).length + " Gruppen · werden bei Bestellung angezeigt")
+        React.createElement("div", { style:{ fontSize:12, color:"#999", marginTop:2 } }, (optionGroups||[]).filter(g=>g&&!g.deleted).length + " Gruppen · werden bei Bestellung angezeigt")
       ),
       React.createElement("button", {
         onClick: () => { setGroupForm({ name:"", required:false, multiple:false, choices:[""] }); setEditingGroup(null); setShowGroupForm(true); },
@@ -18912,7 +18958,10 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                 choices: groupForm.choices
                   .map(c => typeof c === "object" ? c : {name:c, price:""})
                   .filter(c=>c.name.trim()),
-                id: editingGroup !== null ? ((optionGroups||[])[editingGroup] && (optionGroups||[])[editingGroup].id) : Date.now()
+                id: editingGroup !== null ? ((optionGroups||[])[editingGroup] && (optionGroups||[])[editingGroup].id) : Date.now(),
+                /* v471: Ohne Uhrzeit gewann beim Zusammenfuehren die Fassung aus
+                   der Cloud - eine noch nicht hochgeladene Aenderung war weg. */
+                geaendert: window.belksJetzt()
               };
               if(editingGroup !== null) {
                 onUpdateOptionGroups((optionGroups||[]).map((g,i)=>i===editingGroup?cleaned:g));
@@ -18928,14 +18977,14 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
     ),
 
     // Groups List
-    (optionGroups||[]).length === 0 ?
+    (optionGroups||[]).filter(g=>g&&!g.deleted).length === 0 ?
       React.createElement("div", { style:{ textAlign:"center", padding:"50px 20px", color:"#bbb" } },
         React.createElement("div", { style:{ fontSize:40, marginBottom:10 } }, "⚙️"),
         React.createElement("div", { style:{ fontWeight:600, fontSize:15 } }, "Noch keine Option-Gruppen"),
         React.createElement("div", { style:{ fontSize:13, marginTop:6 } }, "Erstelle Gruppen wie 'Dips', 'Größe', 'Extras'")
       ) :
       React.createElement("div", { style:{ display:"flex", flexDirection:"column", gap:10 } },
-        (optionGroups||[]).map((grp, idx) =>
+        (optionGroups||[]).map((grp, idx) => grp.deleted ? null :   /* v471 */
           React.createElement("div", { key:grp.id||idx, style:{ background:"#fff", borderRadius:12, padding:14, border:"2px solid #e8f5e9", boxShadow:"0 1px 4px #0001" } },
             React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 } },
               React.createElement("div", null,
@@ -18952,7 +19001,12 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                   style:{ padding:"6px 10px", background:"#e8f5e9", color:C.green, border:"none", borderRadius:8, cursor:"pointer", fontSize:13 }
                 }, "✏️"),
                 React.createElement("button", {
-                  onClick: () => { onUpdateOptionGroups((optionGroups||[]).filter((_,i)=>i!==idx)); },
+                  onClick: () => {
+                    /* v471: Herausnehmen hiess: das naechste Geraet fuehrt seine Liste
+                       mit der Cloud zusammen und bringt die Gruppe zurueck. Eine
+                       Loeschmarke gewinnt dagegen immer (siehe _mergeById). */
+                    onUpdateOptionGroups((optionGroups||[]).map((g,i)=> i===idx ? Object.assign({}, g, { deleted:true, deletedAt: window.belksJetzt() }) : g));
+                  },
                   style:{ padding:"6px 10px", background:"#ffebee", color:"#c62828", border:"none", borderRadius:8, cursor:"pointer", fontSize:13 }
                 }, "🗑️")
               )
@@ -25312,7 +25366,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v470"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v471"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25736,7 +25790,12 @@ function App() {
     }
     if (hadSaved) {
       window._menuHydrated = true;   // echtes Menue vorhanden -> Persist-Effekte duerfen speichern
-      LS.set("eatdesi_menu", saved);
+      /* v471: Hier wird die gespeicherte Karte nur aufgeraeumt (Reihenfolge,
+         Steuersatz) - das hat kein Mensch geaendert. Frueher stempelte genau
+         diese Zeile das Geraet auf "jetzt": eine neuere Karte aus der Cloud
+         kam danach nicht mehr an, und die alte ging hoch. */
+      window.__belksStartwert = true;
+      try { LS.set("eatdesi_menu", saved); } finally { window.__belksStartwert = false; }
     } else {
       window._menuHydrated = false;  // nur Anzeige-Fallback -> NICHT speichern/syncen!
     }
@@ -25746,7 +25805,9 @@ function App() {
     const saved = LS.get("eatdesi_optiongroups", null);
     if (saved && saved.length > 0) return saved;
     // Standard-Gruppen (wiederverwendbar) - werden beim ersten Mal angelegt
-    return [
+    /* v471: Nur Anzeige. Gespeichert wird erst, wenn jemand etwas aendert -
+       sonst holt ein neues Geraet damit geloeschte Gruppen zurueck. */
+    return window.__belksOgStandard = [
       { id: 90001, name: "Extra Dip", required: false, multiple: true, choices: [
         {name:"Sour Cream", price:"1.70"}, {name:"Ranch", price:"1.70"}, {name:"Cheesy Garlic", price:"1.70"},
         {name:"Sweet Chili", price:"1.70"}, {name:"Hot BBQ", price:"1.70"}, {name:"Sweet BBQ", price:"1.70"},
@@ -26059,6 +26120,7 @@ function App() {
      v346 wiederholt. */
   belksZustandVomAbgleich("eatdesi_stornos", stornos, setStornos);
   useEffect(() => {
+    if (optionGroups === window.__belksOgStandard) return;   /* v471 */
     LS.set("eatdesi_optiongroups", optionGroups);
   }, [optionGroups]);
   useEffect(() => { LS.set("eatdesi_inventory", inventory); }, [inventory]);
@@ -37518,6 +37580,7 @@ async function pushStateToSupabase(key, value) {
         if (_erg.ok) {
           belksStateVersionSetzen(_rk, _erg.version);
           try { window.__pushFehler = null; } catch(e){}
+          belksWarteschlangeErledigt(key);          /* v471 */
           return true;
         }
         if (_erg.fehler) break;                 /* nicht erreichbar: alter Weg */
@@ -37619,6 +37682,7 @@ async function pushStateToSupabase(key, value) {
     }
     // eigenen Zeitstempel mitfuehren, damit der eigene Push nicht zurueckgezogen wird
     try { localStorage.setItem('eatdesi_stamp_' + key, String(new Date(stamp).getTime())); } catch(e2) {}
+    belksWarteschlangeErledigt(key);              /* v471 */
     return true;                      // v292: wirklich in der Cloud angekommen
   } catch(e) {
     console.warn('pushState error:', e.message);
@@ -37783,6 +37847,16 @@ function _wsIdent(p){
     return 'X:' + JSON.stringify(p).slice(0, 120);
   } catch(e) { return 'X:?'; }
 }
+/* v471: Nach einem erfolgreichen Hochladen ist jede aeltere Momentaufnahme
+   desselben Schluessels in der Warteschlange ueberholt - und gefaehrlich,
+   denn sie wuerde den neuen Stand beim naechsten Rundlauf ueberschreiben. */
+function belksWarteschlangeErledigt(key){
+  try {
+    var pend = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]') || [];
+    var rest = pend.filter(function(p){ return !(p && p.key === key && ('value' in p)); });
+    if (rest.length !== pend.length) localStorage.setItem('eatdesi_pending_push', JSON.stringify(rest));
+  } catch(e){}
+}
 async function pushPendingOrders() {
   var pending = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]');
   if (!pending.length) return;
@@ -37791,9 +37865,23 @@ async function pushPendingOrders() {
     var p = pending[i];
     if (p && p.key && 'value' in p) {
       // State-Eintrag (z.B. users, floors) erneut pushen
+      /* ═══ v471: DEN HEUTIGEN STAND SENDEN, NICHT DEN VON DAMALS ═══
+         Hier ging die Momentaufnahme aus dem Moment des Fehlschlags hoch.
+         Wurde danach erneut geaendert und erfolgreich gespeichert, stand der
+         alte Eintrag trotzdem noch in der Schlange - und ueberschrieb beim
+         naechsten Rundlauf die neue Speisekarte in der Cloud mit der alten.
+         Die Kasse holte sie sich dann selbst zurueck, lautlos.
+         Die Schlange bedeutet ab jetzt: "dieser Schluessel muss noch hoch".
+         Was hochgeht, ist der Stand, den das Geraet JETZT zeigt. */
+      var _wert = p.value;
+      try {
+        var _ls = (p.key === 'tableOrders') ? 'eatdesi_tableorders' : ('eatdesi_' + p.key);
+        var _jetzt = localStorage.getItem(_ls);
+        if (_jetzt != null) _wert = JSON.parse(_jetzt);
+      } catch(e) { _wert = p.value; }
       var okS = false;
-      try { okS = await pushStateToSupabase(p.key, p.value); } catch(e) { okS = false; }
-      if (!okS) keep.push(p);
+      try { okS = await pushStateToSupabase(p.key, _wert); } catch(e) { okS = false; }
+      if (!okS) keep.push({ key: p.key, value: _wert, ts: p.ts });
     } else {
       // Order-Eintrag
       var ok = await pushOrderToSupabase(p);
@@ -39811,7 +39899,8 @@ LS.set = function(key, value) {
      dann schon der neue. Ergebnis: kein Unterschied gefunden, also nichts
      hochgeladen. Genau deshalb kam ein neuer Kellner nie in der Tabelle an. */
   var _vorherStr = null;
-  if (key === 'eatdesi_users' || key === 'eatdesi_customers' || key === 'eatdesi_tableorders') {
+  /* v471: fuer ALLE Schluessel - siehe "STARTWERT IST KEINE AENDERUNG" unten. */
+  if (typeof key === 'string' && key.indexOf('eatdesi_') === 0) {
     try { _vorherStr = localStorage.getItem(key); } catch(e){}
   }
   _origLSSet(key, value);
@@ -39949,6 +40038,30 @@ LS.set = function(key, value) {
       var _neu = JSON.stringify(value);
       var _alt = window.__belksZuletztGeschrieben && window.__belksZuletztGeschrieben[key];
       if (_alt !== undefined && _alt === _neu) return;   // nichts passiert
+      /* ═══ v471: STARTWERT IST KEINE AENDERUNG ═══
+         GEMESSEN (test_startabgleich): Ein Geraet mit alter Speisekarte
+         startet, in der Cloud liegt eine neuere. Ergebnis in v470: das
+         Geraet behielt die alte UND schob sie in die Cloud - die neue war
+         weg. Genau das passiert nach jedem Hochladen einer Datei, weil dann
+         alle Geraete neu starten.
+         Ursache: Beim Aufbau schreibt die Kasse die Karte einmal zurueck.
+         Der Merker oben ist beim Start noch leer - also galt dieser
+         Rueckschreiber als Aenderung: Stempel "jetzt", und damit war die
+         Cloud-Karte (Stunden alt) fuer dieses Geraet nie mehr "neuer".
+         v428 hatte den Merker eingefuehrt, aber den Start nicht bedacht.
+         Jetzt: steht derselbe Wert schon im Speicher, ist nichts passiert.
+         Und was der Abgleich oder ein Startwert schreibt, ist nie eine
+         menschliche Aenderung. */
+      if (_alt === undefined && _vorherStr !== null && _vorherStr === _neu) {
+        if (!window.__belksZuletztGeschrieben) window.__belksZuletztGeschrieben = {};
+        window.__belksZuletztGeschrieben[key] = _neu;
+        return;
+      }
+      if (window._syncWriting || window.__belksStartwert) {
+        if (!window.__belksZuletztGeschrieben) window.__belksZuletztGeschrieben = {};
+        window.__belksZuletztGeschrieben[key] = _neu;
+        return;
+      }
       if (!window.__belksZuletztGeschrieben) window.__belksZuletztGeschrieben = {};
       window.__belksZuletztGeschrieben[key] = _neu;
     } catch(e) { /* nicht vergleichbar: dann lieber senden als verlieren */ }
@@ -40071,7 +40184,7 @@ localStorage.setItem = function(key, valueStr) {
       var _vorherWert = null;
       try { _vorherWert = _origGetItem(key); } catch(e1){}
       _origSetItem(key, valueStr);
-      if (_vorherWert !== valueStr) {
+      if (_vorherWert !== valueStr && !window.__belksStartwert) {   /* v471 */
         try {
           window.__belksNachholen = window.__belksNachholen || {};
           window.__belksNachholen[key] = 1;
@@ -40085,6 +40198,7 @@ localStorage.setItem = function(key, valueStr) {
   _origSetItem(key, valueStr);
   // Wenn die Sync-Engine selbst gerade schreibt: NICHT erneut pushen (Endlosschleife vermeiden)
   if (window._syncWriting) return;
+  if (window.__belksStartwert) return;   /* v471: Startwert der Ansicht, keine Aenderung */
   // Diese Keys werden bereits ueber LS.set / eigene Logik behandelt -> hier ueberspringen
   if (key === 'eatdesi_orders' || key === 'eatdesi_tableorders') return;
   if (typeof key === 'string' && key.indexOf('eatdesi_') === 0 && !_isLocalOnlyKey(key)) {
@@ -40098,6 +40212,233 @@ localStorage.setItem = function(key, valueStr) {
     } catch(e) {}
   }
 };
+
+/* ═══ v471: CLOUD-WACHE - SAGT, OB EINE AENDERUNG WIRKLICH IN DER CLOUD IST ═══
+   Warum es sie gibt: Speisekarte, Optionen und Firmendaten wurden nach
+   einer Aenderung genau EINMAL hochgeladen, 300 ms spaeter. Wurde dieser
+   eine Versuch gesperrt ("Cloud noch nicht gelesen", Anmeldung abgelaufen,
+   Version abgewiesen), stand der Grund nur in der Konsole - auf dem Handy
+   unsichtbar. Der regelmaessige Abgleich laedt diese Schluessel nie erneut
+   hoch, er holt nur. Die Aenderung lebte also still nur auf diesem Geraet,
+   bis ein anderer Stand sie ueberschrieb. Abdullah merkte es erst nach dem
+   naechsten Hochladen einer Datei - und musste deshalb jedes Mal alles
+   nachpruefen.
+
+   v429 und v443 haben je EINEN Weg dieses Fehlers repariert. Statt eines
+   dritten Versuchs auf Verdacht misst die Wache jetzt:
+   - 15 s nach einer Aenderung liest sie die Cloud und vergleicht mit dem,
+     was der MENSCH eingegeben hat (nicht mit dem lokalen Speicher - der
+     koennte inzwischen selbst ueberschrieben sein),
+   - stimmt es: kurze gruene Bestaetigung,
+   - stimmt es nach zwei Runden nicht: roter Balken mit Grund, Knopf
+     "Jetzt hochladen" und Protokoll.
+   Die Wache veraendert KEINEN Abgleich und schreibt nichts selbst - nur auf
+   Knopfdruck. */
+(function(){
+  var WACHE = {
+    'eatdesi_menu':'Speisekarte', 'eatdesi_optiongroups':'Optionen',
+    'eatdesi_firma':'Firmendaten', 'eatdesi_services':'Leistungen',
+    'eatdesi_deliveryCfg':'Liefereinstellungen', 'eatdesi_cat_order':'Kategorien-Reihenfolge',
+    'eatdesi_happyhours':'Happy Hour', 'eatdesi_loyalty_settings':'Treuepunkte-Einstellungen',
+    'eatdesi_gutscheine':'Gutscheine', 'eatdesi_floors':'Tischbereiche', 'eatdesi_tischplan':'Tischplan'
+  };
+  var PROTO = 'belks_syncprotokoll';           /* ohne eatdesi_: wird nie gesynct */
+  var offen = {};
+  function ms(){ return Number(window.__belksWacheMs) || 15000; }
+  function uhr(){ try { return new Date().toLocaleString('de-DE'); } catch(e){ return String(new Date()); } }
+  function notiere(t){
+    try {
+      var a = JSON.parse(_origGetItem(PROTO) || '[]') || [];
+      a.push(uhr() + ' \u00b7 ' + t);
+      if (a.length > 80) a = a.slice(-80);
+      _origSetItem(PROTO, JSON.stringify(a));
+    } catch(e){}
+  }
+  function gleich(a, b){
+    if (a == null || b == null) return false;
+    try { return JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b)); }
+    catch(e){ return String(a) === String(b); }
+  }
+  window.belksWacheProtokoll = function(){
+    try { return JSON.parse(_origGetItem(PROTO) || '[]') || []; } catch(e){ return []; }
+  };
+
+  function protokollZeigen(){
+    try {
+      var alt = document.getElementById('belksWacheProto'); if (alt) alt.remove();
+      var o = document.createElement('div');
+      o.id = 'belksWacheProto';
+      o.style.cssText = 'position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:14px';
+      var k = document.createElement('div');
+      k.style.cssText = 'background:#fff;color:#222;border-radius:14px;max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;font-family:sans-serif';
+      var kopf = document.createElement('div');
+      kopf.style.cssText = 'padding:14px 16px;font-weight:700;border-bottom:1px solid #eee';
+      kopf.textContent = 'Cloud-Protokoll (letzte Eintr\u00e4ge)';
+      var pre = document.createElement('pre');
+      pre.style.cssText = 'margin:0;padding:12px 16px;overflow:auto;font-size:12px;white-space:pre-wrap;flex:1';
+      pre.textContent = window.belksWacheProtokoll().slice().reverse().join('\n') || '(noch keine Eintr\u00e4ge)';
+      var fuss = document.createElement('div');
+      fuss.style.cssText = 'display:flex;gap:8px;padding:12px 16px;border-top:1px solid #eee';
+      var kop = document.createElement('button');
+      kop.textContent = 'Kopieren';
+      kop.style.cssText = 'flex:1;padding:12px;border:none;border-radius:10px;background:#1565c0;color:#fff;font-weight:700';
+      kop.onclick = function(){ try { navigator.clipboard.writeText(pre.textContent); kop.textContent = '\u2713 Kopiert'; } catch(e){} };
+      var zu = document.createElement('button');
+      zu.textContent = 'Schlie\u00dfen';
+      zu.style.cssText = 'flex:1;padding:12px;border:1px solid #ccc;border-radius:10px;background:#fff;font-weight:700';
+      zu.onclick = function(){ o.remove(); };
+      fuss.appendChild(kop); fuss.appendChild(zu);
+      k.appendChild(kopf); k.appendChild(pre); k.appendChild(fuss); o.appendChild(k);
+      document.body.appendChild(o);
+    } catch(e){}
+  }
+  window.belksWacheProtokollZeigen = protokollZeigen;
+
+  function balkenZeigen(key, grund){
+    try {
+      var name = WACHE[key] || key;
+      var id = 'belksWache_' + key;
+      var d = document.getElementById(id);
+      if (!d) {
+        d = document.createElement('div');
+        d.id = id;
+        d.setAttribute('data-wache', key);
+        d.style.cssText = 'position:fixed;left:8px;right:8px;top:8px;z-index:100000;background:#b71c1c;color:#fff;'
+          + 'border-radius:12px;padding:12px 14px;font-family:sans-serif;font-size:14px;line-height:1.45;box-shadow:0 6px 20px rgba(0,0,0,.35)';
+        document.body.appendChild(d);
+      }
+      d.textContent = '';
+      var t = document.createElement('div');
+      t.style.fontWeight = '700';
+      t.textContent = '\u26A0\uFE0F ' + name + ' ist NICHT in der Cloud gespeichert.';
+      var g = document.createElement('div');
+      g.style.cssText = 'font-size:12px;opacity:.9;margin:4px 0 10px';
+      g.textContent = 'Nur auf diesem Ger\u00e4t. Andere Ger\u00e4te sehen es nicht, und es kann \u00fcberschrieben werden. Grund: ' + (grund || 'unbekannt');
+      var reihe = document.createElement('div');
+      reihe.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
+      var knopf = function(text, fn, hell){
+        var b = document.createElement('button');
+        b.textContent = text;
+        b.style.cssText = 'padding:9px 12px;border-radius:9px;font-weight:700;font-size:13px;border:none;'
+          + (hell ? 'background:#fff;color:#b71c1c' : 'background:rgba(255,255,255,.18);color:#fff');
+        b.onclick = fn; reihe.appendChild(b); return b;
+      };
+      knopf('Jetzt hochladen', function(ev){
+        var o = offen[key]; if (!o) { d.remove(); return; }
+        ev.target.textContent = 'L\u00e4dt\u2026';
+        notiere(name + ': "Jetzt hochladen" gedr\u00fcckt');
+        var wert = null; try { wert = JSON.parse(o.wert); } catch(e){ wert = o.wert; }
+        Promise.resolve(pushStateToSupabase(_remoteName(key), wert)).then(function(){
+          o.runde = 1; o.seit = Date.now();
+          setTimeout(function(){ pruefen(key); }, 1500);
+        });
+      }, true);
+      knopf('Protokoll', protokollZeigen);
+      knopf('Ausblenden', function(){ d.remove(); });
+      d.appendChild(t); d.appendChild(g); d.appendChild(reihe);
+    } catch(e){}
+  }
+
+  async function pruefen(key){
+    var o = offen[key]; if (!o) return;
+    if (Date.now() - o.seit < ms() - 50) return;          /* neuere Aenderung wartet schon */
+    var name = WACHE[key];
+    var cloud = null, lesbar = false, status = '';
+    try {
+      var r = await supaFetch('/rest/v1/pos_state?key=eq.' + LOCATION_ID + '_' + _remoteName(key) + '&select=value,updated_at');
+      status = r ? String(r.status) : '?';
+      if (r && r.ok) {
+        lesbar = true;
+        var d = await r.json();
+        if (d && d[0]) cloud = (typeof d[0].value === 'string') ? d[0].value : JSON.stringify(d[0].value);
+      }
+    } catch(e){ status = (e && e.message) || 'Netz'; }
+    if (!offen[key] || offen[key] !== o) return;
+    if (lesbar && gleich(cloud, o.wert)) {
+      delete offen[key];
+      try { if (window.__belksWacheGrund) delete window.__belksWacheGrund[key]; } catch(e){}
+      notiere(name + ' ist in der Cloud \u2713');
+      var alt = document.getElementById('belksWache_' + key); if (alt) alt.remove();
+      try { window.belksHinweis && window.belksHinweis('\u2713 ' + name + ' in der Cloud gespeichert', '#2e7d32'); } catch(e){}
+      return;
+    }
+    if ((o.runde || 0) < 1) {                               /* dem Abgleich eine zweite Runde lassen */
+      o.runde = 1; o.seit = Date.now();
+      setTimeout(function(){ pruefen(key); }, ms());
+      return;
+    }
+    var grund = !lesbar ? ('Cloud nicht lesbar (' + status + ')')
+              : ((window.__belksWacheGrund && window.__belksWacheGrund[key]) ? String(window.__belksWacheGrund[key])
+                 : (cloud == null ? 'in der Cloud gibt es diesen Eintrag nicht' : 'die Cloud hat einen anderen Stand'));
+    notiere('\u26A0 ' + name + ' NICHT in der Cloud \u2013 ' + grund);
+    balkenZeigen(key, grund);
+  }
+
+  /* Menschliche Aenderungen erkennen: alles, was NICHT der Abgleich schreibt
+     und den Inhalt wirklich aendert. Das Zurueckschreiben beim Start aendert
+     nichts und loest deshalb keine Pruefung aus. */
+  var _haken = localStorage.setItem;
+  localStorage.setItem = function(key, valueStr){
+    var beobachten = !!WACHE[key] && !window._syncWriting;
+    var vorher = null;
+    if (beobachten) { try { vorher = _origGetItem(key); } catch(e){} }
+    var erg = _haken.apply(this, arguments);
+    if (beobachten) {
+      try {
+        var jetzt = _origGetItem(key);
+        var s = (valueStr == null) ? null : String(valueStr);
+        if (s !== null && vorher !== s) {
+          if (jetzt !== s) {
+            notiere(WACHE[key] + ': Eingabe wurde lokal verworfen');
+          } else {
+            offen[key] = { wert: s, seit: Date.now(), runde: 0 };
+            notiere(WACHE[key] + ' ge\u00e4ndert (' + s.length + ' Zeichen)');
+            setTimeout(function(){ pruefen(key); }, ms());
+          }
+        }
+      } catch(e){}
+    }
+    return erg;
+  };
+
+  /* Uebernahmen aus der Cloud mitschreiben - und laut werden, wenn sie eine
+     noch nicht bestaetigte Eingabe ueberschreiben. Genau DAS waere der
+     Beweis fuer den Weg, auf dem Aenderungen verschwinden. */
+  window.addEventListener('eatdesi_state_synced', function(ev){
+    try {
+      var key = ev && ev.detail && ev.detail.key;
+      if (!WACHE[key]) return;
+      var neu = JSON.stringify(ev.detail.value);
+      var o = offen[key];
+      if (o && !gleich(neu, o.wert)) {
+        notiere('\u26A0 ' + WACHE[key] + ': Cloud-Stand \u00fcberschreibt deine unbest\u00e4tigte \u00c4nderung');
+      } else {
+        notiere(WACHE[key] + ' von der Cloud \u00fcbernommen');
+      }
+    } catch(e){}
+  });
+
+  /* Jeden Hochlade-Versuch mit Ergebnis mitschreiben. */
+  try {
+    var _hoch = pushStateToSupabase;
+    pushStateToSupabase = async function(k, v){
+      /* Der Fehlergrund ist EINE globale Variable. Vorher leeren, sonst
+         stuende hier der Grund eines ganz anderen Schluessels. */
+      var lk = 'eatdesi_' + k;
+      if (WACHE[lk]) { try { window.__pushFehler = null; } catch(e){} }
+      var r = await _hoch(k, v);
+      try {
+        if (WACHE[lk]) {
+          var g = window.__pushFehler ? String(window.__pushFehler) : 'gesperrt, ohne Grund gemeldet';
+          if (!r) window.__belksWacheGrund = window.__belksWacheGrund || {};
+          if (!r) window.__belksWacheGrund[lk] = g;
+          notiere(WACHE[lk] + ' hochladen: ' + (r ? 'ok' : ('NICHT \u2013 ' + g)));
+        }
+      } catch(e){}
+      return r;
+    };
+  } catch(e){}
+})();
 
 // Sync starten
 localStorage.setItem('eatdesi_sb_url', SUPA_URL);
