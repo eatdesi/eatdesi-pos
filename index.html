@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v473</title>
+<title>eatDeSi POS v474</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -10082,6 +10082,42 @@ function buildConfirmText(order, prepMin) {
     ((typeof tenantDisplayName==='function')?tenantDisplayName():'eatDeSi') + (((typeof tenantAddressLine==='function')&&tenantAddressLine())?(' · '+tenantAddressLine()):'')
   ];
   return lines.join('\n');
+}
+
+// E-Mail an den Gast, wenn seine Anfrage (Catering/Buffet/Feier/Reservierung)
+// angenommen wurde. Gleicher Weg wie sendConfirmEmail bei Online-Bestellungen -
+// nur ohne Artikel/Preis, dafuer mit Datum/Uhrzeit/Personen der Anfrage.
+function sendAnfrageConfirmEmail(req, cfg) {
+  try {
+    if (!req || !cfg || !cfg.emailOn) return;
+    if (!cfg.emailServiceId || !cfg.emailTemplateId || !cfg.emailPublicKey) { console.warn('EmailJS: Keys fehlen'); return; }
+    if (!req.email) { console.warn('Anfrage ohne E-Mail - keine automatische Bestaetigung moeglich'); return; }
+    if (typeof emailjs === 'undefined') { console.warn('EmailJS nicht geladen'); return; }
+    var typLabel = ({ catering: 'Catering-Anfrage', buffet: 'Buffet-Angebot', feier: 'Feier', reservierung: 'Tisch-Reservierung' })[req.type] || 'Anfrage';
+    var wann = (req.date || '') + (req.time ? (' um ' + req.time + ' Uhr') : '');
+    var lines = [
+      'Hallo ' + (req.name || '') + ',',
+      '',
+      'deine ' + typLabel + ' für ' + wann + ' wurde bestätigt!',
+      req.guests ? ('👥 ' + req.guests) : '',
+      '',
+      'Bei Fragen ruf uns gern an: ' + (req.phone ? '' : ''),
+      '',
+      'Bis bald!',
+      ((typeof tenantDisplayName === 'function') ? tenantDisplayName() : 'eatDeSi') + (((typeof tenantAddressLine === 'function') && tenantAddressLine()) ? (' · ' + tenantAddressLine()) : '')
+    ].filter(Boolean);
+    var params = {
+      to_email: req.email,
+      customer_name: req.name || 'Kunde',
+      bon_nr: (req.id || '').replace('req', ''),
+      prep_min: '', order_type: typLabel,
+      items: wann, total: req.guests ? (req.guests + ' Personen') : '',
+      message: lines.join('\n')
+    };
+    emailjs.send(cfg.emailServiceId, cfg.emailTemplateId, params, { publicKey: cfg.emailPublicKey })
+      .then(function(){ console.log('✅ Anfrage-Bestätigung gesendet an ' + req.email); })
+      .catch(function(err){ console.warn('EmailJS Fehler (Anfrage):', err && (err.text||err.message||err)); });
+  } catch(e){ console.warn('sendAnfrageConfirmEmail Fehler:', e.message); }
 }
 
 // E-Mail via EmailJS (vollautomatisch, kein Server)
@@ -20949,7 +20985,7 @@ function AnfragenView({ anfragen, onStatus, onPrint, rueckfragen, onRueckfrageEr
             }, istOffen(r) ? "NEU" : String(r.status || "").toUpperCase())
           ),
           /*#__PURE__*/React.createElement("div", { style: { marginTop: 10, fontSize: 13.5, color: "#333", lineHeight: 1.65 } },
-            /*#__PURE__*/React.createElement("div", null, "\uD83D\uDCC5 ", /*#__PURE__*/React.createElement("b", null, r.date || "\u2014"), r.guests ? (" \u00B7 \uD83D\uDC65 " + r.guests + " Personen") : ""),
+            /*#__PURE__*/React.createElement("div", null, "\uD83D\uDCC5 ", /*#__PURE__*/React.createElement("b", null, r.date || "\u2014"), r.time ? (" \u00B7 \u23F0 " + r.time) : "", r.guests ? (" \u00B7 \uD83D\uDC65 " + r.guests + " Personen") : ""),
             r.phone ? /*#__PURE__*/React.createElement("div", null, "\uD83D\uDCDE ",
               /*#__PURE__*/React.createElement("a", { href: "tel:" + r.phone, style: { color: "#1565c0", fontWeight: 700, textDecoration: "none" } }, r.phone)) : null,
             r.email ? /*#__PURE__*/React.createElement("div", { style: { wordBreak: "break-all" } }, "\u2709\uFE0F ", r.email) : null,
@@ -25413,7 +25449,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v473"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v474"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -25942,6 +25978,14 @@ function App() {
       try { LS.set("eatdesi_webrequests", next); } catch(e){}
       return next;
     });
+    // v2026-09-12: Der Gast bekam bisher nie eine Bestaetigung, wenn seine
+    // Anfrage angenommen wurde - der Bon sagte nur "Bitte Kunde zurueckrufen".
+    // Jetzt geht, sofern eine E-Mail vorliegt, automatisch eine Bestaetigung
+    // raus - unabhaengig davon, ob ueber die Liste oder das Popup angenommen
+    // wurde, weil beide hier durchlaufen.
+    if (status === 'akzeptiert') {
+      try { sendAnfrageConfirmEmail(req, printerSettings); } catch(e){ console.warn('Anfrage-Email:', e); }
+    }
     try {
       const r = await fetch(SUPA_URL + '/rest/v1/rpc/belks_anfrage_status', {
         method: 'POST',
@@ -25950,7 +25994,7 @@ function App() {
       });
       return r.ok;
     } catch(e) { return false; }
-  }, []);
+  }, [printerSettings]);
   const acceptAnfrage = React.useCallback((req) => {
     setAnfrageStatus(req, 'akzeptiert');
     setPendingAnfragePopup(null);
@@ -25964,7 +26008,7 @@ function App() {
       body += '<div class="row"><span>Name:</span><span>'+(req.name||'-')+'</span></div>';
       body += '<div class="row"><span>Telefon:</span><span>'+(req.phone||'-')+'</span></div>';
       if (req.email) body += '<div class="row"><span>E-Mail:</span><span>'+req.email+'</span></div>';
-      body += '<div class="row"><span>Datum:</span><span>'+(req.date||'-')+'</span></div>';
+      body += '<div class="row"><span>Datum:</span><span>'+(req.date||'-')+(req.time?(' '+req.time+' Uhr'):'')+'</span></div>';
       if (req.guests) body += '<div class="row"><span>Personen:</span><span>'+req.guests+'</span></div>';
       body += '<div class="line"></div>';
       if (req.message) body += '<div style="font-size:13px;padding:4px 0"><b>Nachricht:</b><br>'+req.message+'</div>';
@@ -29349,7 +29393,7 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
       React.createElement("div", null, React.createElement("b", null, "👤 Name: "), (pendingAnfragePopup.name||"-")),
       React.createElement("div", null, React.createElement("b", null, "📞 Telefon: "), (pendingAnfragePopup.phone||"-")),
       pendingAnfragePopup.email && React.createElement("div", null, React.createElement("b", null, "✉️ E-Mail: "), pendingAnfragePopup.email),
-      React.createElement("div", null, React.createElement("b", null, "📅 Datum: "), (pendingAnfragePopup.date||"-")),
+      React.createElement("div", null, React.createElement("b", null, "📅 Datum: "), (pendingAnfragePopup.date||"-"), pendingAnfragePopup.time ? (" · ⏰ " + pendingAnfragePopup.time) : ""),
       pendingAnfragePopup.guests && React.createElement("div", null, React.createElement("b", null, "👥 Personen: "), pendingAnfragePopup.guests),
       pendingAnfragePopup.message && React.createElement("div", { style:{ marginTop:6, paddingTop:6, borderTop:"1px dashed #ccc" } }, React.createElement("b", null, "💬 "), pendingAnfragePopup.message)
     ),
