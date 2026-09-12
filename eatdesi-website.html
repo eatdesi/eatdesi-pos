@@ -1315,18 +1315,40 @@ function renderCartList(){
   const sub=cartTotal(), isDeliv=mode==='lieferung';
   // Bei Lieferung: Ort muss gewählt sein, damit Zone/Gebühr feststehen
   const ortList=buildOrtList();
-  const ortChosen = isDeliv && activeOrt && ortList.some(x=>x.ort===activeOrt);
+  const isManualMode = DELIVERY_CFG.mode==='manual';
+  /* v2026-09-12: DER EIGENTLICHE FEHLER - zwei Orte, die sich nicht kannten.
+     Bei Umkreis/Karte bestaetigt confirmDelivCheck() die Adresse bereits per
+     Karte (activeZone steht fest, window._delivPrefill wird gesetzt). Hier
+     wurde trotzdem verlangt, dass der frei eingegebene Ort ("Bad Wildungen")
+     WORTGLEICH zu einem Dropdown-Eintrag passt ("Bad Wildungen (Kernstadt)")
+     - das passiert nie. Ergebnis: die Kasse fragte nach einer laengst
+     bestaetigten Adresse noch einmal, mit leerem Auswahlfeld.
+     Der Dropdown-Vergleich ist nur fuer "Manuell" richtig, wo der Gast aus
+     genau dieser Liste waehlt. Bei Umkreis/Karte zaehlt: wurde ueberhaupt
+     schon eine Adresse bestaetigt? Das zeigt window._delivPrefill an. */
+  const ortChosen = isDeliv && (isManualMode
+    ? (activeOrt && ortList.some(x=>x.ort===activeOrt))
+    : (!!window._delivPrefill && !!ZONES[activeZone]));
   const z=ZONES[activeZone]||{min:0,fee:0,name:''};
   const fee=(isDeliv&&ortChosen)?z.fee:0, tot=sub+fee;
   const belowMin=isDeliv && ortChosen && sub<z.min;
   let zoneSel='';
-  if(isDeliv){
+  if(isDeliv && isManualMode){
     zoneSel=`<div class="field" style="margin-bottom:10px"><label>Liefergebiet – wähle deinen Ort</label>
       <select id="zoneSel" onchange="setOrt(this.value);renderCartList()">
         <option value="" ${!ortChosen?'selected':''} disabled>– Bitte Ort wählen –</option>
         ${ortList.map(x=>`<option value="${(x.ort||'').replace(/"/g,'&quot;')}" ${x.ort===activeOrt?'selected':''}>${x.ort} · Min ${eur(ZONES[x.zone].min)} · ${eur(ZONES[x.zone].fee)}</option>`).join('')}
       </select>
       ${!ortChosen?`<div style="font-size:12px;color:var(--gold);margin-top:6px">Bitte deinen Ort wählen – die Liefergebühr wird automatisch berechnet.</div>`:''}</div>`;
+  } else if(isDeliv && ortChosen){
+    zoneSel=`<div class="field" style="margin-bottom:10px;font-size:13px">
+      <div style="display:flex;justify-content:space-between;align-items:center;color:#999">
+        <span>Liefergebiet</span><b style="color:var(--cream)">${z.name}${(window._delivPrefill&&window._delivPrefill.city)?(' · '+window._delivPrefill.city):''}</b>
+      </div>
+      <button type="button" style="background:none;border:none;color:var(--gold);font-size:12px;padding:2px 0;cursor:pointer" onclick="openDelivCheck()">Adresse ändern</button>
+    </div>`;
+  } else if(isDeliv){
+    zoneSel=`<div class="field" style="margin-bottom:10px"><button type="button" class="checkout" onclick="openDelivCheck()">📍 Lieferadresse prüfen</button></div>`;
   }
   foot.innerHTML=`${zoneSel}
     <div class="sumrow"><span>Zwischensumme</span><span>${eur(sub)}</span></div>
@@ -1374,7 +1396,7 @@ function goCheckout(){
     <div class="field"><label>Telefon *</label><input id="f_phone" inputmode="tel" placeholder="Für Rückfragen"><div class="err">Bitte Telefonnummer angeben</div></div>
     <div class="field"><label>E-Mail (optional)</label><input id="f_email" inputmode="email" placeholder="für Bestätigung per E-Mail"></div>
     <div class="field"><label style="display:flex;align-items:center;gap:8px;font-weight:500;cursor:pointer"><input type="checkbox" id="f_saveacct" checked style="width:18px;height:18px;accent-color:#d4a934"> 💾 Daten speichern & ⭐ Punkte sammeln (Kundenkonto)</label></div>
-    ${isDeliv?`<div class="field"><label>Straße & Hausnummer *</label><input id="f_street" placeholder="z.B. Brunnenallee 12"><div class="err">Bitte Adresse angeben</div></div>
+    ${isDeliv?(DELIVERY_CFG.mode==='manual'?`<div class="field"><label>Straße & Hausnummer *</label><input id="f_street" placeholder="z.B. Brunnenallee 12"><div class="err">Bitte Adresse angeben</div></div>
       <div class="row2"><div class="field"><label>Ort / Stadtteil *</label>
         <select id="f_city" onchange="onCityChange(this.value)" style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:11px;color:var(--cream);font-size:14px">
           <option value="" ${!activeOrt?'selected':''} disabled>– wählen –</option>
@@ -1382,6 +1404,19 @@ function goCheckout(){
         </select><div class="err">Bitte Ort wählen</div></div>
       <div class="field"><label>PLZ *</label><input id="f_zip" inputmode="numeric" placeholder="34537"><div class="err">PLZ</div></div></div>
       <div class="hint" id="plzHint" style="margin:-4px 0 8px">${activeOrt?('Liefergebiet: '+(ZONES[activeZone]?ZONES[activeZone].name:'')+' · PLZ '+(ZONES[activeZone]?ZONES[activeZone].plz:'')):'Erst Ort wählen – die passende PLZ wird gesetzt.'}</div>`
+      :
+      /* v2026-09-12: Umkreis/Karte - die Adresse ist schon per Karte bestaetigt
+         (confirmDelivCheck). Frueher stand hier trotzdem dasselbe Auswahlfeld
+         wie bei "Manuell" - der frei eingegebene Ort passte nie zu einem der
+         festen Eintraege, das Feld blieb leer und verlangte eine neue Wahl,
+         obwohl "Wir liefern zu dir!" laengst bestaetigt war. Jetzt: Ort/PLZ
+         als normale, schon ausgefuellte Felder - kein zweites Mal fragen. */
+      `<div class="field"><label>Straße & Hausnummer *</label><input id="f_street" placeholder="z.B. Brunnenallee 12"><div class="err">Bitte Adresse angeben</div></div>
+      <div class="row2"><div class="field"><label>Ort / Stadtteil *</label>
+        <input id="f_city" placeholder="Ort" style="width:100%;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:11px;color:var(--cream);font-size:14px">
+        <div class="err">Bitte Ort angeben</div></div>
+      <div class="field"><label>PLZ *</label><input id="f_zip" inputmode="numeric" placeholder="34537"><div class="err">PLZ</div></div></div>
+      <div class="hint" id="plzHint" style="margin:-4px 0 8px">Liefergebiet: <b>${ZONES[activeZone]?ZONES[activeZone].name:''}</b> · bereits geprüft · <a href="#" onclick="openDelivCheck();return false" style="color:var(--gold)">Adresse ändern</a></div>`)
       :isDine?`<div class="field"><label>Anzahl Personen *</label><input id="f_guests" inputmode="numeric" placeholder="z.B. 4"><div class="err">Bitte Personenzahl angeben</div></div>
       <div class="deliv-note">${TABLE_NO?('🍽️ Du sitzt an <b>Tisch '+TABLE_NO+'</b> – wir bringen dein Essen direkt an deinen Tisch.'):'🍽️ Wir reservieren deinen Tisch und bereiten dein Essen vor. Die genaue Zeit bestätigen wir dir.'}</div>`
       :`<div class="deliv-note">\uD83E\uDD61 Abholung: <b>${(COMPANY.name||'')}${COMPANY.street?(', '+COMPANY.street):''}${COMPANY.city?(', '+COMPANY.city):''}</b>.</div>`}
@@ -2052,7 +2087,11 @@ async function acctPhoneNext(){
   var err=document.getElementById('ac_err');
   if(phone.length<6){ if(err) err.textContent='Bitte gültige Handynummer eingeben.'; return; }
   if(err) err.textContent='Prüfe…';
-  var info=await kundeBekannt(raw);
+  /* v2026-09-12: hier stand kundeBekannt(raw) - die UNnormalisierte Eingabe.
+     Wurde die Nummer mit Leerzeichen, Bindestrich oder Landesvorwahl
+     eingegeben, fand die Pruefung den laengst bekannten Kunden nicht und
+     zeigte immer nur "neuer Kunde". */
+  var info=await kundeBekannt(phone);
   if(info && info.bekannt && info.hatPasswort) return renderAcctPw(raw, {name:info.name||''});
   if(info && info.bekannt) return renderAcctSetPw(raw, {name:info.name||''}, false);
   return renderAcctCreate(raw);
@@ -2139,7 +2178,7 @@ async function acctCreate(raw){
   if(p1!==p2){ if(err) err.textContent='Passwörter stimmen nicht überein.'; return; }
   if(err) err.textContent='Erstelle Konto…';
   var np=normPhone(raw);
-  var info=await kundeBekannt(raw);
+  var info=await kundeBekannt(np);   /* v2026-09-12: war raw, siehe oben */
   if(info && info.bekannt){ if(err) err.textContent='Nummer existiert schon – bitte anmelden.'; return; }
   var daten={name:name,phone:raw,kundenNr:raw};
   if(email) daten.email=email;
@@ -2936,7 +2975,10 @@ function drawZones(){
     <div class="dmode" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
       <label class="dmode-opt"><input type="radio" name="dmode" value="address-radius" ${(DELIVERY_CFG.mode==='address'&&DELIVERY_CFG.zoneMode==='radius')?'checked':''} onchange="setDeliveryMode('address','radius')"> 📏 <b>Umkreis (A)</b> – Adresse wird per Karte geprüft, Zone nach Entfernung (km)</label>
       <label class="dmode-opt"><input type="radio" name="dmode" value="address-polygon" ${(DELIVERY_CFG.mode==='address'&&DELIVERY_CFG.zoneMode==='polygon')?'checked':''} onchange="setDeliveryMode('address','polygon')"> 🗺️ <b>Karte/Polygon (B)</b> – Adresse wird geprüft, Zone nach gezeichnetem Gebiet</label>
-      <label class="dmode-opt"><input type="radio" name="dmode" value="manual" ${DELIVERY_CFG.mode==='manual'?'checked':''} onchange="setDeliveryMode('manual','radius')"> ✍️ <b>Manuell</b> – Kunde wählt Ortsteil selbst (ohne Karte)</label>
+      <!-- v2026-09-12: "Manuell" ist aus der Auswahl entfernt (siehe Begruendung
+         beim eigentlichen Fix weiter unten). Ein Standort, der schon auf
+         "manual" stand, laeuft unveraendert weiter - nur neu waehlen geht
+         nicht mehr. -->
     </div>
     <div class="afield"><label>Restaurant-Standort (für Umkreis & Karte)</label>
       <div style="display:flex;gap:8px;margin-bottom:8px">
