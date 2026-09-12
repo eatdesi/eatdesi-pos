@@ -1782,17 +1782,19 @@ function drawReq(){
     <div class="row2"><div class="field"><label>Name *</label><input id="r_name" placeholder="Dein Name"><div class="err">Name fehlt</div></div>
     <div class="field"><label>Telefon *</label><input id="r_phone" inputmode="tel" placeholder="Rückruf-Nr."><div class="err">Telefon fehlt</div></div></div>
     <div class="field"><label>E-Mail</label><input id="r_email" inputmode="email" placeholder="optional"></div>
-    <div class="row2"><div class="field"><label>Datum *</label><input id="r_date" type="date"><div class="err">Datum fehlt</div></div>${extra}</div>
+    <div class="row2"><div class="field"><label>Datum *</label><input id="r_date" type="date"><div class="err">Datum fehlt</div></div>
+    <div class="field"><label>Uhrzeit *</label><input id="r_time" type="time"><div class="err">Uhrzeit fehlt</div></div></div>
+    <div class="field">${extra}</div>
     <div class="field"><label>Nachricht</label><textarea id="r_msg" rows="3" placeholder="Wünsche, Allergien, Budget, Ort…"></textarea></div>
     <button class="checkout" id="reqBtn" onclick="sendReq()">${d.icon} Anfrage senden</button>`;
 }
 async function sendReq(){
-  const name=$('#r_name').value.trim(),phone=$('#r_phone').value.trim(),date=$('#r_date').value,guests=($('#r_guests')||{}).value||'';
-  let inv=false; inv=bad('r_name',!name)||inv; inv=bad('r_phone',phone.length<5)||inv; inv=bad('r_date',!date)||inv;
+  const name=$('#r_name').value.trim(),phone=$('#r_phone').value.trim(),date=$('#r_date').value,time=$('#r_time').value,guests=($('#r_guests')||{}).value||'';
+  let inv=false; inv=bad('r_name',!name)||inv; inv=bad('r_phone',phone.length<5)||inv; inv=bad('r_date',!date)||inv; inv=bad('r_time',!time)||inv;
   if($('#r_guests'))inv=bad('r_guests',!guests.trim())||inv;
   if(inv){toast('Bitte Pflichtfelder ausfüllen');return;}
   const btn=$('#reqBtn');btn.disabled=true;btn.textContent='Wird gesendet…';
-  const payload={id:'req'+Date.now(),type:reqType,name,phone,email:$('#r_email').value.trim(),date,guests,
+  const payload={id:'req'+Date.now(),type:reqType,name,phone,email:$('#r_email').value.trim(),date,time,guests,
     message:$('#r_msg').value.trim(),created_at:new Date().toISOString(),status:'neu'};
   const ok=await pushRequest(payload);
   if(ok){
