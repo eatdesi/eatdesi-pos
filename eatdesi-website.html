@@ -1013,17 +1013,30 @@ async function geocodeStructured(street, number, plz, city){
 }
 // Zone aus Koordinaten finden (je nach zoneMode). Gibt {idx,zone,dist} oder null.
 function findZoneByCoords(lat,lng){
-  // FIX (Liefergebiet): hybrid & fehlertolerant. Vorher blockierte der
-  // Polygon-Modus ALLE Adressen, wenn kein Polygon gezeichnet/gespeichert war.
-  // Jetzt: pro Zone zählt Polygon (falls vorhanden) ODER Umkreis-km (falls >0).
-  // zoneMode bestimmt nur noch, was zuerst geprüft wird.
+  /* v2026-09-12: DER FEHLER - "Umkreis ODER Polygon, was zuerst passt".
+     Eine Zone bringt oft noch ein "km" aus der Zeit mit, als Umkreis (A)
+     probiert oder einfach nie geleert wurde. Sobald diese Zone dann ein
+     echtes Polygon bekam, blieb das alte km im Hintergrund liegen - und
+     zaehlte als Rueckfalltuer IMMER mit, auch wenn der Punkt klar
+     ausserhalb der gezeichneten Flaeche lag. Gemessen: eine Adresse in
+     Rhuenda (2,5 km, deutlich ausserhalb der Karte) und eine bei
+     Hilgershausen (4,5 km) wurden beide als "liefern wir" bestaetigt,
+     obwohl beide sichtbar ausserhalb des gezeichneten Gebiets liegen.
+     Jetzt gilt: hat eine Zone ein echtes Polygon, zaehlt NUR das Polygon.
+     Der Umkreis ist nur noch die Rueckfalltuer fuer eine Zone, die noch
+     GAR KEIN Polygon hat (frisch angelegt) - damit eine solche Zone nicht
+     sofort jede Adresse blockiert. */
   const d=geoDistKm(REST_LOC.lat,REST_LOC.lng,lat,lng);
-  const matchPoly=function(z){ return z && Array.isArray(z.poly) && z.poly.length>=3 && geoInPoly(lat,lng,z.poly); };
+  const hatPoly=function(z){ return z && Array.isArray(z.poly) && z.poly.length>=3; };
+  const matchPoly=function(z){ return hatPoly(z) && geoInPoly(lat,lng,z.poly); };
   const matchKm=function(z){ const km=parseFloat(z&&z.km); return km>0 && d<=km; };
-  const first = DELIVERY_CFG.zoneMode==='polygon' ? matchPoly : matchKm;
-  const second= DELIVERY_CFG.zoneMode==='polygon' ? matchKm  : matchPoly;
-  for(let i=0;i<ZONES.length;i++){ if(first(ZONES[i]))  return {idx:i,zone:ZONES[i],dist:d}; }
-  for(let i=0;i<ZONES.length;i++){ if(second(ZONES[i])) return {idx:i,zone:ZONES[i],dist:d}; }
+  if(DELIVERY_CFG.zoneMode==='polygon'){
+    for(let i=0;i<ZONES.length;i++){ if(hatPoly(ZONES[i]) && matchPoly(ZONES[i])) return {idx:i,zone:ZONES[i],dist:d}; }
+    for(let i=0;i<ZONES.length;i++){ if(!hatPoly(ZONES[i]) && matchKm(ZONES[i])) return {idx:i,zone:ZONES[i],dist:d}; }
+    return null;
+  }
+  for(let i=0;i<ZONES.length;i++){ if(matchKm(ZONES[i])) return {idx:i,zone:ZONES[i],dist:d}; }
+  for(let i=0;i<ZONES.length;i++){ if(matchPoly(ZONES[i])) return {idx:i,zone:ZONES[i],dist:d}; }
   return null;
 }
 /* Prüft ob eine PLZ zur Zone des gewählten Ortes passt.
@@ -1473,16 +1486,29 @@ async function placeOrder(){
   let street='',zip='',city='',guests='';
   if(isDeliv){street=$('#f_street').value.trim();zip=$('#f_zip').value.trim();city=$('#f_city').value.trim();
     inv=bad('f_street',!street)||inv; inv=bad('f_zip',!zip)||inv; inv=bad('f_city',!city)||inv;
-    // Ort -> Zone sicher setzen; außerhalb des Liefergebiets -> stoppen
-    if(city){ if(!setOrt(city)){ inv=bad('f_city',true)||inv; toast('Zu diesem Ort liefern wir leider nicht.'); } }
-    // PLZ muss zur Zone des gewählten Ortes passen (verhindert falsche/Fake-Adressen)
-    if(city && zip && setOrt(city) && !plzMatchesZone(zip, activeZone)){
-      inv=bad('f_zip',true)||inv;
-      const ok=allZonePlz().join(', ');
-      toast('Die PLZ '+zip+' passt nicht zu „'+city+'". Wir liefern dort nur mit PLZ: '+ok);
+    /* v2026-09-12: DIESELBE LEHRE WIE BEI RENDERCARTLIST/GOCHECKOUT -
+       diese Pruefung kannte nur den "Manuell"-Weg (Ort exakt aus der
+       festen Liste). Bei Umkreis/Karte ist die Adresse laengst per
+       confirmDelivCheck() bestaetigt (activeZone steht fest) - der frei
+       eingegebene Ort passt aber nie zu einem Listeneintrag. Ergebnis:
+       "Felsberg" (echt, bestaetigt) wurde beim Absenden als "liefern wir
+       nicht" abgelehnt, obwohl die Karte kurz zuvor genau das Gegenteil
+       gesagt hatte. */
+    if(DELIVERY_CFG.mode==='manual'){
+      if(city){ if(!setOrt(city)){ inv=bad('f_city',true)||inv; toast('Zu diesem Ort liefern wir leider nicht.'); } }
+      if(city && zip && setOrt(city) && !plzMatchesZone(zip, activeZone)){
+        inv=bad('f_zip',true)||inv;
+        const ok=allZonePlz().join(', ');
+        toast('Die PLZ '+zip+' passt nicht zu „'+city+'". Wir liefern dort nur mit PLZ: '+ok);
+      }
+    } else if(!window._delivPrefill || !ZONES[activeZone]){
+      // Umkreis/Karte: ohne bestaetigte Adresse gibt es keine sichere Zone.
+      inv=bad('f_city',true)||inv;
+      toast('Bitte zuerst die Lieferadresse prüfen („Adresse ändern").');
     }
     // Mindestbestellwert prüfen (Sicherheits-Stopp)
-    if(city && setOrt(city)){
+    const _zoneOk = DELIVERY_CFG.mode==='manual' ? (city && setOrt(city)) : (!!window._delivPrefill && !!ZONES[activeZone]);
+    if(city && _zoneOk){
       const zMin=ZONES[activeZone]||{min:0,name:''};
       if(cartTotal() < zMin.min){
         inv=true;
@@ -2068,33 +2094,89 @@ function openAccount(){
   if(c && c.phone) renderAccount(c);
   else renderAcctLogin();
 }
+/* ═══ v2026-09-12: DREI GETRENNTE, KLAR BENANNTE WEGE ═══
+   Vorher gab es nur ein Feld "Handynummer", und die Kasse entschied
+   selbst, was als naechstes kommt - bei einer bekannten Nummer OHNE
+   Passwort landete man direkt bei "Passwort festlegen", ohne das je
+   angefragt zu haben. Das sah aus wie ein automatischer Login.
+   Jetzt entscheidet der Gast zuerst selbst: Einloggen, Registrieren,
+   oder Passwort vergessen. Was inhaltlich bei "kein Passwort gesetzt"
+   passiert, bleibt bewusst gleich (sofort online moeglich) - nur nicht
+   mehr als ueberraschender Nebeneffekt eines simplen "Weiter". */
 function renderAcctLogin(err){
   acctOverlay('<div class="dc-box">'
     +'<h3>👤 Mein Konto</h3>'
-    +'<p class="dc-sub">Mit Handynummer + Passwort anmelden. Neu hier? Einfach Nummer eingeben – wir legen dein Konto an. ⭐ Punkte sammeln & einlösen inklusive.</p>'
-    +'<label class="dc-l">Handynummer</label>'
-    +'<input id="ac_phone" class="dc-i" inputmode="tel" placeholder="z.B. 0151 2345678">'
-    +'<div class="dc-err" id="ac_err">'+(err||'')+'</div>'
-    +'<button class="checkout" onclick="acctPhoneNext()">Weiter ➜</button>'
+    +'<p class="dc-sub">⭐ Punkte sammeln & einlösen bei jeder Bestellung.</p>'
+    +(err?('<div class="dc-err" style="margin-bottom:10px">'+err+'</div>'):'')
+    +'<button class="checkout" onclick="renderAcctLoginForm()">🔓 Einloggen</button>'
+    +'<button class="checkout" style="background:var(--paper-2);margin-top:8px" onclick="renderAcctCreate(\'\')">📝 Registrieren (neu hier)</button>'
+    +'<button class="dc-cancel" onclick="renderAcctForgot()">Passwort vergessen?</button>'
     +'<button class="dc-cancel" onclick="closeAccount()">Schließen</button>'
     +'</div>');
-  var inp=document.getElementById('ac_phone');
-  if(inp) inp.addEventListener('keydown',function(e){ if(e.key==='Enter') acctPhoneNext(); });
 }
-async function acctPhoneNext(){
+/* 1) EINLOGGEN - Handynummer UND Passwort zusammen auf einem Schritt.
+   Ohne gesetztes Passwort (oder falsches) kommt eine allgemeine Meldung,
+   die auf "Passwort vergessen" verweist - kein automatischer Rueckfall
+   mehr aufs Passwort-Festlegen mitten im Login. */
+function renderAcctLoginForm(){
+  acctOverlay('<div class="dc-box">'
+    +'<h3>🔓 Einloggen</h3>'
+    +'<label class="dc-l">Handynummer</label>'
+    +'<input id="ac_phone" class="dc-i" inputmode="tel" placeholder="z.B. 0151 2345678">'
+    +'<label class="dc-l">Passwort</label>'
+    +'<input id="ac_pw" type="password" class="dc-i">'
+    +'<div class="dc-err" id="ac_err"></div>'
+    +'<button class="checkout" onclick="acctLoginGo()">🔓 Anmelden</button>'
+    +'<button class="dc-cancel" onclick="renderAcctLogin()">← Zurück</button>'
+    +'</div>');
+  var inp=document.getElementById('ac_pw');
+  if(inp) inp.addEventListener('keydown',function(e){ if(e.key==='Enter') acctLoginGo(); });
+}
+async function acctLoginGo(){
+  var raw=String((document.getElementById('ac_phone')||{}).value||'').trim();
+  var pw=String((document.getElementById('ac_pw')||{}).value||'');
+  var np=normPhone(raw);
+  var err=document.getElementById('ac_err');
+  if(np.length<6){ if(err) err.textContent='Bitte gültige Handynummer eingeben.'; return; }
+  if(!pw){ if(err) err.textContent='Bitte Passwort eingeben.'; return; }
+  if(err) err.textContent='Prüfe…';
+  var h=await custHashPw(np, pw);
+  var found=await kundeLogin(np, h);
+  if(found && found.ohnePasswort){
+    if(err) err.textContent='';
+    return renderAcctSetPw(np, found, false);
+  }
+  if(!found){ if(err) err.textContent='❌ Falsche Handynummer oder falsches Passwort. Noch kein Passwort? → „Passwort vergessen".'; return; }
+  var c={phone:found.phone||np, name:found.name||'', points:(typeof found.points==='number')?found.points:null, email:found.email||'', street:found.street||'', zip:found.zip||'', city:found.city||'', sess:h};
+  setCust(c);
+  renderAccount(c);
+}
+/* 2) PASSWORT VERGESSEN (deckt auch "noch nie eines gesetzt" ab) -
+   dieselbe Wirkung wie vorher bei einer bekannten Nummer ohne Passwort,
+   jetzt aber als eigener, bewusst gewaehlter Schritt statt Nebeneffekt
+   des Logins. */
+function renderAcctForgot(){
+  acctOverlay('<div class="dc-box">'
+    +'<h3>🔑 Passwort vergessen</h3>'
+    +'<p class="dc-sub">Gib deine Handynummer ein. Ist sie uns bekannt, kannst du direkt ein neues Passwort festlegen.</p>'
+    +'<label class="dc-l">Handynummer</label>'
+    +'<input id="ac_phone" class="dc-i" inputmode="tel" placeholder="z.B. 0151 2345678">'
+    +'<div class="dc-err" id="ac_err"></div>'
+    +'<button class="checkout" onclick="acctForgotGo()">Weiter ➜</button>'
+    +'<button class="dc-cancel" onclick="renderAcctLogin()">← Zurück</button>'
+    +'</div>');
+  var inp=document.getElementById('ac_phone');
+  if(inp) inp.addEventListener('keydown',function(e){ if(e.key==='Enter') acctForgotGo(); });
+}
+async function acctForgotGo(){
   var raw=String((document.getElementById('ac_phone')||{}).value||'').trim();
   var phone=normPhone(raw);
   var err=document.getElementById('ac_err');
   if(phone.length<6){ if(err) err.textContent='Bitte gültige Handynummer eingeben.'; return; }
   if(err) err.textContent='Prüfe…';
-  /* v2026-09-12: hier stand kundeBekannt(raw) - die UNnormalisierte Eingabe.
-     Wurde die Nummer mit Leerzeichen, Bindestrich oder Landesvorwahl
-     eingegeben, fand die Pruefung den laengst bekannten Kunden nicht und
-     zeigte immer nur "neuer Kunde". */
   var info=await kundeBekannt(phone);
-  if(info && info.bekannt && info.hatPasswort) return renderAcctPw(raw, {name:info.name||''});
-  if(info && info.bekannt) return renderAcctSetPw(raw, {name:info.name||''}, false);
-  return renderAcctCreate(raw);
+  if(!info || !info.bekannt){ if(err) err.textContent='Diese Nummer ist uns noch nicht bekannt. Bitte zuerst registrieren.'; return; }
+  return renderAcctSetPw(raw, {name:info.name||''}, false);
 }
 function renderAcctPw(raw, found){
   acctOverlay('<div class="dc-box">'
@@ -2154,6 +2236,8 @@ function renderAcctCreate(raw){
   acctOverlay('<div class="dc-box">'
     +'<h3>✨ Konto erstellen</h3>'
     +'<p class="dc-sub">Neu bei uns – schön, dass du da bist! Ab sofort sammelst du bei jeder Bestellung ⭐ Punkte.</p>'
+    +'<label class="dc-l">Handynummer</label>'
+    +'<input id="ac_phone" class="dc-i" inputmode="tel" placeholder="z.B. 0151 2345678" value="'+String(raw||'').replace(/[^0-9+ ]/g,'')+'">'
     +'<label class="dc-l">Dein Name</label>'
     +'<input id="ac_name" class="dc-i" placeholder="Vor- und Nachname">'
     +'<label class="dc-l">E-Mail (optional)</label>'
@@ -2163,23 +2247,25 @@ function renderAcctCreate(raw){
     +'<label class="dc-l">Passwort wiederholen</label>'
     +'<input id="ac_pw2" type="password" class="dc-i">'
     +'<div class="dc-err" id="ac_err"></div>'
-    +'<button class="checkout" onclick="acctCreate(\''+String(raw).replace(/[^0-9+ ]/g,'')+'\')">✅ Konto erstellen</button>'
+    +'<button class="checkout" onclick="acctCreate()">✅ Konto erstellen</button>'
     +'<button class="dc-cancel" onclick="renderAcctLogin()">← Zurück</button>'
     +'</div>');
 }
-async function acctCreate(raw){
+async function acctCreate(){
+  var raw=String((document.getElementById('ac_phone')||{}).value||'').trim();
   var name=String((document.getElementById('ac_name')||{}).value||'').trim();
   var email=String((document.getElementById('ac_email')||{}).value||'').trim();
   var p1=String((document.getElementById('ac_pw1')||{}).value||'');
   var p2=String((document.getElementById('ac_pw2')||{}).value||'');
   var err=document.getElementById('ac_err');
+  var np=normPhone(raw);
+  if(np.length<6){ if(err) err.textContent='Bitte gültige Handynummer eingeben.'; return; }
   if(!name){ if(err) err.textContent='Bitte Namen eingeben.'; return; }
   if(p1.length<4){ if(err) err.textContent='Passwort: mind. 4 Zeichen.'; return; }
   if(p1!==p2){ if(err) err.textContent='Passwörter stimmen nicht überein.'; return; }
   if(err) err.textContent='Erstelle Konto…';
-  var np=normPhone(raw);
-  var info=await kundeBekannt(np);   /* v2026-09-12: war raw, siehe oben */
-  if(info && info.bekannt){ if(err) err.textContent='Nummer existiert schon – bitte anmelden.'; return; }
+  var info=await kundeBekannt(np);
+  if(info && info.bekannt){ if(err) err.textContent='Nummer existiert schon – bitte einloggen oder „Passwort vergessen" nutzen.'; return; }
   var daten={name:name,phone:raw,kundenNr:raw};
   if(email) daten.email=email;
   var _h=await custHashPw(np,p1);
