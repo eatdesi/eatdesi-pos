@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v476</title>
+<title>eatDeSi POS v477</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -15369,23 +15369,6 @@ function OrderView({
             style:{ display:"block", fontSize:10.5, fontWeight:600, opacity:.6, marginTop:2 }
           }, "Tippen f\u00fcr Notiz (Uhrzeit, Gast, Allergie \u2026)")),
 
-    /* ═══ v475: KUNDE / LIEFERADRESSE NACHTRAEGLICH SETZEN ODER AENDERN ═══
-       Bisher stand die Wahl (Kunde, Abholung/Lieferung) nur ganz am Anfang
-       fest - sagte der Gast am Ende doch "liefert das bitte", musste man
-       neu anfangen. Antippen oeffnet dieselbe Kundensuche wie beim Start;
-       eine Adresse macht daraus automatisch eine Lieferung (wie ueberall
-       sonst in der Kasse), ohne Adresse bleibt/wird es eine Abholung. */
-    isTakeaway && onKundeAendern && /*#__PURE__*/React.createElement("span", {
-      onClick: onKundeAendern,
-      style:{ display:"block", fontSize:11.5, fontWeight:700, color:"#fff", cursor:"pointer",
-              marginTop:6, opacity:.95, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }
-    },
-      order && order.customerStreet
-        ? ("\uD83D\uDEF5 Lieferung \u00b7 " + (order.customerName || order.customerStreet))
-        : (order && (order.customerName || order.customerPhone))
-          ? ("\uD83E\uDD61 Abholung \u00b7 " + order.customerName)
-          : "\uD83D\uDC64 Kunde / Lieferadresse hinzuf\u00fcgen"),
-
     /* ═══ v423: BON GEDRUCKT, NOCH NICHT GEBUCHT ═══
        Wer den Zahlungs-Dialog ueber "Zurueck zur Bestellung" verlaesst, hat
        einen Bon auf dem Tresen liegen, zu dem es keine Buchung gibt. Ohne
@@ -15528,28 +15511,6 @@ function OrderView({
                   color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:13.5 }
         }, "\u2713 Speichern"))))),   /* v385: schliesst auch die Leisten-Spalte */
 
-  /* ═══ v475: ARTIKEL DIREKT SUCHEN, STATT DURCH KATEGORIEN TIPPEN ═══
-     Steht hier ein Suchbegriff, ersetzt eine flache Trefferliste (ueber
-     ALLE Kategorien) die normale Kategorie-Spalte + Artikelliste weiter
-     unten (siehe MENU_LIVE[activeCat] dort: "!artikelSuche.trim() &&").
-     Ein Treffer wird genauso angetippt wie jeder Artikel aus der Liste -
-     handleClick() kennt den Unterschied nicht. */
-  /*#__PURE__*/React.createElement("input", {
-    value: artikelSuche,
-    onChange: e => setArtikelSuche(e.target.value),
-    placeholder: "\uD83D\uDD0D Artikel suchen\u2026",
-    style: {
-      flex: 1, minWidth: 0, maxWidth: 220, margin: "0 8px",
-      padding: "7px 10px", borderRadius: 8, border: "1.5px solid rgba(255,255,255,.4)",
-      background: "rgba(255,255,255,.14)", color: "#fff", fontFamily: "inherit", fontSize: 13
-    }
-  }),
-  artikelSuche.trim() && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setArtikelSuche(""),
-    style: { background: "none", border: "none", color: "#fff", opacity: .85, fontSize: 16,
-             cursor: "pointer", padding: "0 6px 0 0", marginRight: 4 }
-  }, "\u2715"),
-
   /* ═══ v351: TISCHWECHSEL ═══
      Ohne diesen Knopf blieb nur: alten Tisch loeschen und alles neu
      tippen - was seit v346 auch noch einen Storno erzeugt, obwohl
@@ -15568,7 +15529,53 @@ function OrderView({
       fontWeight: 700,
       fontSize: 16
     }
-  }, fmt(total))), items.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, fmt(total))),
+
+  /* ═══ v477: ZWEI EIGENE BOXEN STATT ALLES IN EINER ZEILE ═══
+     v475/v476 hatten die Kunde-Zeile und das Suchfeld noch in die pinke
+     Kopfzeile gequetscht - daneben stand aber schon der dreizeilige
+     Notiz-Block (Titel, Notiz-Hinweis, Kunde), und beides ueberlagerte
+     sich auf dem Handy sichtbar. Jetzt eine eigene, helle Zeile direkt
+     darunter, mit zwei klar getrennten, umrandeten Boxen. Die Kunde-Box
+     gibt es nur bei Takeaway - die Suche gilt fuer JEDE Bestellung
+     (auch am Tisch will man mal schnell einen Artikel suchen). */
+  /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", gap: 8, padding: "8px 12px", background: "#fdf6e8",
+             borderBottom: "1px solid #eee" }
+  },
+    isTakeaway && onKundeAendern && /*#__PURE__*/React.createElement("button", {
+      onClick: onKundeAendern,
+      style: {
+        flex: "0 1 auto", maxWidth: "45%", display: "flex", alignItems: "center", gap: 5,
+        padding: "9px 12px", borderRadius: 10, border: "2px solid " + (order && order.customerStreet ? C.green : "#ddd"),
+        background: "#fff", color: order && order.customerStreet ? C.green : "#555",
+        cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12.5,
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+      }
+    },
+      order && order.customerStreet
+        ? ("\uD83D\uDEF5 " + (order.customerName || order.customerStreet))
+        : (order && (order.customerName || order.customerPhone))
+          ? ("\uD83E\uDD61 " + order.customerName)
+          : "\uD83D\uDC64 Kunde"),
+    /*#__PURE__*/React.createElement("div", {
+      style: { flex: 1, display: "flex", alignItems: "center", gap: 6, padding: "0 10px",
+               borderRadius: 10, border: "2px solid #ddd", background: "#fff" }
+    },
+      /*#__PURE__*/React.createElement("span", { style: { fontSize: 14, opacity: .6 } }, "\uD83D\uDD0D"),
+      /*#__PURE__*/React.createElement("input", {
+        value: artikelSuche,
+        onChange: e => setArtikelSuche(e.target.value),
+        placeholder: "Artikel suchen\u2026",
+        style: { flex: 1, minWidth: 0, border: "none", outline: "none", padding: "9px 0",
+                 fontFamily: "inherit", fontSize: 13.5, background: "transparent", color: "#333" }
+      }),
+      artikelSuche.trim() && /*#__PURE__*/React.createElement("button", {
+        onClick: () => setArtikelSuche(""),
+        style: { background: "none", border: "none", color: "#999", fontSize: 15, cursor: "pointer", padding: 2 }
+      }, "\u2715"))),
+
+  items.length > 0 && /*#__PURE__*/React.createElement("div", {
     ref: orderListRef,
     /* v313: Die Bestellliste war auf 220 px gedeckelt und weiss wie die
        Speisekarte darunter - ab der vierten Zeile musste man in einem
@@ -25513,7 +25520,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v476"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v477"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27428,11 +27435,18 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
      eingetragen" wird aufgeraeumt. */
   const belksLeereTaAufraeumen = () => {
     if (typeof activeTable !== "string" || !activeTable.startsWith("ta_")) return;
-    const eintrag = (takeaway || []).find(x => window.belksTaIst(x, activeTable) && !x.deleted);
+    /* v477 GEFUNDEN: belksTaIst() vergleicht String(x.id) mit der reinen
+       Nummer, NICHT mit "ta_5". Hier stand bisher "activeTable" (mit dem
+       Vorsatz) direkt drin - dadurch fand find() nie einen Treffer, und
+       der leere Entwurf wurde still NICHT geloescht, obwohl es so aussah,
+       als wuerde die Funktion laufen. Derselbe Umweg wie ueberall sonst
+       im Code (siehe deleteTakeaway-Aufrufe): erst die Nummer heraus. */
+    const taId = parseInt(String(activeTable).replace("ta_", ""));
+    const eintrag = (takeaway || []).find(x => window.belksTaIst(x, taId) && !x.deleted);
     if (!eintrag) return;
     const leer = (!eintrag.items || eintrag.items.length === 0)
       && !eintrag.done && !eintrag.customerName && !eintrag.customerPhone && !eintrag.note;
-    if (leer) deleteTakeaway(activeTable);
+    if (leer) deleteTakeaway(taId);
   };
 
   /* v475: Kunde/Lieferadresse einer LAUFENDEN Takeaway-Bestellung setzen
