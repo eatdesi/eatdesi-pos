@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v474</title>
+<title>eatDeSi POS v476</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -14919,7 +14919,8 @@ function OrderView({
   optionGroups,
   menuData,
   printerSettings,
-  loggedInUser
+  loggedInUser,
+  onKundeAendern   // v475: Kunde/Lieferadresse nachtraeglich hinzufuegen/aendern
 }) {
   const MENU_LIVE = menuData || MENU;
   const [activeCat, setActiveCat] = useState(Object.keys(MENU_LIVE)[0] || Object.keys(MENU)[0]);
@@ -14929,6 +14930,9 @@ function OrderView({
   /* v385: Notiz fuer den GANZEN Tisch - nicht fuer eine Zeile. */
   const [tnOffen, setTnOffen] = useState(false);
   const [tnText, setTnText] = useState("");
+  /* v475: Artikel-Suche ueber alle Kategorien hinweg - siehe die Kopfzeile
+     weiter unten und den Listen-Umbau bei MENU_LIVE[activeCat]. */
+  const [artikelSuche, setArtikelSuche] = useState("");
   const loeschTipp = React.useRef({ n: 0, zeit: 0 });   // v393: drei Tipper auf die Summe
   const [azTarget, setAzTarget] = useState(null);   // v392: Artikel-Storno
   const [azGrund, setAzGrund]   = useState("");
@@ -14996,6 +15000,24 @@ function OrderView({
   const lieferFee = isTakeaway && liefergebührOn ? (parseFloat(liefergebührAmt)||0) : 0;
   const total = itemsTotal + lieferFee;
   const cats = Object.keys(MENU_LIVE);
+  /* v475: Flache Trefferliste ueber ALLE Kategorien, fuer die Artikel-Suche
+     in der Kopfzeile. Bei jedem Artikel steht seine eigene Kategorie dran
+     (_sucheCat) - sonst wuerde ein Treffer beim Antippen unter der gerade
+     ausgewaehlten Sidebar-Kategorie einsortiert, egal wo er wirklich
+     hingehoert (Kueche/Bar-Zuordnung waere dann falsch). */
+  const artikelTreffer = React.useMemo(() => {
+    const q = (artikelSuche || "").trim().toLowerCase();
+    if (!q) return null;
+    const out = [];
+    cats.forEach(function (cat) {
+      (MENU_LIVE[cat] || []).forEach(function (it) {
+        if ((it.name || "").toLowerCase().indexOf(q) > -1 || String(it.nr || "").toLowerCase().indexOf(q) > -1) {
+          out.push(Object.assign({}, it, { _sucheCat: cat }));
+        }
+      });
+    });
+    return out;
+  }, [artikelSuche, MENU_LIVE]);
   // Findet die Kategorie eines Artikels (fuer Bon-Gruppierung nach Kategorie)
   /* Kategorie bestimmen.
      Frueher wurde ueber die id gesucht:
@@ -15347,6 +15369,23 @@ function OrderView({
             style:{ display:"block", fontSize:10.5, fontWeight:600, opacity:.6, marginTop:2 }
           }, "Tippen f\u00fcr Notiz (Uhrzeit, Gast, Allergie \u2026)")),
 
+    /* ═══ v475: KUNDE / LIEFERADRESSE NACHTRAEGLICH SETZEN ODER AENDERN ═══
+       Bisher stand die Wahl (Kunde, Abholung/Lieferung) nur ganz am Anfang
+       fest - sagte der Gast am Ende doch "liefert das bitte", musste man
+       neu anfangen. Antippen oeffnet dieselbe Kundensuche wie beim Start;
+       eine Adresse macht daraus automatisch eine Lieferung (wie ueberall
+       sonst in der Kasse), ohne Adresse bleibt/wird es eine Abholung. */
+    isTakeaway && onKundeAendern && /*#__PURE__*/React.createElement("span", {
+      onClick: onKundeAendern,
+      style:{ display:"block", fontSize:11.5, fontWeight:700, color:"#fff", cursor:"pointer",
+              marginTop:6, opacity:.95, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }
+    },
+      order && order.customerStreet
+        ? ("\uD83D\uDEF5 Lieferung \u00b7 " + (order.customerName || order.customerStreet))
+        : (order && (order.customerName || order.customerPhone))
+          ? ("\uD83E\uDD61 Abholung \u00b7 " + order.customerName)
+          : "\uD83D\uDC64 Kunde / Lieferadresse hinzuf\u00fcgen"),
+
     /* ═══ v423: BON GEDRUCKT, NOCH NICHT GEBUCHT ═══
        Wer den Zahlungs-Dialog ueber "Zurueck zur Bestellung" verlaesst, hat
        einen Bon auf dem Tresen liegen, zu dem es keine Buchung gibt. Ohne
@@ -15488,6 +15527,29 @@ function OrderView({
           style:{ flex:1, padding:12, borderRadius:10, border:"none", background:C.green,
                   color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:13.5 }
         }, "\u2713 Speichern"))))),   /* v385: schliesst auch die Leisten-Spalte */
+
+  /* ═══ v475: ARTIKEL DIREKT SUCHEN, STATT DURCH KATEGORIEN TIPPEN ═══
+     Steht hier ein Suchbegriff, ersetzt eine flache Trefferliste (ueber
+     ALLE Kategorien) die normale Kategorie-Spalte + Artikelliste weiter
+     unten (siehe MENU_LIVE[activeCat] dort: "!artikelSuche.trim() &&").
+     Ein Treffer wird genauso angetippt wie jeder Artikel aus der Liste -
+     handleClick() kennt den Unterschied nicht. */
+  /*#__PURE__*/React.createElement("input", {
+    value: artikelSuche,
+    onChange: e => setArtikelSuche(e.target.value),
+    placeholder: "\uD83D\uDD0D Artikel suchen\u2026",
+    style: {
+      flex: 1, minWidth: 0, maxWidth: 220, margin: "0 8px",
+      padding: "7px 10px", borderRadius: 8, border: "1.5px solid rgba(255,255,255,.4)",
+      background: "rgba(255,255,255,.14)", color: "#fff", fontFamily: "inherit", fontSize: 13
+    }
+  }),
+  artikelSuche.trim() && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setArtikelSuche(""),
+    style: { background: "none", border: "none", color: "#fff", opacity: .85, fontSize: 16,
+             cursor: "pointer", padding: "0 6px 0 0", marginRight: 4 }
+  }, "\u2715"),
+
   /* ═══ v351: TISCHWECHSEL ═══
      Ohne diesen Knopf blieb nur: alten Tisch loeschen und alles neu
      tippen - was seit v346 auch noch einen Storno erzeugt, obwohl
@@ -15656,9 +15718,9 @@ function OrderView({
       flex: 1,
       overflowY: "auto"
     }
-  }, MENU_LIVE[activeCat] && (MENU_LIVE[activeCat]).map((item, idx) => /*#__PURE__*/React.createElement("div", {
+  }, (artikelSuche.trim() ? artikelTreffer : MENU_LIVE[activeCat]) && (artikelSuche.trim() ? artikelTreffer : MENU_LIVE[activeCat]).map((item, idx) => /*#__PURE__*/React.createElement("div", {
     key: item.id,
-    onClick: () => handleClick(item, activeCat),
+    onClick: () => handleClick(item, item._sucheCat || activeCat),
     style: {
       display: "flex",
       alignItems: "center",
@@ -15677,7 +15739,9 @@ function OrderView({
       fontWeight: 600,
       fontSize: 13
     }
-  }, item.nr, ". ", item.name), item.vegan && /*#__PURE__*/React.createElement("span", {
+  }, item.nr, ". ", item.name), item._sucheCat && /*#__PURE__*/React.createElement("span", {
+    style: { marginLeft: 6, fontSize: 10, color: "#888", fontWeight: 600 }
+  }, "· ", item._sucheCat), item.vegan && /*#__PURE__*/React.createElement("span", {
     style: {
       marginLeft: 5,
       fontSize: 10,
@@ -25449,7 +25513,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v474"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v476"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26640,6 +26704,11 @@ function App() {
   };
 
   const [showTaCustomerSearch, setShowTaCustomerSearch] = useState(false);
+  /* v475: Wird die Suche fuer eine BEREITS laufende Takeaway-Bestellung
+     geoeffnet (Kunde/Lieferadresse nachtraeglich hinzufuegen oder aendern),
+     steht hier deren id - sonst null (dann legt die Suche wie bisher eine
+     NEUE Bestellung an). */
+  const [taKundeEditId, setTaKundeEditId] = useState(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   /* ═══ v385: NOTIZ AM GANZEN TISCH ═══
      Bisher liess sich nur an einzelnen ARTIKELN etwas vermerken. Angaben,
@@ -27342,6 +27411,46 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
       ? Object.assign({}, x, {
           deleted: true,
           deletedAt: new Date((window.belksJetzt ? window.belksJetzt() : Date.now())).toISOString()
+        })
+      : x));
+  };
+
+  /* v475: EIN ENTWURF OHNE ARTIKEL WIRD NIE GESPEICHERT.
+     "Neue Takeaway Bestellung" legt sofort einen Eintrag an (items:[]) -
+     das ist Absicht, damit auf einem Geraet ohne Verbindung nichts
+     verloren geht, waehrend der Kellner schon Artikel eintippt. Verlaesst
+     er die Ansicht aber, OHNE je einen Artikel hinzuzufuegen, blieb dieser
+     leere Entwurf fuer immer in der Liste stehen ("0 Artikel · 0,00 €").
+     Diese Funktion raeumt genau DAS beim Verlassen auf - denselben Weg wie
+     ein normales Loeschen (markieren, nicht entfernen), damit es sich mit
+     einem Geraet, das gerade offline ist, nicht beisst. Ein Entwurf MIT
+     Notiz, Kunde oder Artikeln bleibt unangetastet - nur "wirklich nichts
+     eingetragen" wird aufgeraeumt. */
+  const belksLeereTaAufraeumen = () => {
+    if (typeof activeTable !== "string" || !activeTable.startsWith("ta_")) return;
+    const eintrag = (takeaway || []).find(x => window.belksTaIst(x, activeTable) && !x.deleted);
+    if (!eintrag) return;
+    const leer = (!eintrag.items || eintrag.items.length === 0)
+      && !eintrag.done && !eintrag.customerName && !eintrag.customerPhone && !eintrag.note;
+    if (leer) deleteTakeaway(activeTable);
+  };
+
+  /* v475: Kunde/Lieferadresse einer LAUFENDEN Takeaway-Bestellung setzen
+     oder aendern - z.B. wenn ein Gast, der ohne Angaben gestartet hat,
+     am Ende doch geliefert bekommen moechte. customer=null loescht die
+     Angaben wieder (damit gilt die Bestellung automatisch wieder als
+     Abholung - dieselbe Regel, die ueberall sonst schon entscheidet:
+     eine Strasse macht eine Lieferung). Traegt eine eigene Uhrzeit wie
+     jede andere Aenderung an einer Abholung (siehe deleteTakeaway). */
+  const updateTaKunde = (taId, customer) => {
+    setTakeaway(t => (t || []).map(x => window.belksTaIst(x, taId)
+      ? Object.assign({}, x, {
+          customerName: customer?.name || null,
+          customerPhone: customer?.phone || null,
+          customerStreet: customer?.street || null,
+          customerPlz: customer?.plz || null,
+          customerCity: customer?.city || null,
+          geaendert: window.belksJetzt ? window.belksJetzt() : Date.now()
         })
       : x));
   };
@@ -28315,9 +28424,17 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
   showTaCustomerSearch && /*#__PURE__*/React.createElement(TakeawayCustomerSearch, {
     customers: customers,
     completedOrders: completedOrders,
-    onSelect: (customer) => { setShowTaCustomerSearch(false); newTakeaway(customer); },
-    onSkip: () => { setShowTaCustomerSearch(false); newTakeaway(null); },
-    onClose: () => setShowTaCustomerSearch(false),
+    onSelect: (customer) => {
+      setShowTaCustomerSearch(false);
+      if (taKundeEditId != null) { updateTaKunde(taKundeEditId, customer); setTaKundeEditId(null); }
+      else newTakeaway(customer);
+    },
+    onSkip: () => {
+      setShowTaCustomerSearch(false);
+      if (taKundeEditId != null) { updateTaKunde(taKundeEditId, null); setTaKundeEditId(null); }
+      else newTakeaway(null);
+    },
+    onClose: () => { setShowTaCustomerSearch(false); setTaKundeEditId(null); },
     onAddCustomer: c => setCustomers(p => [...p, c])
   }), menuOpen && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -28443,6 +28560,7 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
     }
   }, view === "order" && /*#__PURE__*/React.createElement("button", {
     onClick: () => {
+      belksLeereTaAufraeumen();
       setView("tables");
       setActiveTable(null);
     },
@@ -28895,7 +29013,8 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
   }].map(tab => /*#__PURE__*/React.createElement("button", {
     key: tab.id,
     onClick: () => {
-      if (tab.id === "takeaway") { setShowTaCustomerSearch(true); } else {
+      if (tab.id === "takeaway") { belksLeereTaAufraeumen(); setShowTaCustomerSearch(true); } else {
+        belksLeereTaAufraeumen();
         setView(tab.id);
         setActiveTable(null);
       }
@@ -28991,7 +29110,11 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
     optionGroups: optionGroups,
     menuData: menuData,
     printerSettings: printerSettings,
-    loggedInUser: loggedInUser
+    loggedInUser: loggedInUser,
+    onKundeAendern: isTakeaway ? (() => {
+      setTaKundeEditId(parseInt(String(activeTable).replace("ta_", "")));
+      setShowTaCustomerSearch(true);
+    }) : null
   }), view === "kitchen" && /*#__PURE__*/React.createElement(KitchenView, {
     orders: tableOrders,
     takeaway: takeaway,
