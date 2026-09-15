@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v481</title>
+<title>eatDeSi POS v484</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -15539,7 +15539,7 @@ function OrderView({
           ? ("\uD83E\uDD61 " + order.customerName)
           : "\uD83D\uDC64 Kunde"),
     /*#__PURE__*/React.createElement("div", {
-      style: { display: "flex", alignItems: "center", gap: 4, minWidth: 0, flex: "1 1 auto", maxWidth: 150,
+      style: { display: "flex", alignItems: "center", gap: 4, minWidth: 0, flex: "0 1 auto", maxWidth: 70,
                padding: "5px 9px", borderRadius: 8, border: "1.5px solid rgba(255,255,255,.4)",
                background: "rgba(255,255,255,.92)" }
     },
@@ -15547,8 +15547,8 @@ function OrderView({
       /*#__PURE__*/React.createElement("input", {
         value: artikelSuche,
         onChange: e => setArtikelSuche(e.target.value),
-        placeholder: "Artikel suchen\u2026",
-        style: { flex: 1, minWidth: 0, border: "none", outline: "none", padding: 0,
+        placeholder: "",
+        style: { flex: 1, minWidth: 0, width: "100%", border: "none", outline: "none", padding: 0,
                  fontFamily: "inherit", fontSize: 12, background: "transparent", color: "#333" }
       }),
       artikelSuche.trim() && /*#__PURE__*/React.createElement("button", {
@@ -23276,7 +23276,29 @@ function FahrerView({ takeaway, setTakeaway, completedOrders, setCompletedOrders
         : null
     }));
   // Offene Lieferungen: haben eine Adresse und sind noch nicht abgeschlossen
-  const alle = (takeaway || []).filter(t => t && !t.deleted && !t.done && (t.items || []).length > 0 && adresse(t))   /* v433 */
+  /* v482: ALTE, NIE ABGESCHLOSSENE LIEFERUNGEN VERSTOPFEN DIE HEUTIGE TOUR.
+     Eine unbezahlte Abholung bleibt absichtlich fuer immer liegen (v467) -
+     das Geld darf nie stillschweigend verschwinden. Aber genau deshalb
+     sammelten sich in "Meine Touren" irgendwann Lieferungen von vor Tagen
+     an, die niemand je als geliefert markiert hatte - der Fahrer sah jeden
+     Morgen dieselbe alte Karte zwischen den echten, heutigen Touren.
+     Der Datensatz selbst wird hier NICHT geloescht (das Geld bleibt in
+     eatdesi_takeaway nachvollziehbar) - nur die TOUR-ANSICHT zeigt eine
+     Lieferung vor dem aktuellen Geschaeftstag (Grenze: 4 Uhr, dieselbe
+     Grenze wie beim naechtlichen Automatik-Abschluss) nicht mehr als
+     "heute zu erledigen". Wer so etwas findet, klaert es ueber die
+     normale Abholungs-Liste, nicht ueber die Fahrer-Tour. */
+  const _geschaeftstagStart = window.belksGeschaeftstagStart ? window.belksGeschaeftstagStart() : (() => {
+    const g = new Date();
+    g.setHours(4, 0, 0, 0);
+    if (new Date().getHours() < 4) g.setDate(g.getDate() - 1);
+    return g.getTime();
+  })();   /* v483: dieselbe Stelle wie KDS Pro, Kueche, Bar - siehe dort */
+  const _amHeutigenTag = (t) => {
+    const z = new Date(t.time || 0).getTime();
+    return !(z > 0 && z < _geschaeftstagStart);
+  };
+  const alle = (takeaway || []).filter(t => t && !t.deleted && !t.done && (t.items || []).length > 0 && adresse(t) && _amHeutigenTag(t))   /* v433, v482 */
     .concat(wsAlle.filter(t => (t.items || []).length > 0 && adresse(t)));
   const offen = alle.filter(t => !t.geliefert);
   const liste = (nurMeine ? offen.filter(t => t.fahrer === ich) : offen)
@@ -25520,7 +25542,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v481"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v484"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -36586,7 +36608,7 @@ function KdsProView({ tableOrders, takeaway, setTableOrders, completedOrders, se
   });
 
   // 2) TAKEAWAY (POS Abholung/Lieferung): aus takeaway-Liste, Status im Feld kdsStatus (Default 'new')
-  var taTickets = (takeaway||[]).filter(function(t){ return !t.deleted && !t.done && !t.kdsHidden && (t.items||[]).length>0; })   /* v433 */.map(function(ta){
+  var taTickets = window.belksTakeawayOffen(takeaway).filter(function(t){ return !t.kdsHidden; })   /* v433, v483 */.map(function(ta){
     var deliv = ta.orderType==='Lieferung' || !!ta.customerStreet;
     var lbl = (ta.source && ta.source!=='Takeaway') ? ta.source : '🥡 Takeaway';
     return {
@@ -37273,9 +37295,30 @@ window.belksZeitMerken = function(resp){
    ihn nie umgesetzt. Ich habe das in v433 eingebaut, als ich sechs
    Filterstellen zu einer zusammengezogen habe - dabei ist "bezahlt"
    verlorengegangen. */
+/* v483: EINE STELLE FUER "AKTUELLER GESCHAEFTSTAG" - STATT VIER.
+   KDS Pro, Kueche, Bar und Meine Touren pruefen jede fuer sich, ob eine
+   Abholung noch offen ist - und drohten dabei genau in das Muster zu
+   laufen, das dieser Code immer wieder gekostet hat: zwei (hier: vier)
+   Orte, die dasselbe wissen muessen, laufen auseinander. Eine alte,
+   nie abgeschlossene Lieferung (44597 Minuten = ueber 30 Tage) stand
+   noch in KDS Pro, Kueche und Bar, obwohl "Meine Touren" sie schon
+   nicht mehr zeigte.
+   Jetzt gibt es EINE Funktion fuer die Grenze - 4 Uhr, dieselbe Stunde
+   wie beim naechtlichen Automatik-Abschluss - und jede Ansicht fragt
+   nur noch hier nach. */
+window.belksGeschaeftstagStart = function(){
+  var g = new Date();
+  g.setHours(4, 0, 0, 0);
+  if (new Date().getHours() < 4) g.setDate(g.getDate() - 1);
+  return g.getTime();
+};
 window.belksTakeawayOffen = function(liste){
+  var grenze = window.belksGeschaeftstagStart();
   return (liste || []).filter(function(t){
-    return t && !t.deleted && !t.done && (t.items || []).length > 0;
+    if (!t || t.deleted || t.done || !(t.items || []).length) return false;
+    var z = new Date(t.time || 0).getTime();
+    if (z > 0 && z < grenze) return false;   /* v483: nicht der aktuelle Geschaeftstag */
+    return true;
   });
 };
 
