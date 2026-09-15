@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v480</title>
+<title>eatDeSi POS v481</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -15367,50 +15367,6 @@ function OrderView({
           }, "\uD83D\uDCDD ", tischNotiz)
         : null),   /* v478: Einladungstext "Tippen fuer Notiz..." weg - spart Platz */
 
-    /* ═══ v478: KUNDE + SUCHE KLEIN, INLINE IN DER KOPFZEILE ═══
-       v477 hatte dafuer noch eine eigene Zeile darunter - wirkte zu
-       ausladend. Jetzt sitzen beide klein direkt in der pinken Kopfzeile,
-       im Platz, der durch den Wegfall der Notiz-Einladung frei wurde.
-       Die Kunde-Box gibt es nur bei Takeaway, die Suche bei jeder
-       Bestellung. */
-    /*#__PURE__*/React.createElement("div", {
-      style: { display: "flex", alignItems: "center", gap: 5, flex: "0 1 auto", minWidth: 0 }
-    },
-      isTakeaway && onKundeAendern && /*#__PURE__*/React.createElement("button", {
-        onClick: onKundeAendern,
-        style: {
-          display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
-          padding: "5px 9px", borderRadius: 8, border: "1.5px solid rgba(255,255,255,.55)",
-          background: (order && order.customerStreet) ? "rgba(255,255,255,.9)" : "rgba(255,255,255,.14)",
-          color: (order && order.customerStreet) ? C.green : "#fff",
-          cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 11.5,
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 110
-        }
-      },
-        order && order.customerStreet
-          ? ("\uD83D\uDEF5 " + (order.customerName || order.customerStreet))
-          : (order && (order.customerName || order.customerPhone))
-            ? ("\uD83E\uDD61 " + order.customerName)
-            : "\uD83D\uDC64 Kunde"),
-      /*#__PURE__*/React.createElement("div", {
-        style: { display: "flex", alignItems: "center", gap: 4, minWidth: 0, flex: "1 1 auto", maxWidth: 150,
-                 padding: "5px 9px", borderRadius: 8, border: "1.5px solid rgba(255,255,255,.4)",
-                 background: "rgba(255,255,255,.92)" }
-      },
-        /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, opacity: .55, flexShrink: 0 } }, "\uD83D\uDD0D"),
-        /*#__PURE__*/React.createElement("input", {
-          value: artikelSuche,
-          onChange: e => setArtikelSuche(e.target.value),
-          placeholder: "Artikel suchen\u2026",
-          style: { flex: 1, minWidth: 0, border: "none", outline: "none", padding: 0,
-                   fontFamily: "inherit", fontSize: 12, background: "transparent", color: "#333" }
-        }),
-        artikelSuche.trim() && /*#__PURE__*/React.createElement("button", {
-          onClick: () => setArtikelSuche(""),
-          style: { background: "none", border: "none", color: "#999", fontSize: 13,
-                   cursor: "pointer", padding: 0, flexShrink: 0 }
-        }, "\u2715"))),
-
     /* ═══ v423: BON GEDRUCKT, NOCH NICHT GEBUCHT ═══
        Wer den Zahlungs-Dialog ueber "Zurueck zur Bestellung" verlaesst, hat
        einen Bon auf dem Tresen liegen, zu dem es keine Buchung gibt. Ohne
@@ -25564,7 +25520,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v480"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v481"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
