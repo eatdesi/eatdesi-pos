@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v479</title>
+<title>eatDeSi POS v480</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -15336,8 +15336,6 @@ function OrderView({
       background: C.pink,
       padding: "9px 14px",
       display: "flex",
-      flexWrap: "nowrap",
-      gap: 8,
       justifyContent: "space-between",
       alignItems: "center"
     }
@@ -15360,10 +15358,8 @@ function OrderView({
        Notiz zum ganzen Vorgang - Uhrzeit, Hinweis zum Gast, Allergie.
        Steht eine Notiz da, ist sie hier zu lesen, ohne dass man sie
        oeffnen muss. */
-    /*#__PURE__*/React.createElement("span", {
-      style:{ display:"block", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }
-    },
-      "\u270F\uFE0F ", String(label || "").replace(" \u00b7 Entwurf", ""),   /* v479: "· Entwurf" spart Platz in der einzeiligen Kopfzeile - der Status steht ohnehin im Reiter oben */
+    /*#__PURE__*/React.createElement("span", { style:{ display:"block" } },
+      "\u270F\uFE0F ", String(label || "").replace(" \u00b7 Entwurf", ""),   /* v480: "· Entwurf" spart Platz - der Status steht ohnehin im Reiter oben */
       tischNotiz
         ? /*#__PURE__*/React.createElement("span", {
             style:{ display:"block", fontSize:11.5, fontWeight:600, opacity:.95, marginTop:2,
@@ -15556,6 +15552,54 @@ function OrderView({
           style:{ flex:1, padding:12, borderRadius:10, border:"none", background:C.green,
                   color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:13.5 }
         }, "\u2713 Speichern"))))),   /* v385: schliesst auch die Leisten-Spalte */
+
+  /* ═══ v480: KUNDE + SUCHE - ALS GESCHWISTER DER KOPFZEILE, NICHT DARIN ═══
+     GEFUNDEN (mit einem echten JS-Parser statt Klammern zaehlen): die
+     klickbare Notiz-Sprechblase ist ein einziger riesiger <span>, der
+     Titel, Notiz, den Bon-gedruckt-Hinweis und mehr umschliesst. v478
+     hatte diesen Block versehentlich als KIND dieser Sprechblase
+     eingefuegt (span > <div>), und ein <div> erzwingt dort immer einen
+     Zeilenumbruch - egal was am Eltern-Element fuer flexWrap steht.
+     Jetzt haengt der Block auf derselben Ebene wie die Sprechblase,
+     "Wechseln" und der Preis - also wirklich in der pinken Kopfzeile,
+     nicht darin verschachtelt. */
+  /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", alignItems: "center", gap: 5, flex: "0 1 auto", minWidth: 0 }
+  },
+    isTakeaway && onKundeAendern && /*#__PURE__*/React.createElement("button", {
+      onClick: onKundeAendern,
+      style: {
+        display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
+        padding: "5px 9px", borderRadius: 8, border: "1.5px solid rgba(255,255,255,.55)",
+        background: (order && order.customerStreet) ? "rgba(255,255,255,.9)" : "rgba(255,255,255,.14)",
+        color: (order && order.customerStreet) ? C.green : "#fff",
+        cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 11.5,
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 110
+      }
+    },
+      order && order.customerStreet
+        ? ("\uD83D\uDEF5 " + (order.customerName || order.customerStreet))
+        : (order && (order.customerName || order.customerPhone))
+          ? ("\uD83E\uDD61 " + order.customerName)
+          : "\uD83D\uDC64 Kunde"),
+    /*#__PURE__*/React.createElement("div", {
+      style: { display: "flex", alignItems: "center", gap: 4, minWidth: 0, flex: "1 1 auto", maxWidth: 150,
+               padding: "5px 9px", borderRadius: 8, border: "1.5px solid rgba(255,255,255,.4)",
+               background: "rgba(255,255,255,.92)" }
+    },
+      /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, opacity: .55, flexShrink: 0 } }, "\uD83D\uDD0D"),
+      /*#__PURE__*/React.createElement("input", {
+        value: artikelSuche,
+        onChange: e => setArtikelSuche(e.target.value),
+        placeholder: "Artikel suchen\u2026",
+        style: { flex: 1, minWidth: 0, border: "none", outline: "none", padding: 0,
+                 fontFamily: "inherit", fontSize: 12, background: "transparent", color: "#333" }
+      }),
+      artikelSuche.trim() && /*#__PURE__*/React.createElement("button", {
+        onClick: () => setArtikelSuche(""),
+        style: { background: "none", border: "none", color: "#999", fontSize: 13,
+                 cursor: "pointer", padding: 0, flexShrink: 0 }
+      }, "\u2715"))),
 
   /* ═══ v351: TISCHWECHSEL ═══
      Ohne diesen Knopf blieb nur: alten Tisch loeschen und alles neu
@@ -25520,7 +25564,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v479"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v480"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
