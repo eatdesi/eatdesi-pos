@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v478</title>
+<title>eatDeSi POS v479</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -15336,6 +15336,8 @@ function OrderView({
       background: C.pink,
       padding: "9px 14px",
       display: "flex",
+      flexWrap: "nowrap",
+      gap: 8,
       justifyContent: "space-between",
       alignItems: "center"
     }
@@ -15358,8 +15360,10 @@ function OrderView({
        Notiz zum ganzen Vorgang - Uhrzeit, Hinweis zum Gast, Allergie.
        Steht eine Notiz da, ist sie hier zu lesen, ohne dass man sie
        oeffnen muss. */
-    /*#__PURE__*/React.createElement("span", { style:{ display:"block" } },
-      "\u270F\uFE0F ", label,
+    /*#__PURE__*/React.createElement("span", {
+      style:{ display:"block", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }
+    },
+      "\u270F\uFE0F ", String(label || "").replace(" \u00b7 Entwurf", ""),   /* v479: "· Entwurf" spart Platz in der einzeiligen Kopfzeile - der Status steht ohnehin im Reiter oben */
       tischNotiz
         ? /*#__PURE__*/React.createElement("span", {
             style:{ display:"block", fontSize:11.5, fontWeight:600, opacity:.95, marginTop:2,
@@ -25516,7 +25520,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v478"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v479"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
