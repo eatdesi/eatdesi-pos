@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v484</title>
+<title>eatDeSi POS v486</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -10229,7 +10229,7 @@ function BonModal({
   const applyGutschein = () => {
     const code = belksGutscheinKey(gutscheinCode);   // v329
     if(!code) return;
-    const g = (gutscheine||[]).find(x => belksGutscheinKey(x.code) === code && !x.used);
+    const g = (gutscheine||[]).find(x => belksGutscheinKey(x.code) === code && !x.used && !x.deleted);   /* v485 */
     if(!g) { setGutscheinError("❌ Ungültiger oder bereits eingelöster Code!"); return; }
     setGutscheinApplied(g);
     setGutscheinError("");
@@ -11465,7 +11465,7 @@ function CheckoutModal({ label, items, total, directSplit, printerSettings, onCl
 
   const applyGutschein = () => {
     const code = belksGutscheinKey(gutscheinCode);   // v329
-    const g = (gutscheine||[]).find(x => belksGutscheinKey(x.code) === code && !x.used);
+    const g = (gutscheine||[]).find(x => belksGutscheinKey(x.code) === code && !x.used && !x.deleted);   /* v485 */
     if(!g) { setGutscheinError("❌ Ungültiger oder bereits eingelöster Code!"); return; }
     setGutscheinApplied(g); setGutscheinError("");
   };
@@ -13053,7 +13053,7 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
     return out;
   };
   const menuContext = Object.entries(activeMenu).map(([cat, items]) =>
-    `${cat}:\n` + (items||[]).map(i => `  ${i.nr||""}. ${i.name} — ${(i.price||i.finalPrice||0)>0?((i.price||i.finalPrice||0).toFixed(2)+"€"):"Preis je nach Wahl"}${i.vegan?" (vegan)":i.veg?" (vegetarisch)":""}${i.desc?" — "+i.desc:""}` + _optStr(i)).join("\n")
+    `${cat}:\n` + (items||[]).map(i => `  ${i.nr||""}. ${i.name} — ${(i.price||i.finalPrice||0)>0?((i.price||i.finalPrice||0).toFixed(2)+"€"):"Preis je nach Wahl"}${i.vegan?" (vegan)":i.veg?" (vegetarisch)":""}${i.description?" — "+i.description:""}` + _optStr(i)).join("\n")
   ).join("\n\n");
 
   const _oeff = printerSettings?.oeffnungszeiten || printerSettings?.openingHours || "";
@@ -18641,7 +18641,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
   var [showForm, setShowForm] = R.useState(false);
   var [newCat, setNewCat] = R.useState('');
   var [showNewCat, setShowNewCat] = R.useState(false);
-  var [form, setForm] = R.useState({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});
+  var [form, setForm] = R.useState({nr:'',name:'',price:'',description:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});
   var [showGroupForm, setShowGroupForm] = R.useState(false);
   var [editingGroup, setEditingGroup] = R.useState(null);
   var [groupForm, setGroupForm] = R.useState({name:'',required:false,multiple:false,choices:[{name:'',price:''}]});
@@ -18689,7 +18689,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
       return {name:o.name.trim(),price:parseFloat(o.price)||0};
     });
     var item={id:(editing!==null&&menuData[activeCat]&&menuData[activeCat][editing])?menuData[activeCat][editing].id:Date.now(),
-      nr:form.nr,name:form.name,price:parseFloat(form.price)||0,
+      nr:form.nr,name:form.name,price:parseFloat(form.price)||0,description:(form.description||'').trim(),
       veg:form.veg,vegan:form.vegan,taxRate:form.taxRate||'food',channel:form.channel||'both',bon:form.bon||'auto',
       options:cleanOpts,
       selectedGroups:form.selectedGroups||[]};
@@ -18697,14 +18697,14 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
     if(editing!==null){u[activeCat]=u[activeCat].map(function(x,i){return i===editing?Object.assign({},x,item,{id:x.id}):x;});}
     else{u[activeCat]=(u[activeCat]||[]).concat([item]);}
     onUpdate(u);
-    setForm({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});
+    setForm({nr:'',name:'',price:'',description:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});
     setEditing(null);setShowForm(false);
   };
 
   var deleteItem=function(i){var u=Object.assign({},menuData);u[activeCat]=u[activeCat].filter(function(_,j){return j!==i;});onUpdate(u);};
 
   var startEdit=function(item,i){
-    setForm({nr:item.nr||'',name:item.name||'',price:String(item.price||''),veg:item.veg||false,vegan:item.vegan||false,taxRate:item.taxRate||'food',channel:item.channel||'both',bon:item.bon||'auto',options:item.options||[],selectedGroups:item.selectedGroups||[]});
+    setForm({nr:item.nr||'',name:item.name||'',price:String(item.price||''),description:item.description||'',veg:item.veg||false,vegan:item.vegan||false,taxRate:item.taxRate||'food',channel:item.channel||'both',bon:item.bon||'auto',options:item.options||[],selectedGroups:item.selectedGroups||[]});
     setEditing(i);setShowForm(true);
   };
 
@@ -18807,7 +18807,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
               activeCat,' ',R.createElement('span',{style:{fontSize:12,color:'#888',fontWeight:400}},'('+(menuData[activeCat]||[]).length+' Artikel)')
             ),
             R.createElement('div',{style:{display:'flex',gap:6}},
-              R.createElement('button',{onClick:function(){setEditing(null);setForm({nr:'',name:'',price:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});setShowForm(true);},style:bS(C.green)},'+ Artikel'),
+              R.createElement('button',{onClick:function(){setEditing(null);setForm({nr:'',name:'',price:'',description:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});setShowForm(true);},style:bS(C.green)},'+ Artikel'),
               R.createElement('button',{onClick:function(){deleteCat(activeCat);},style:{padding:'8px 10px',borderRadius:8,border:'none',background:'#ffebee',color:C.red,fontWeight:700,cursor:'pointer',fontSize:13}},'Loeschen')
             )
           ),
@@ -18827,6 +18827,14 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                 R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:3}},'Preis'),
                 R.createElement('input',{value:form.price,onChange:function(e){setForm(Object.assign({},form,{price:e.target.value}));},placeholder:'14.90',type:'number',step:'0.10',style:iS})
               )
+            ),
+            /* v486: Beschreibung/Zutaten - fehlte bisher komplett im Formular.
+               Ohne dieses Feld konnte Priya (die KI) nur Namen und Preis
+               kennen, nie was wirklich drin ist - "was ist im Butter
+               Chicken drin?" konnte sie nie richtig beantworten. */
+            R.createElement('div',{style:{marginBottom:8}},
+              R.createElement('label',{style:{fontSize:11,color:'#888',display:'block',marginBottom:3}},'Beschreibung / Zutaten (für Gäste & die KI Priya)'),
+              R.createElement('input',{value:form.description||'',onChange:function(e){setForm(Object.assign({},form,{description:e.target.value}));},placeholder:'z.B. Hähnchen, Tomaten-Sahne-Sauce, Butter, Gewürze',style:iS})
             ),
             R.createElement('div',{style:{display:'flex',gap:12,marginBottom:10,flexWrap:'wrap'}},
               R.createElement('label',{style:{display:'flex',alignItems:'center',gap:5,fontSize:13,cursor:'pointer'}},
@@ -24932,6 +24940,7 @@ function HappyHourView({ happyHours, setHappyHours, menuData }) {
   const curDay = now.getDay();
 
   const isActive = (hh) => {
+    if (hh.deleted) return false;   /* v485: gelöschte Aktion zählt nie als aktiv */
     if (!hh.active) return false;
     if (!(hh.days||[]).includes(curDay)) return false;
     const [sh,sm] = (hh.startTime||"00:00").split(":").map(Number);
@@ -24941,9 +24950,13 @@ function HappyHourView({ happyHours, setHappyHours, menuData }) {
 
   const saveForm = () => {
     if (!form.name.trim()) return;
-    const item = { ...form, id: editIdx !== null ? happyHours[editIdx].id : Date.now() };
+    /* v485: editIdx traegt jetzt die id des Eintrags, nicht mehr seine
+       Position in der Liste - seit gelöschte Aktionen ausgeblendet werden
+       (gefiltert), waere die Position im sichtbaren Array nicht mehr
+       dieselbe wie im echten happyHours-Array. */
+    const item = { ...form, id: editIdx !== null ? editIdx : Date.now() };
     if (editIdx !== null) {
-      setHappyHours(p => p.map((h,i) => i===editIdx?item:h));
+      setHappyHours(p => p.map(h => h.id===editIdx ? item : h));
     } else {
       setHappyHours(p => [...p, item]);
     }
@@ -25015,9 +25028,9 @@ function HappyHourView({ happyHours, setHappyHours, menuData }) {
     ),
 
     // Liste
-    (happyHours||[]).length === 0 && !showForm
+    (happyHours||[]).filter(h=>!h.deleted).length === 0 && !showForm
       ? React.createElement("div", { style:{ textAlign:"center", color:"#bbb", padding:40 } }, "Noch keine Aktionen angelegt")
-      : (happyHours||[]).map((hh,i) =>
+      : (happyHours||[]).filter(h=>!h.deleted).map((hh,i) =>
         React.createElement("div", { key:hh.id||i, style:{ background:"#fff", borderRadius:12, padding:"12px 14px", marginBottom:8, boxShadow:"0 1px 4px #0001", border:"2px solid "+(isActive(hh)?"#a5d6a7":"#f5f5f5") } },
           React.createElement("div", { style:{ display:"flex", alignItems:"center", gap:10 } },
             React.createElement("div", { style:{ flex:1 } },
@@ -25030,11 +25043,11 @@ function HappyHourView({ happyHours, setHappyHours, menuData }) {
                 ` · ${(hh.days||[]).map(d=>dayNames[d]).join(", ")}`
               )
             ),
-            React.createElement("button", { onClick:()=>setHappyHours(p=>p.map((h,j)=>j===i?{...h,active:!h.active}:h)),
+            React.createElement("button", { onClick:()=>setHappyHours(p=>p.map(h=>h.id===hh.id?{...h,active:!h.active}:h)),
               style:{ padding:"5px 10px", borderRadius:8, border:"none", background:hh.active?"#e8f5e9":"#f5f5f5", color:hh.active?C.green:"#999", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:12 }
             }, hh.active?"AN":"AUS"),
-            React.createElement("button", { onClick:()=>{setEditIdx(i);setForm({...hh});setShowForm(true);}, style:{ background:"#e3f2fd", color:C.blue, border:"none", borderRadius:8, padding:"5px 8px", cursor:"pointer", fontSize:13 } }, "✏️"),
-            React.createElement("button", { onClick:()=>setHappyHours(p=>p.filter((_,j)=>j!==i)), style:{ background:"#ffebee", color:C.red, border:"none", borderRadius:8, padding:"5px 8px", cursor:"pointer", fontSize:13 } }, "🗑️")
+            React.createElement("button", { onClick:()=>{setEditIdx(hh.id);setForm({...hh});setShowForm(true);}, style:{ background:"#e3f2fd", color:C.blue, border:"none", borderRadius:8, padding:"5px 8px", cursor:"pointer", fontSize:13 } }, "✏️"),
+            React.createElement("button", { onClick:()=>setHappyHours(p=>p.map(h=>h.id===hh.id?Object.assign({},h,{deleted:true,geaendert:window.belksJetzt?window.belksJetzt():Date.now()}):h)), style:{ background:"#ffebee", color:C.red, border:"none", borderRadius:8, padding:"5px 8px", cursor:"pointer", fontSize:13 } }, "🗑️")
           )
         )
       )
@@ -25157,7 +25170,7 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
     return { vBar:r(vBar), vKarte:r(vKarte), vAlt:r(vAlt), verkauft:r(vBar+vKarte+vAlt), eingeloest:r(eingeloest), offen:r(offen) };
   })();
 
-  const filtered = gutscheine.filter(g => !search || g.code.includes(search.toUpperCase()) || (g.note||"").toLowerCase().includes(search.toLowerCase()));
+  const filtered = gutscheine.filter(g => !g.deleted && (!search || g.code.includes(search.toUpperCase()) || (g.note||"").toLowerCase().includes(search.toLowerCase())));   /* v485 */
 
   const C3 = { green:"#2e7d32", red:"#C84B31", gold:"#D4A017", blue:"#1565c0" };
 
@@ -25181,7 +25194,7 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
     React.createElement("div", { style:{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 } },
       React.createElement("div", null,
         React.createElement("div", { style:{ fontWeight:800, fontSize:18 } }, "🎫 Gutscheine"),
-        React.createElement("div", { style:{ fontSize:12, color:"#999", marginTop:2 } }, gutscheine.length + " gesamt · " + gutscheine.filter(g=>!g.used).length + " aktiv")
+        React.createElement("div", { style:{ fontSize:12, color:"#999", marginTop:2 } }, gutscheine.filter(g=>!g.deleted).length + " gesamt · " + gutscheine.filter(g=>!g.used && !g.deleted).length + " aktiv")
       ),
       isAdmin && React.createElement("button", {
         onClick: () => { genCode(); setShowNew(true); },
@@ -25303,7 +25316,7 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
         // Delete button (admin only)
         isAdmin && (confirmDel === g.id ?
           React.createElement("div", { style:{ display:"flex", gap:4 } },
-            React.createElement("button", { onClick:()=>{ setGutscheine(p=>p.filter(x=>x.id!==g.id)); setConfirmDel(null); }, style:{ padding:"6px 10px", background:"#ffebee", color:"#c62828", border:"2px solid #ef9a9a", borderRadius:8, cursor:"pointer", fontWeight:700, fontSize:12 } }, "✓ Ja"),
+            React.createElement("button", { onClick:()=>{ setGutscheine(p=>p.map(x=>x.id===g.id?Object.assign({},x,{deleted:true,geaendert:window.belksJetzt?window.belksJetzt():Date.now()}):x)); setConfirmDel(null); }, style:{ padding:"6px 10px", background:"#ffebee", color:"#c62828", border:"2px solid #ef9a9a", borderRadius:8, cursor:"pointer", fontWeight:700, fontSize:12 } }, "✓ Ja"),
             React.createElement("button", { onClick:()=>setConfirmDel(null), style:{ padding:"6px 10px", background:"#f5f5f5", color:"#666", border:"2px solid #eee", borderRadius:8, cursor:"pointer", fontSize:12 } }, "✕")
           ) :
           React.createElement("button", { onClick:()=>setConfirmDel(g.id), style:{ padding:"6px 10px", background:"#ffebee", color:"#c62828", border:"none", borderRadius:8, cursor:"pointer", fontSize:14 } }, "🗑️")
@@ -25401,6 +25414,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       const now2 = new Date();
       const curM = now2.getHours()*60+now2.getMinutes();
       const active = (happyHours||[]).filter(hh => {
+        if (hh.deleted) return false;   /* v485 */
         if (!hh.active) return false;
         if (!(hh.days||[]).includes(now2.getDay())) return false;
         const [sh,sm]=(hh.startTime||"00:00").split(":").map(Number);
@@ -25542,7 +25556,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v484"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v486"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -39487,6 +39501,11 @@ var MERGE_LIST_KEYS = {
      Loeschmarkierung wie die Kunden seit v370. Eigene Aenderung, eigener
      Test. */
   'archive': 1, 'inventory': 1, 'staff': 1, 'optiongroups': 1,
+  /* v485: Gutscheine und Happy-Hour-Aktionen bekamen jetzt eine
+     Loeschmarkierung statt geloescht zu werden (wie hier oben schon
+     beschrieben war), also duerfen auch sie jetzt sicher zusammengefuehrt
+     werden. */
+  'gutscheine': 1, 'happyhours': 1,
   /* v433: Takeaway. Bis v432 stand es auf "der letzte gewinnt" - ein
      Offline-Geraet schob am 31.08. eine Bestellung vom 25.08. zurueck.
      Es steht erst JETZT hier, weil erledigte Eintraege bis v432 aus der
