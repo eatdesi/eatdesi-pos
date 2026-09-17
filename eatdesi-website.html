@@ -380,11 +380,21 @@ footer .fl:hover{color:var(--gold)}
 @media(max-width:600px){.zrow{grid-template-columns:1fr 1fr;gap:8px}.zrow .btn-del{grid-column:span 2}.itemedit{grid-template-columns:1fr}}
 
 /* ---------- AI ASSISTANT ---------- */
-.ai-fab{position:fixed;bottom:20px;right:20px;z-index:66;display:flex;align-items:center;gap:10px;background:var(--gold);color:var(--ink);font-weight:700;font-size:14px;padding:13px 18px;border-radius:999px;box-shadow:var(--shadow);transition:.2s}
+.ai-fab{position:fixed;bottom:20px;right:20px;z-index:66;display:flex;align-items:center;gap:10px;background:var(--gold);color:var(--ink);font-weight:700;font-size:14px;padding:13px 18px;border-radius:999px;box-shadow:var(--shadow);transition:.2s;animation:aiFabGlow 2.6s ease-in-out infinite}
 .ai-fab:hover{transform:translateY(-2px);background:var(--gold-glow)}
 .ai-fab .pulse{width:9px;height:9px;border-radius:50%;background:var(--ink);animation:pulse 1.8s infinite}
 @keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+@keyframes aiFabGlow{0%,100%{box-shadow:0 4px 18px rgba(200,160,78,.35)}50%{box-shadow:0 4px 26px rgba(200,160,78,.8)}}
 .pulse-dot{animation:pulse 1.2s ease-in-out infinite;color:var(--gold-glow)}
+/* v487: Begruessungs-Sprechblase - taucht kurz nach dem Laden einmal pro
+   Besuch auf, damit die Assistentin nicht nur ein Knopf ist, den man
+   zufaellig entdecken muss, sondern aktiv "Hallo" sagt. */
+.ai-teaser{position:fixed;bottom:78px;right:20px;z-index:65;max-width:250px;background:var(--ink-2);
+  border:1.5px solid var(--gold);border-radius:16px 16px 4px 16px;padding:13px 30px 13px 15px;box-shadow:var(--shadow);
+  font-size:13px;line-height:1.4;color:var(--cream);cursor:pointer;display:none;animation:aiTeaserIn .4s ease}
+.ai-teaser.show{display:block}
+.ai-teaser .ai-teaser-x{position:absolute;top:6px;right:8px;font-size:13px;color:var(--paper-2);padding:3px;cursor:pointer}
+@keyframes aiTeaserIn{from{transform:translateY(12px);opacity:0}to{transform:translateY(0);opacity:1}}
 .order-track{position:fixed;left:12px;right:12px;bottom:14px;z-index:9999;display:flex;align-items:center;gap:12px;
   background:linear-gradient(135deg,#1a1712,#2a241a);border:1.5px solid var(--gold,#c8a04e);border-radius:16px;
   padding:13px 15px;box-shadow:0 8px 30px rgba(0,0,0,.5);cursor:pointer;max-width:560px;margin:0 auto;animation:trackIn .35s ease}
@@ -793,6 +803,10 @@ footer .fl:hover{color:var(--gold)}
 </div>
 
 <!-- ===================== AI ASSISTANT ===================== -->
+<div class="ai-teaser" id="aiTeaser" onclick="openAI()">
+  <span class="ai-teaser-x" onclick="event.stopPropagation();dismissAiTeaser()">✕</span>
+  <span id="aiTeaserText">👋 Namaste! Fragen zur Karte, Lieferung oder Reservierung? Frag einfach die Desi-Assistentin!</span>
+</div>
 <button class="ai-fab" id="aiFab" onclick="openAI()"><span class="pulse"></span>💬 Desi-Assistentin</button>
 <div class="ai-panel" id="aiPanel">
   <div class="ai-head">
@@ -1915,6 +1929,18 @@ function openDelivCheck(){
   var ov=document.getElementById('delivCheck');
   if(!ov){ ov=document.createElement('div'); ov.id='delivCheck'; ov.className='dc-overlay'; document.body.appendChild(ov); }
   ov.innerHTML=html; ov.classList.add('show'); document.body.style.overflow='hidden';
+  /* v487: Stammkunde mit gespeicherter Adresse muss sie nicht jedes Mal neu
+     eintippen - Felder vorausfuellen, "Adresse pruefen" bleibt trotzdem ein
+     bewusster Tipp (Adresse koennte sich geaendert haben, oder es ist ein
+     anderer Liefer-Ort diesmal). */
+  try{
+    var _sc=getCust();
+    if(_sc && _sc.street){
+      var _se=document.getElementById('dc_street'); if(_se) _se.value=_sc.street;
+      var _ce=document.getElementById('dc_city'); if(_ce) _ce.value=_sc.city||'';
+      var _ze=document.getElementById('dc_zip'); if(_ze) _ze.value=_sc.zip||'';
+    }
+  }catch(e){}
 }
 // Alter manueller Modus (Ortsteil-Dropdown) als Fallback
 function openDelivCheckManual(){
@@ -1946,6 +1972,15 @@ function openDelivCheckManual(){
     var z=ZONES[activeZone]; var zip=document.getElementById('dc_zip');
     if(z && zip){ var fp=(z.plz||'').split(',').map(s=>s.trim()).filter(Boolean)[0]||''; if(!zip.value) zip.value=fp; }
   };
+  /* v487: dieselbe Vorausfuellung wie im Adress-Modus - siehe openDelivCheck() */
+  try{
+    var _sc2=getCust();
+    if(_sc2 && _sc2.street){
+      var _se2=document.getElementById('dc_street'); if(_se2) _se2.value=_sc2.street;
+      var _ze2=document.getElementById('dc_zip'); if(_ze2 && _sc2.zip) _ze2.value=_sc2.zip;
+      if(cs && _sc2.city){ cs.value=_sc2.city; if(cs.value===_sc2.city) cs.onchange(); }
+    }
+  }catch(e){}
 }
 function closeDelivCheck(){
   var ov=document.getElementById('delivCheck');
@@ -2274,6 +2309,16 @@ function renderAcctCreate(raw){
     +'<input id="ac_name" class="dc-i" placeholder="Vor- und Nachname">'
     +'<label class="dc-l">E-Mail (optional)</label>'
     +'<input id="ac_email" class="dc-i" inputmode="email" placeholder="für Bestell-Infos">'
+    /* v487: Lieferadresse gleich mit anlegen - spart beim naechsten Mal
+       das erneute Eintippen (siehe openDelivCheck/openDelivCheckManual,
+       die diese gespeicherte Adresse jetzt vorausfuellen). Bewusst
+       optional: nicht jeder Gast will/kann sich liefern lassen. */
+    +'<label class="dc-l">Lieferadresse (optional – spart dir beim nächsten Mal das Eintippen)</label>'
+    +'<input id="ac_street" class="dc-i" placeholder="Straße & Hausnummer">'
+    +'<div class="dc-row">'
+      +'<div style="flex:1"><input id="ac_city" class="dc-i" placeholder="Ort"></div>'
+      +'<div style="width:110px"><input id="ac_zip" class="dc-i" inputmode="numeric" placeholder="PLZ"></div>'
+    +'</div>'
     +'<label class="dc-l">Passwort (mind. 4 Zeichen)</label>'
     +'<input id="ac_pw1" type="password" class="dc-i">'
     +'<label class="dc-l">Passwort wiederholen</label>'
@@ -2287,6 +2332,9 @@ async function acctCreate(){
   var raw=String((document.getElementById('ac_phone')||{}).value||'').trim();
   var name=String((document.getElementById('ac_name')||{}).value||'').trim();
   var email=String((document.getElementById('ac_email')||{}).value||'').trim();
+  var street=String((document.getElementById('ac_street')||{}).value||'').trim();
+  var city=String((document.getElementById('ac_city')||{}).value||'').trim();
+  var zip=String((document.getElementById('ac_zip')||{}).value||'').trim();
   var p1=String((document.getElementById('ac_pw1')||{}).value||'');
   var p2=String((document.getElementById('ac_pw2')||{}).value||'');
   var err=document.getElementById('ac_err');
@@ -2298,13 +2346,40 @@ async function acctCreate(){
   if(err) err.textContent='Erstelle Konto…';
   var info=await kundeBekannt(np);
   if(info && info.bekannt){ if(err) err.textContent='Nummer existiert schon – bitte einloggen oder „Passwort vergessen" nutzen.'; return; }
+  /* v488: Eine eingetragene Adresse wird jetzt GEPRUEFT, genau wie beim
+     normalen Liefer-Check (dieselbe Geokodierung + Zonen-Suche) - bevor
+     sie gespeichert wird. Liegt sie ausserhalb jeder Liefer-Zone (oder
+     laesst sich gar nicht finden), wird sie NICHT als Lieferadresse
+     gespeichert: der Kunde wuerde sonst spaeter automatisch eine
+     Adresse vorausgefuellt bekommen, zu der ohnehin nie geliefert wird.
+     Das Konto selbst wird trotzdem angelegt - nur eben ohne Lieferadresse,
+     als Abholungs-/Vor-Ort-Kunde. */
+  var pickupOnly=false;
+  if(street && city){
+    if(err) err.textContent='Prüfe Adresse…';
+    try{
+      var geo=await geocodeStructured(street, '', zip, city);
+      var hit=geo ? findZoneByCoords(geo.lat, geo.lng) : null;
+      if(!hit){
+        pickupOnly=true;
+        street=''; city=''; zip='';
+        if(err) err.textContent='📍 An diese Adresse können wir leider nicht liefern – kein Problem, du kannst trotzdem abholen! Konto wird angelegt…';
+      }
+    }catch(e){ /* Geokodierung fehlgeschlagen -> sicherheitshalber nicht als Lieferadresse speichern */
+      pickupOnly=true; street=''; city=''; zip='';
+    }
+  }
   var daten={name:name,phone:raw,kundenNr:raw};
   if(email) daten.email=email;
+  if(street) daten.street=street;
+  if(city) daten.city=city;
+  if(zip) daten.zip=zip;
+  if(pickupOnly) daten.preferredMode='abholung';
   var _h=await custHashPw(np,p1);
   var res=await kundeSpeichern(np, _h, daten);
   if(!res || res.ok!==true){ if(err) err.textContent='❌ '+((res&&res.grund)||'Konnte nicht speichern.'); return; }
   var kk=res.kunde||{};
-  var c={phone:kk.phone||raw,name:kk.name||name,points:(typeof kk.points==='number')?kk.points:0,email:kk.email||email||'',sess:_h};
+  var c={phone:kk.phone||raw,name:kk.name||name,points:(typeof kk.points==='number')?kk.points:0,email:kk.email||email||'',street:kk.street||street||'',city:kk.city||city||'',zip:kk.zip||zip||'',sess:_h};
   setCust(c);
   renderAccount(c);
 }
@@ -3535,6 +3610,7 @@ function aiContext(){
     for(const i of items){
       var line='  '+i.name+' — '+(i.price>0?eur(i.price):'Preis je nach Wahl');
       if(i.vegan)line+=' (vegan)'; else if(i.veg)line+=' (vegetarisch)';
+      if(i.description)line+=' — '+i.description;   /* v486: Zutaten/Beschreibung, damit Priya die Speisekarte wirklich kennt */
       // preisbestimmende Option (z.B. Zutat bei Curry)
       if(Array.isArray(i.options)){
         for(const g of i.options){
@@ -3584,6 +3660,7 @@ ${menuLines.join('\n')}${custInfo}`;
 
 function openAI(){
   $('#aiPanel').classList.add('show');$('#aiFab').style.display='none';
+  dismissAiTeaser();   /* v487: Sprechblase weg, sobald der Chat wirklich aufgeht */
   if(!aiOpened){aiOpened=true; aiAddMsg('bot','Namaste! 🪔 Ich bin die Desi-Assistentin von eatDeSi. Frag mich nach Öffnungszeiten, Gerichten, Lieferung oder Catering – per Text oder Mikrofon.');}
   // AI-Key frisch aus Supabase holen, falls der Inhaber ihn gerade erst gespeichert
   // hat (sonst bliebe AI_KEY leer und es kaemen nur Standardantworten).
@@ -3595,6 +3672,25 @@ function openAI(){
   }
 }
 function closeAI(){$('#aiPanel').classList.remove('show');$('#aiFab').style.display='flex';aiStopSpeak();}
+/* v487: Begruessungs-Sprechblase - einmal pro Besuch (sessionStorage),
+   nicht bei jedem Klick auf einer neuen Unterseite erneut, und nie, wenn
+   der Chat schon offen war/ist. Verschwindet von selbst nach 12s, wenn
+   niemand reagiert, oder sofort bei Klick/X/Chat-Oeffnen. */
+function dismissAiTeaser(){
+  var t=document.getElementById('aiTeaser'); if(t) t.classList.remove('show');
+}
+(function(){
+  try{
+    if(sessionStorage.getItem('eatdesi_ai_teaser_gezeigt')) return;
+    setTimeout(function(){
+      if(aiOpened) return;   // Gast hat den Chat schon selbst geoeffnet - keine Sprechblase mehr noetig
+      var t=document.getElementById('aiTeaser'); if(!t) return;
+      t.classList.add('show');
+      sessionStorage.setItem('eatdesi_ai_teaser_gezeigt','1');
+      setTimeout(dismissAiTeaser, 12000);
+    }, 3500);
+  }catch(e){}
+})();
 function aiAddMsg(role,text){
   const m=document.createElement('div');m.className='amsg '+(role==='usr'?'usr':'bot');m.textContent=text;
   $('#aiMsgs').appendChild(m);$('#aiMsgs').scrollTop=$('#aiMsgs').scrollHeight;return m;
