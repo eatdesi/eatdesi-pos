@@ -1292,10 +1292,18 @@ function onAdd(id){
 }
 function normChoice(c){return (typeof c==='string')?{name:c,price:0}:{name:c.name,price:c.price||0};}
 function openOpt(it){
-  modalItem=it;modalSel={};modalQty=1;modalNote='';
-  const opts=effectiveOptions(it);   /* v489: Options-Gruppen + alte Item-Optionen zusammen */
-  opts.forEach((o,gi)=>{ modalSel[gi]= (o.required&&!o.multi)?[normChoice(o.choices[0])]:[]; });
-  drawOpt(); $('#optScrim').classList.add('show'); document.body.style.overflow='hidden';
+  try{
+    modalItem=it;modalSel={};modalQty=1;modalNote='';
+    const opts=effectiveOptions(it);
+    opts.forEach((o,gi)=>{ modalSel[gi]= (o.required&&!o.multi)?[normChoice(o.choices[0])]:[]; });
+    drawOpt(); $('#optScrim').classList.add('show'); document.body.style.overflow='hidden';
+  }catch(e){
+    /* v492: lieber eine sichtbare Meldung als ein lautloses "nichts
+       passiert" - und die genaue Ursache steht jetzt in der Konsole,
+       falls das nochmal vorkommt. */
+    console.error('Options-Fenster konnte nicht geöffnet werden:', e, it);
+    toast('⚠️ Konnte die Optionen nicht laden – bitte kurz anrufen oder Seite neu laden.');
+  }
 }
 function closeOpt(){$('#optScrim').classList.remove('show');document.body.style.overflow='';modalItem=null;}
 function drawOpt(){
@@ -1319,10 +1327,12 @@ function drawOpt(){
   $('#optSheet').innerHTML=h;
 }
 function pickOpt(gi,ci,multi){
-  const opts=effectiveOptions(modalItem);
-  const o=opts[gi], nc=normChoice(o.choices[ci]); let arr=modalSel[gi]||[];
-  if(multi){const i=arr.findIndex(s=>s.name===nc.name); if(i>=0)arr.splice(i,1); else arr.push(nc);} else arr=[nc];
-  modalSel[gi]=arr; drawOpt();
+  try{
+    const opts=effectiveOptions(modalItem);
+    const o=opts[gi], nc=normChoice(o.choices[ci]); let arr=modalSel[gi]||[];
+    if(multi){const i=arr.findIndex(s=>s.name===nc.name); if(i>=0)arr.splice(i,1); else arr.push(nc);} else arr=[nc];
+    modalSel[gi]=arr; drawOpt();
+  }catch(e){ console.error('pickOpt Fehler:', e); }
 }
 function modQty(d){modalQty=Math.max(1,modalQty+d);drawOpt();}
 function optTotal(){
@@ -2896,12 +2906,27 @@ async function loadOptionGroupsFromCloud(){
 // geloescht. Choice-Preise sind bei Options-Gruppen immer zusaetzlich zum
 // Grundpreis (priced:false) - genau wie die Kasse es auch zeigt.
 function effectiveOptions(it){
-  const legacy = Array.isArray(it.options) ? it.options : [];
+  /* v492: GEFUNDEN (vermutlich) - das "Optionen"-Kennzeichen erschien schon
+     richtig, das Fenster ging aber trotzdem nicht auf. Das bedeutet: die
+     Gruppe wird gefunden, aber beim AUFBAUEN des Fensters bricht irgendwo
+     ein Fehler lautlos ab (z.B. eine choices-Liste, die nicht ganz die
+     erwartete Form hat) - VOR dem Anzeigen, also sieht man buchstaeblich
+     nichts. Jetzt wird JEDER Eintrag (alt UND neu) hart normalisiert,
+     damit so etwas gar nicht mehr passieren kann, egal wie die echten
+     Daten historisch gewachsen sind. */
+  const normEintrag = o => ({
+    label: (o && (o.label||o.name)) || 'Option',
+    required: !!(o && o.required),
+    multi: !!(o && (o.multi||o.multiple)),
+    priced: !!(o && o.priced),
+    choices: Array.isArray(o && o.choices) ? o.choices : []
+  });
+  const legacy = (Array.isArray(it.options) ? it.options : []).map(normEintrag);
   const gids = Array.isArray(it.selectedGroups) ? it.selectedGroups : [];
   const geloest = gids
     .map(gid => (OPTION_GROUPS||[]).find(g=>g && g.id===gid && !g.deleted))
     .filter(Boolean)
-    .map(g => ({ label:g.name, required:!!g.required, multi:!!g.multiple, priced:false, choices:g.choices||[] }));
+    .map(normEintrag);
   return legacy.concat(geloest);
 }
 async function loadMenuFromCloud(){
