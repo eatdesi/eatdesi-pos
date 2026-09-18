@@ -1290,12 +1290,20 @@ function onAdd(id){
   }
   openOpt(it);
 }
-function normChoice(c){return (typeof c==='string')?{name:c,price:0}:{name:c.name,price:c.price||0};}
+function normChoice(c){
+  if(c==null) return {name:'',price:0};   /* v493: leere/kaputte Wahlmoeglichkeit - nie abstuerzen */
+  return (typeof c==='string')?{name:c,price:0}:{name:c.name||'',price:c.price||0};
+}
 function openOpt(it){
   try{
     modalItem=it;modalSel={};modalQty=1;modalNote='';
     const opts=effectiveOptions(it);
-    opts.forEach((o,gi)=>{ modalSel[gi]= (o.required&&!o.multi)?[normChoice(o.choices[0])]:[]; });
+    /* v493: GEFUNDEN - genau hier krachte es. Eine Pflicht-Gruppe OHNE
+       Mehrfachauswahl bekommt automatisch ihre erste Wahlmoeglichkeit
+       vorbelegt - war die choices-Liste leer (z.B. eine Gruppe, die noch
+       gar keine Wahlmoeglichkeiten hat), gab es kein "erstes Element",
+       und der Versuch, es zu normalisieren, brach lautlos ab. */
+    opts.forEach((o,gi)=>{ modalSel[gi]= (o.required&&!o.multi&&o.choices.length)?[normChoice(o.choices[0])]:[]; });
     drawOpt(); $('#optScrim').classList.add('show'); document.body.style.overflow='hidden';
   }catch(e){
     /* v492: lieber eine sichtbare Meldung als ein lautloses "nichts
