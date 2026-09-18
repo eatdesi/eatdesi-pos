@@ -1293,13 +1293,15 @@ function onAdd(id){
 function normChoice(c){return (typeof c==='string')?{name:c,price:0}:{name:c.name,price:c.price||0};}
 function openOpt(it){
   modalItem=it;modalSel={};modalQty=1;modalNote='';
-  (it.options||[]).forEach((o,gi)=>{ modalSel[gi]= (o.required&&!o.multi)?[normChoice(o.choices[0])]:[]; });
+  const opts=effectiveOptions(it);   /* v489: Options-Gruppen + alte Item-Optionen zusammen */
+  opts.forEach((o,gi)=>{ modalSel[gi]= (o.required&&!o.multi)?[normChoice(o.choices[0])]:[]; });
   drawOpt(); $('#optScrim').classList.add('show'); document.body.style.overflow='hidden';
 }
 function closeOpt(){$('#optScrim').classList.remove('show');document.body.style.overflow='';modalItem=null;}
 function drawOpt(){
-  const it=modalItem; let h=`<h3>${it.name}</h3><p class="sub">Nr. ${it.nr} · ${(it.options&&it.options.length)?(it.description||'Wähle deine Optionen'):(it.description||'Direkt hinzufügen')}</p>`;
-  (it.options||[]).forEach((o,gi)=>{
+  const it=modalItem; const opts=effectiveOptions(it);
+  let h=`<h3>${it.name}</h3><p class="sub">Nr. ${it.nr} · ${(opts&&opts.length)?(it.description||'Wähle deine Optionen'):(it.description||'Direkt hinzufügen')}</p>`;
+  opts.forEach((o,gi)=>{
     const multi=!!o.multi, req=o.required?'<span class="req">PFLICHT</span>':'';
     h+=`<div class="optgrp"><div class="label"><span>${o.label}</span>${req}</div>`;
     o.choices.forEach((c,ci)=>{
@@ -1317,19 +1319,20 @@ function drawOpt(){
   $('#optSheet').innerHTML=h;
 }
 function pickOpt(gi,ci,multi){
-  const o=modalItem.options[gi], nc=normChoice(o.choices[ci]); let arr=modalSel[gi]||[];
+  const opts=effectiveOptions(modalItem);
+  const o=opts[gi], nc=normChoice(o.choices[ci]); let arr=modalSel[gi]||[];
   if(multi){const i=arr.findIndex(s=>s.name===nc.name); if(i>=0)arr.splice(i,1); else arr.push(nc);} else arr=[nc];
   modalSel[gi]=arr; drawOpt();
 }
 function modQty(d){modalQty=Math.max(1,modalQty+d);drawOpt();}
 function optTotal(){
   const it=modalItem; let base=it.price;
-  (it.options||[]).forEach((o,gi)=>{const sel=modalSel[gi]||[]; if(o.priced){if(sel.length)base=sel[0].price;} else sel.forEach(s=>base+=(s.price||0));});
+  effectiveOptions(it).forEach((o,gi)=>{const sel=modalSel[gi]||[]; if(o.priced){if(sel.length)base=sel[0].price;} else sel.forEach(s=>base+=(s.price||0));});
   return base;
 }
 function confirmOpt(){
   const it=modalItem;
-  const opts=it.options||[];
+  const opts=effectiveOptions(it);
   for(let gi=0;gi<opts.length;gi++){const o=opts[gi]; if(o.required&&!(modalSel[gi]&&modalSel[gi].length)){toast('Bitte wählen: '+o.label);return;}}
   const flat=[]; opts.forEach((o,gi)=>{(modalSel[gi]||[]).forEach(s=>flat.push({label:o.label,name:s.name,price:o.priced?0:(s.price||0)}));});
   addToCart(it,flat,optTotal(),modalQty,(modalNote||'').trim()); closeOpt();
@@ -2864,11 +2867,49 @@ function applyCompany(){
 }
 
 /* ---- LIVE-MENÜ aus Supabase (vom POS gepflegt) ---- */
+/* v489: GEFUNDEN - die Website kannte nur die alten, direkt am Artikel
+   eingetragenen Optionen (item.options), NIE die wiederverwendbaren
+   "Option-Gruppen" (Naan dazu, Beilage, Saft große, ...), die man in der
+   Kasse unter "Option-Gruppen" anlegt und per selectedGroups an mehrere
+   Artikel gleichzeitig haengt - GENAU der Weg, den die Kasse selbst fuer
+   Pflicht-Beilagen etc. benutzt (siehe handleClick() in der Kasse).
+   Ohne diese Liste zeigte "Schnitzel Peppe Rosa" auf der Website "Direkt
+   hinzufuegen" statt der Pflicht-Beilage, obwohl die Kasse sie laengst
+   kennt - ein Gast haette also ohne Beilage bestellt, oder ein Getraenk
+   ohne die noetige Groessen-Wahl. */
+let OPTION_GROUPS = [];
+async function loadOptionGroupsFromCloud(){
+  try{
+    const r=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_optiongroups&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
+    if(r.ok){const j=await r.json();
+      if(j&&j[0]&&j[0].value){
+        const g=JSON.parse(j[0].value);
+        if(Array.isArray(g)) OPTION_GROUPS=g;
+      }
+    }
+  }catch(e){console.warn('optiongroups cloud load',e);}
+}
+// Loest die Options-Gruppen eines Artikels auf und macht daraus dieselbe
+// Form wie die alten, direkt am Artikel eingetragenen Optionen - damit der
+// Rest des Bestell-Codes (drawOpt/pickOpt/confirmOpt) unveraendert bleibt.
+// Exakt dieselbe Regel wie handleClick() in der Kasse: id-Treffer, nicht
+// geloescht. Choice-Preise sind bei Options-Gruppen immer zusaetzlich zum
+// Grundpreis (priced:false) - genau wie die Kasse es auch zeigt.
+function effectiveOptions(it){
+  const legacy = Array.isArray(it.options) ? it.options : [];
+  const gids = Array.isArray(it.selectedGroups) ? it.selectedGroups : [];
+  const geloest = gids
+    .map(gid => (OPTION_GROUPS||[]).find(g=>g && g.id===gid && !g.deleted))
+    .filter(Boolean)
+    .map(g => ({ label:g.name, required:!!g.required, multi:!!g.multiple, priced:false, choices:g.choices||[] }));
+  return legacy.concat(geloest);
+}
 async function loadMenuFromCloud(){
   try{
     // code-MENU ਦੇ "top" (Beliebt) artikel ਦੇ nr ਯਾਦ ਰੱਖੋ — cloud ਪੁਰਾਣਾ ਹੋਵੇ ਤਾਂ ਵੀ Beliebt ਰਹੇ
     const TOPNRS=new Set();
     try{ Object.values(MENU).forEach(arr=>arr.forEach(it=>{ if(it&&it.top) TOPNRS.add(String(it.nr)); })); }catch(_){}
+    await loadOptionGroupsFromCloud();
     const r=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+LOCATION_ID+'_menu&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
     if(r.ok){const j=await r.json();
       if(j&&j[0]&&j[0].value){
@@ -3631,6 +3672,7 @@ function aiContext(){
 
   return `Du bist Priya, die herzliche, SCHLAUE Sprach-Assistentin & Verkäuferin von ${COMPANY.name}${(COMPANY.street||COMPANY.city)?(' — '+[COMPANY.street,[COMPANY.zip,COMPANY.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')):''}${COMPANY.phone?(', Tel '+COMPANY.phone):''}.${LOCATION_ID==='eatdesi-bw'?' Indisches Fusion-Restaurant (Kitchen & Grill), Familie Sidhu. "Indien trifft Trends".':''}
 Antworte KURZ (1-3 Sätze), herzlich, auf Deutsch (Englisch/Punjabi nur wenn der Gast so schreibt). Erfinde KEINE Preise/Gerichte außerhalb der Liste.
+WICHTIG (Zutaten/Allergene): Nur zu Zutaten/Allergenen äußern, wenn es in der Speisekarte unten bei dem Gericht steht. Steht nichts dabei, erfinde NICHTS – sage ehrlich, dass du die genauen Zutaten nicht sicher weißt und man bei Allergien am besten kurz anruft. Verspreche NIE, dass etwas allergenfrei ist.
 
 VERKAUFEN (schlau, Umsatz steigern):
 - Empfiehl aktiv unsere hochwertigen Grill-Gerichte zuerst: ${grill||'Tandoori Mix Grill'}.
