@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v486</title>
+<title>eatDeSi POS v488</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -18812,6 +18812,20 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
             )
           ),
 
+          /* v488: Fortschrittsanzeige "X von Y haben eine Beschreibung" -
+             ohne das sieht man nicht, welche Artikel Priya (die KI) noch
+             nicht wirklich kennt, weil sie noch keine Zutaten/Beschreibung
+             hinterlegt haben. */
+          (function(){
+            var alle=menuData[activeCat]||[];
+            var mit=alle.filter(function(x){return x&&x.description&&x.description.trim();}).length;
+            if(!alle.length) return null;
+            return R.createElement('div',{style:{fontSize:12,color:mit<alle.length?'#e65100':'#888',marginBottom:10,marginTop:-4}},
+              (mit<alle.length?'📝 ':'✅ ')+mit+' von '+alle.length+' Artikeln haben eine Beschreibung für Priya (die KI)'+
+              (mit<alle.length?' – die anderen '+(alle.length-mit)+' sind unten mit 📝 markiert.':'.')
+            );
+          })(),
+
           showForm&&R.createElement('div',{style:{background:'#f0f7f0',borderRadius:12,padding:14,marginBottom:12,border:'2px solid #c8e6c9'}},
             R.createElement('div',{style:{fontWeight:800,fontSize:14,marginBottom:10,color:C.green}},editing!==null?'Bearbeiten':'Neuer Artikel'),
             R.createElement('div',{style:{display:'grid',gridTemplateColumns:'70px 1fr 90px',gap:8,marginBottom:8}},
@@ -19001,6 +19015,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                     R.createElement('div',{style:{flex:1,minWidth:0}},
                       R.createElement('div',{style:{fontWeight:600,fontSize:14,color:C.pink}},
                         item.nr?item.nr+'. ':'',item.name,
+                        !item.description&&R.createElement('span',{title:'Keine Beschreibung für Priya (die KI) hinterlegt',style:{marginLeft:5,fontSize:11,color:'#e65100'}},'📝'),
                         item.vegan&&R.createElement('span',{style:{marginLeft:4,fontSize:11,color:'#4caf50'}},'(V)'),
                         item.veg&&!item.vegan&&R.createElement('span',{style:{marginLeft:4,fontSize:11,color:'#8bc34a'}},'(Veg)')
                       ),
@@ -25556,7 +25571,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v486"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v488"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
