@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v488</title>
+<title>eatDeSi POS v490</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -25571,7 +25571,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v488"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v490"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -29534,7 +29534,7 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
   ), view === "kds_pro" && React.createElement(KdsProView, {tableOrders:tableOrders,takeaway:takeaway,setTableOrders:setTableOrders,completedOrders:completedOrders,setCompletedOrders:setCompletedOrders,setTakeaway:setTakeaway}
   ), view === "rezeptkosten" && React.createElement(RezeptkostenView, {menuData:menuData}
   ), view === "lieferfahrer" && React.createElement(LieferfahrerView, null
-  ), view === "kiosk" && React.createElement(KioskView, {menuData:menuData, setView:setView}
+  ), view === "kiosk" && React.createElement(KioskView, {menuData:menuData, setView:setView, optionGroups:optionGroups}
   ), view === "qr_karten" && React.createElement(QRKartenView, null
   ), view === "channels" && React.createElement(ChannelsView, {menuData:menuData, completedOrders:completedOrders,
       onInPos: belksFotoInPos, tischAnzahl: (printerSettings && printerSettings.tableCount) || 40}   // v375
@@ -36829,13 +36829,14 @@ function LieferfahrerView() {
 }
 
 
-function KioskView({ menuData, setView }) {
+function KioskView({ menuData, setView, optionGroups }) {
   var R = React;
   var [cart, setCart] = R.useState([]);
   var [step, setStep] = R.useState('welcome');
   var [activeCat, setActiveCat] = R.useState(Object.keys(menuData||{})[0]||'');
   var [orderType, setOrderType] = R.useState(null);
-  var [optionModal, setOptionModal] = R.useState(null); // {name, description, options}
+  var [optionModal, setOptionModal] = R.useState(null); // {id, name, description, groups}
+  var [optionSel, setOptionSel] = R.useState({}); // Auswahl je Gruppen-Index im offenen optionModal
   var [kLang, setKLang] = R.useState('de');
 
   // Kiosk-Übersetzungen (DE / EN / Punjabi)
@@ -36901,34 +36902,94 @@ function KioskView({ menuData, setView }) {
     return found ? found.qty : 0;
   };
 
+  /* v490: GEFUNDEN - der Kiosk kannte, genau wie zuvor die Website, nur die
+     alten direkt am Artikel eingetragenen Optionen, nie die wiederver-
+     wendbaren Options-Gruppen (Beilage, Saft große, ...). ZUSAETZLICH war
+     das Options-Fenster hier fuer ein VOELLIG anderes Format gebaut: eine
+     flache Liste einzelner Preise (item.options[i].price), nicht die echten
+     Gruppen mit mehreren Wahlmoeglichkeiten (item.options[i].choices). Bei
+     jedem Artikel mit einer echten Options-Gruppe krachte darum still ein
+     Fehler beim Oeffnen (".price" gab es auf der Gruppe nicht) - "nichts
+     passierte", wie gemeldet. Jetzt: dieselbe Aufloesung wie ueberall
+     sonst in der Kasse (id-Treffer in optionGroups, nicht geloescht). */
+  var effectiveOptions = function(item){
+    var legacy = Array.isArray(item.options) ? item.options : [];
+    var gids = Array.isArray(item.selectedGroups) ? item.selectedGroups : [];
+    var geloest = gids.map(function(gid){
+      return (optionGroups||[]).filter(function(g){ return g && g.id===gid && !g.deleted; })[0];
+    }).filter(Boolean).map(function(g){
+      return { label:g.name, required:!!g.required, multi:!!g.multiple, priced:false, choices:g.choices||[] };
+    });
+    return legacy.concat(geloest);
+  };
+
   // OPTION MODAL
   if (optionModal) {
+    var groups = optionModal.groups || [];
+    var basis = optionModal.price || 0;
+    var summe = basis;
+    groups.forEach(function(g, gi){
+      var sel = optionSel[gi] || [];
+      if (g.priced) { if (sel.length) summe = sel[0].price; }
+      else sel.forEach(function(s){ summe += (s.price||0); });
+    });
+    var confirmAdd = function(){
+      for (var gi=0; gi<groups.length; gi++){
+        var g = groups[gi];
+        if (g.required && !((optionSel[gi]||[]).length)) return; // Pflicht nicht erfuellt - Knopf tut nichts
+      }
+      var teile = [];
+      groups.forEach(function(g, gi){ (optionSel[gi]||[]).forEach(function(s){ teile.push(s.name); }); });
+      var combo = teile.length ? teile.join(', ') : null;
+      addToCart(optionModal.id, optionModal.name, summe, combo);
+      setOptionModal(null); setOptionSel({});
+    };
+    var alleErfuellt = groups.every(function(g, gi){ return !g.required || (optionSel[gi]||[]).length > 0; });
     return R.createElement('div',{style:{height:'100vh',display:'flex',flexDirection:'column',background:'rgba(0,0,0,.6)',justifyContent:'flex-end'}},
-      R.createElement('div',{style:{background:'#fff',borderRadius:'20px 20px 0 0',padding:24,maxHeight:'80vh',overflowY:'auto'}},
+      R.createElement('div',{style:{background:'#fff',borderRadius:'20px 20px 0 0',padding:24,maxHeight:'85vh',overflowY:'auto',display:'flex',flexDirection:'column'}},
         R.createElement('div',{style:{fontWeight:900,fontSize:18,marginBottom:4,color:'#C84B31'}},optionModal.name),
-        R.createElement('div',{style:{fontSize:13,color:'#888',marginBottom:20}},optionModal.description||KT.chooseIngredient),
-        (optionModal.options||[]).map(function(opt,oi) {
-          var qty = getCartQty(optionModal.id, opt.name);
-          return R.createElement('div',{key:oi,style:{display:'flex',alignItems:'center',padding:'12px 0',borderBottom:'1px solid #f0f0f0'}},
-            R.createElement('div',{style:{flex:1}},
-              R.createElement('div',{style:{fontWeight:700,fontSize:15}},opt.name),
-              R.createElement('div',{style:{color:'#C84B31',fontWeight:900,fontSize:14}},opt.price.toFixed(2)+' EUR')
+        R.createElement('div',{style:{fontSize:13,color:'#888',marginBottom:16}},optionModal.description||KT.chooseIngredient),
+        groups.map(function(g, gi){
+          var sel = optionSel[gi] || [];
+          return R.createElement('div',{key:gi,style:{marginBottom:18}},
+            R.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:8}},
+              R.createElement('span',{style:{fontWeight:800,fontSize:13,textTransform:'uppercase',color:'#333'}},g.label),
+              g.required && R.createElement('span',{style:{background:'#ffebee',color:'#c62828',borderRadius:4,padding:'2px 7px',fontSize:11,fontWeight:700}},'PFLICHT')
             ),
-            qty > 0
-              ? R.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
-                  R.createElement('button',{onClick:function(){removeFromCart(optionModal.id+'_'+opt.name);},style:{width:32,height:32,borderRadius:16,border:'none',background:'#ffebee',color:'#c62828',fontWeight:900,fontSize:18,cursor:'pointer'}},'-'),
-                  R.createElement('span',{style:{fontWeight:900,minWidth:20,textAlign:'center'}},qty),
-                  R.createElement('button',{onClick:function(){addToCart(optionModal.id,optionModal.name,opt.price,opt.name);},style:{width:32,height:32,borderRadius:16,border:'none',background:'#e8f5e9',color:'#2e7d32',fontWeight:900,fontSize:18,cursor:'pointer'}},'+')
-                )
-              : R.createElement('button',{
-                  onClick:function(){addToCart(optionModal.id,optionModal.name,opt.price,opt.name);setOptionModal(null);},
-                  style:{padding:'8px 16px',borderRadius:10,border:'none',background:'#C84B31',color:'#fff',fontWeight:700,cursor:'pointer',fontFamily:'inherit',fontSize:13}
-                },KT.choose)
+            R.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:8}},
+              (g.choices||[]).map(function(c, ci){
+                var cName = (typeof c==='object') ? c.name : c;
+                var cPrice = (typeof c==='object' && c.price) ? (parseFloat(c.price)||0) : 0;
+                var aktiv = sel.some(function(s){return s.name===cName;});
+                return R.createElement('button',{
+                  key:ci,
+                  onClick:function(){
+                    setOptionSel(function(prev){
+                      var next = Object.assign({}, prev);
+                      var cur = next[gi] || [];
+                      if (g.multi){
+                        var idx = cur.findIndex(function(s){return s.name===cName;});
+                        next[gi] = idx>=0 ? cur.filter(function(s){return s.name!==cName;}) : cur.concat([{name:cName,price:cPrice}]);
+                      } else {
+                        next[gi] = [{name:cName,price:cPrice}];
+                      }
+                      return next;
+                    });
+                  },
+                  style:{padding:'10px 14px',borderRadius:10,border:'2px solid '+(aktiv?'#C84B31':'#ddd'),background:aktiv?'#fdece8':'#fff',color:aktiv?'#C84B31':'#333',fontWeight:700,fontSize:13,cursor:'pointer',fontFamily:'inherit'}
+                }, cName, cPrice>0 ? (' +'+cPrice.toFixed(2)+' EUR') : '');
+              })
+            )
           );
         }),
-        R.createElement('button',{onClick:function(){setOptionModal(null);},
-          style:{width:'100%',padding:13,borderRadius:10,border:'none',background:'#f5f5f5',color:'#555',fontWeight:700,cursor:'pointer',fontFamily:'inherit',marginTop:16,fontSize:14}
-        },KT.close)
+        R.createElement('div',{style:{display:'flex',gap:10,marginTop:8,paddingTop:16,borderTop:'1px solid #f0f0f0'}},
+          R.createElement('button',{onClick:function(){setOptionModal(null);setOptionSel({});},style:{flex:1,padding:14,borderRadius:12,border:'2px solid #ddd',background:'#fff',color:'#666',fontWeight:700,cursor:'pointer',fontFamily:'inherit',fontSize:14}},KT.close),
+          R.createElement('button',{
+            onClick:confirmAdd,
+            disabled:!alleErfuellt,
+            style:{flex:2,padding:14,borderRadius:12,border:'none',background:alleErfuellt?'#C84B31':'#eee',color:alleErfuellt?'#fff':'#aaa',fontWeight:900,cursor:alleErfuellt?'pointer':'default',fontFamily:'inherit',fontSize:14}
+          }, KT.choose+' · '+summe.toFixed(2)+' EUR')
+        )
       )
     );
   }
@@ -37033,9 +37094,10 @@ function KioskView({ menuData, setView }) {
     R.createElement('div',{style:{flex:1,overflowY:'auto',padding:10}},
       R.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}},
         items.map(function(item){
-          var hasOpts = item.options && item.options.length > 0;
+          var itemGroups = effectiveOptions(item);
+          var hasOpts = itemGroups.length > 0;
           var qty = hasOpts ? 0 : getCartQty(item.id, null);
-          var minPrice = hasOpts ? Math.min.apply(null, item.options.map(function(o){return o.price||0;})) : 0;
+          var minPrice = item.price||0;   /* v490: Extras kommen immer OBEN drauf, nie anstelle des Grundpreises */
           var iid = item.id;
           var iname = item.name;
 
@@ -37049,12 +37111,16 @@ function KioskView({ menuData, setView }) {
                 ? R.createElement('div',{style:{fontSize:10,color:'#999',marginBottom:4,lineHeight:1.3}},item.description)
                 : null,
               hasOpts
-                ? R.createElement('div',{style:{fontWeight:900,color:'#C84B31',fontSize:12,marginBottom:6}},KT.from+' '+minPrice.toFixed(2)+' EUR')
+                ? R.createElement('div',{style:{fontWeight:900,color:'#C84B31',fontSize:13,marginBottom:6}},'€'+minPrice.toFixed(2)+' +')
                 : R.createElement('div',{style:{fontWeight:900,color:'#C84B31',fontSize:13,marginBottom:6}},'€'+(item.price||0).toFixed(2)),
               hasOpts
                 ? R.createElement('button',{
                     onClick:function(){
-                      setOptionModal({id:iid, name:iname, description:item.description||'', options:item.options});
+                      var groups=itemGroups;
+                      var vorbelegt={};
+                      groups.forEach(function(g,gi){ if(g.required && !g.multi && g.choices && g.choices.length){ var c0=g.choices[0]; vorbelegt[gi]=[{name:(typeof c0==='object'?c0.name:c0), price:(typeof c0==='object'?(c0.price||0):0)}]; } });
+                      setOptionSel(vorbelegt);
+                      setOptionModal({id:iid, name:iname, description:item.description||'', price:item.price||0, groups:groups});
                     },
                     style:{width:'100%',padding:'7px 0',borderRadius:8,border:'none',background:'#C84B31',color:'#fff',fontWeight:700,fontSize:11,cursor:'pointer',fontFamily:'inherit'}
                   },KT.chooseZutat)
