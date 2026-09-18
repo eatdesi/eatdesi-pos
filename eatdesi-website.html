@@ -1102,7 +1102,7 @@ const CAT_GROUPS = {
 };
 
 /* ---- HELPERS ---- */
-const eur=n=>n.toFixed(2).replace('.',',')+' €';
+const eur=n=>(parseFloat(n)||0).toFixed(2).replace('.',',')+' €';   /* v495: n war teils Text ("2.90"), nie damit gerechnet - siehe normChoice */
 const $=s=>document.querySelector(s);
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),1900);}
 function slug(s){return s.replace(/[^a-z0-9]/gi,'').toLowerCase();}
@@ -1292,7 +1292,12 @@ function onAdd(id){
 }
 function normChoice(c){
   if(c==null) return {name:'',price:0};   /* v493: leere/kaputte Wahlmoeglichkeit - nie abstuerzen */
-  return (typeof c==='string')?{name:c,price:0}:{name:c.name||'',price:c.price||0};
+  /* v495: GEFUNDEN - der eigentliche Grund fuer "n.toFixed is not a
+     function". Preise aus dem Options-Gruppen-Formular kommen aus einem
+     Texteingabefeld und landen als TEXT ("2.90"), nicht als Zahl. eur()
+     rief .toFixed() direkt darauf auf - das gibt es auf einem String
+     nicht. parseFloat() macht daraus zuverlaessig eine echte Zahl. */
+  return (typeof c==='string')?{name:c,price:0}:{name:c.name||'',price:parseFloat(c.price)||0};
 }
 function openOpt(it){
   try{
