@@ -1306,11 +1306,11 @@ function openOpt(it){
     opts.forEach((o,gi)=>{ modalSel[gi]= (o.required&&!o.multi&&o.choices.length)?[normChoice(o.choices[0])]:[]; });
     drawOpt(); $('#optScrim').classList.add('show'); document.body.style.overflow='hidden';
   }catch(e){
-    /* v492: lieber eine sichtbare Meldung als ein lautloses "nichts
-       passiert" - und die genaue Ursache steht jetzt in der Konsole,
-       falls das nochmal vorkommt. */
+    /* v494: die Meldung zeigt jetzt die genaue technische Ursache mit an -
+       damit wir beim naechsten Mal nicht mehr raten muessen, sondern genau
+       sehen, WAS schiefgeht. */
     console.error('Options-Fenster konnte nicht geöffnet werden:', e, it);
-    toast('⚠️ Konnte die Optionen nicht laden – bitte kurz anrufen oder Seite neu laden.');
+    toast('⚠️ Fehler: '+(e&&e.message||e)+' – bitte kurz anrufen.');
   }
 }
 function closeOpt(){$('#optScrim').classList.remove('show');document.body.style.overflow='';modalItem=null;}
