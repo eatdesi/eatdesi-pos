@@ -1264,12 +1264,12 @@ function updateShopModePills(){
   if(hint && SERVICES.allClosed){ hint.innerHTML='<span style="color:var(--red)">⏸️ '+SERVICES.allMsg+'</span>'; }
 }
 function renderCard(it){
-  const hasOpt=it.options&&it.options.length;
+  const hasOpt=effectiveOptions(it).length>0;   /* v491: kannte bisher nur it.options, nie die Options-Gruppen */
   const veg=it.vegan?'<span class="tag vegan">VEGAN</span>':(it.veg?'<span class="tag veg">VEGGIE</span>':'');
   const optTag=hasOpt?'<span class="tag opt">Optionen</span>':'';
   const topTag=it.top?'<span class="tag top">⭐ Beliebt</span>':'';
   const desc=it.description?`<p class="desc">${it.description}</p>`:'';
-  const priced=hasOpt&&it.options.some(o=>o.priced);
+  const priced=(it.options||[]).some(o=>o&&o.priced);
   return `<div class="card${it.top?' top':''}"><div class="nr">Nr. ${it.nr}</div><h4>${it.name}</h4>${desc}<div class="tags">${topTag}${veg}${optTag}</div>
     <div class="foot"><div class="price">${priced?'<small>ab </small>':''}${eur(it.price)}</div>
     <button class="add" onclick="onAdd('${String(it._key||it.id||'').replace(/'/g,"\\'")}')">+ Hinzufügen</button></div></div>`;
@@ -3578,10 +3578,12 @@ function saveCompany(){
 /* ---- SPEISEKARTE (Info: kommt aus POS) ---- */
 function drawMenuInfo(){
   const cats=Object.keys(MENU).length, items=Object.values(MENU).reduce((s,a)=>s+a.length,0);
+  const ogCount=(OPTION_GROUPS||[]).filter(g=>g&&!g.deleted).length;
   $('#adminBody').innerHTML=`<div class="acard"><h3>🍽️ Speisekarte</h3>
     <p class="hint">Die Speisekarte wird im <b>Kassensystem (POS)</b> gepflegt – das ist die einzige Quelle. Diese Website liest sie automatisch live aus der Cloud, damit es nie zwei verschiedene Karten gibt.</p>
     <div class="kgrid"><div class="kpi"><div class="lab">Kategorien</div><div class="val">${cats}</div></div>
-    <div class="kpi"><div class="lab">Artikel</div><div class="val">${items}</div></div></div>
+    <div class="kpi"><div class="lab">Artikel</div><div class="val">${items}</div></div>
+    <div class="kpi"><div class="lab">Options-Gruppen</div><div class="val" style="${ogCount?'':'color:var(--red)'}">${ogCount}</div></div></div>
     <p style="font-size:13.5px;color:var(--paper)">So änderst du die Karte:</p>
     <div style="font-size:13.5px;color:var(--paper-2);line-height:1.9">
       1. Im POS unter „Speisekarte" Artikel/Preise ändern<br>
