@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v495</title>
+<title>eatDeSi POS v497</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8880,6 +8880,32 @@ var TSE = (function () {
   var CNT_KEY   = 'eatdesi_tse_counters';   // { sigCounter, txNumber }
   var LOG_KEY   = 'eatdesi_tse_log';        // Array aller signierten Transaktionen (DSFinV-K Basis)
   var KEY_KEY   = 'eatdesi_tse_localkey';   // exportierter lokaler Signaturschlüssel (Fallback)
+  var AUSFALL_KEY = 'eatdesi_tse_ausfaelle'; // v497: eigenes, kurzes Protokoll NUR der Ausfaelle - fuer die Diagnose-Liste und den "haelt an"-Hinweis, getrennt vom grossen Signatur-Log
+
+  /* v497: LUECKE 1 - haelt fest, WANN ein echter TSE-Ausfall passiert ist.
+     Getrennt vom normalen Signatur-Log, damit die Diagnose-Liste schnell
+     bleibt, auch wenn das Hauptprotokoll irgendwann sehr lang wird. */
+  function merkeAusfall(ts) {
+    var arr = [];
+    try { arr = JSON.parse(localStorage.getItem(AUSFALL_KEY)) || []; } catch (e) {}
+    arr.push({ zeit: ts, nachsigniert: false });
+    if (arr.length > 200) arr = arr.slice(-200);   // waechst nicht unbegrenzt
+    try { localStorage.setItem(AUSFALL_KEY, JSON.stringify(arr)); } catch (e) {}
+  }
+  function ausfallListe() {
+    try { return JSON.parse(localStorage.getItem(AUSFALL_KEY)) || []; }
+    catch (e) { return []; }
+  }
+  /* Haelt der Ausfall gerade an? Wenn die letzten 3 signierten Belege ALLE
+     ein Ausfall waren, ist es kein einzelner Ausrutscher mehr, sondern ein
+     Zustand, den das Personal sehen sollte - dafuer gibt es den Hinweis
+     im Kopfbereich der Kasse (siehe TseAusfallBanner). */
+  function ausfallAnhaltend() {
+    var log = getLog();
+    if (log.length < 3) return false;
+    var letzte3 = log.slice(-3);
+    return letzte3.every(function (e) { return e && e.tse && e.tse.tseAusfall; });
+  }
 
   // ---- Konfiguration ----
   function getCfg() {
@@ -9044,6 +9070,7 @@ var TSE = (function () {
     var counters = bumpCounters();
     var c = getCfg();
     var result = null;
+    var ausfallGrund = null;   /* v497: nur gesetzt, wenn ein ECHTER Ausfall passiert ist (fiskaly/Swissbit war konfiguriert, ist aber gescheitert) - nicht, wenn bewusst im lokalen Testmodus gearbeitet wird */
 
     if (mode() === 'fiskaly') {
       try {
@@ -9051,7 +9078,8 @@ var TSE = (function () {
       } catch (e) {
         // Automatischer Fallback bei Netz-/Auth-Fehler
         result = null;
-        console.warn('TSE fiskaly fehlgeschlagen, Fallback lokal:', e && e.message);
+        ausfallGrund = (e && e.message) || 'Unbekannter Fehler';
+        console.warn('TSE fiskaly fehlgeschlagen, Fallback lokal:', ausfallGrund);
       }
     }
 
@@ -9076,6 +9104,17 @@ var TSE = (function () {
         timeStart: ts,
         timeEnd: ts
       };
+      /* v497: LUECKE 1 - Swissbit verlangt ausdruecklich, dass ein Ausfall
+         auf dem Beleg ERKENNBAR ist und dokumentiert wird, nicht nur in
+         einem console.warn verschwindet, das niemand sieht. Nur markieren,
+         wenn es WIRKLICH ein Ausfall war (ausfallGrund gesetzt) - der
+         normale lokale Testmodus (kein TSE-Anbieter konfiguriert) ist
+         kein Ausfall, sondern der aktuelle, bewusste Zustand. */
+      if (ausfallGrund) {
+        result.tseAusfall = true;
+        result.tseAusfallGrund = ausfallGrund;
+        merkeAusfall(ts);
+      }
     }
 
     // QR-Code-Inhalt nach DGUV/BSI-Format (vereinfachte, gängige Reihenfolge)
@@ -9101,13 +9140,16 @@ var TSE = (function () {
       configured: mode() === 'fiskaly',
       serial: (mode() === 'fiskaly') ? (c.tssSerial || c.tssId) : getLocalSerial(),
       counters: getCounters(),
-      logCount: getLog().length
+      logCount: getLog().length,
+      ausfallAnhaltend: ausfallAnhaltend(),   /* v497 */
+      ausfallAnzahl: ausfallListe().length
     };
   }
 
   return {
     getCfg: getCfg, setCfg: setCfg, mode: mode, status: status,
     signOrder: signOrder, getLog: getLog,
+    ausfallListe: ausfallListe,   /* v497 */
     _local: { getLocalSerial: getLocalSerial }
   };
 })();
@@ -9853,6 +9895,7 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
     <div class="line"></div>
     <div style="font-size:10px;line-height:1.5">
       <div class="bold">TSE-Signatur (${tse.mode==='fiskaly'?'fiskaly':'lokal'})</div>
+      ${tse.tseAusfall ? `<div class="bold" style="color:#c62828">⚠️ TSE nicht erreichbar — lokal signiert (nachtragen!)</div>` : ""}
       <div>TA-Nr: ${tse.txNumber} · Sig-Zähler: ${tse.sigCounter}</div>
       <div>Serien-Nr: ${tse.serial}</div>
       <div>Zeit: ${tse.timeEnd||tse.timeStart||""}</div>
@@ -18633,6 +18676,16 @@ function ReportsView({
     }
   }))))));
 }
+/* v496: Vorlage mit fertigen Beschreibungen fuer ueber 90 typische
+   Gerichte (aus der urspruenglichen Musterkarte) - damit niemand von Hand
+   neu tippen muss, was fuer viele Standard-Artikel (Pommes, Mozzarella
+   Sticks, Calamari, Wonder Bites, ...) schon einmal geschrieben wurde.
+   Wird per Namensabgleich (klein geschrieben, Leerzeichen getrimmt) auf
+   die ECHTE Speisekarte angewendet - siehe "Beschreibungen uebernehmen"
+   unten. Nur eigene, individuelle Gerichte (z.B. "Schnitzel Peppe Rosa")
+   muessen weiterhin von Hand beschrieben werden - fuer die gibt es keine
+   Vorlage, die koennte niemand kennen ausser dir. */
+var BELKS_BESCHREIBUNGS_VORLAGE = {"4 stagioni": "Schinken, Champignons, Artischocken, Ei", "allu tikki chaat": "Kartoffel-Patty, Tomaten, Zwiebeln, Gurke, Kichererbsen, Sweet-Chili & Ranch-Dip", "avocado burger": "Patty · Avocado · Cheddar · Spiegelei · Ranch-Sauce", "avocado fries": "Frische Avocado, Tempura-Panko, Sweet-Chili-Sauce", "avocado tacos": "Beef oder Smoky Chicken · Avocado · Parmesan · Guacamole · Limette · Ranch Sauce", "avocado-ranch-salat": "Beef oder Smoky Chicken · Avocado · Spiegelei · Limette · Ranch-Dressing", "biella italia": "Doppel-Patty · Beef-Bacon-Zwiebelmarmelade · Champignons · Mozzarella · Cheesy-Garlic", "biryani": "Aromatisch gewürzter Basmatireis · Rosted Zwiebel · Rosinen · Sour Cream Dip", "blumenkohl tinga tacos": "Knuspriger Blumenkohl · Paprika · Limette · Sour Cream", "born bacon": "Patty · Gegrilltes Chicken · Senf · Beef-Bacon-Zwiebelmarmelade · Spiegelei · Cheddar · Sweet-BBQ", "bull bbq": "Hackfleisch, Salami, Champignons, Zwiebeln, Jalapenos, BBQ-Sauce", "butter curry": "Cremige Tomaten-Curry-Sahnesauce · Honig · Cashewnüsse · mit Basmatireis oder Nudeln", "butter naan": "Butterweiches Fladenbrot", "calamari": "Knusprig gebacken mit Limette & Aioli", "capricciosa": "Schinken, Salami, Champignons, Peperoni", "capsicum cheese tacos": "Beef oder Smoky Chicken · Paprika · Zwiebelmarmelade · Parmesan · Limette · Sour Cream", "chana masala": "Kichererbsen in würziger Tomaten-Currysauce", "cheese fries": "Beef oder Smoky Chicken · Cheesy-Garlic · Jalapeños · Mozzarella überbacken · Rosted Zwiebeln", "chilli chicken": "Knuspriges Hähnchenbrustfilet · rote Zwiebeln · Paprika · süß-sauer Sauce", "crispy blumenkohl": "Blumenkohlroeschen, Tempura-Panko, Ranch-Dip", "crispy onion rings": "Goldene Zwiebel Ringe mit Guacamole-Dip", "curry": "Klassische Tomaten-Currysauce · Rote Zwiebeln · mit Basmatireis oder Nudeln", "dal makhni": "Linsen in cremiger Butter-Sahnesauce", "der klassiker": "Saftiges Patty · Salat · Tomaten · Gurke · rote Zwiebeln · Mayo · Ketchup · Senf", "diavola": "Salami, Paprika, Chili, Olivenoel", "eatdesi lammkotelett grill": "Saftige gegrillte Lammkoteletts · Bratkartoffeln & Salat", "fantasia": "Smoky Chicken, Zwiebeln, Paprika, Salat, Cheesy-Garlic-Sauce", "feta deluxe salat": "Pfeffer-Feta · Feigen · Walnüsse · Honig · Limette · Olivenöl", "feta salat": "Cremiger Feta · Oliven · Limette · Olivenöl", "garlic naan": "Knoblauch-Fladenbrot", "garlic tacos": "Beef oder Smoky Chicken · Gerösteter Knoblauch · Parmesan · Limette · rote Zwiebeln · Aioli", "guacamole shrimps": "Gegrillte Garnelen, Knoblauch, Guacamole", "indien mix grill": "Hähnchen · Garnelen · Lachs · Salat & Basmatireis", "kasoori naan": "Aromatische Kräuter & Knoblauch", "korma": "Milde Kokos-Currysauce · Kokosmilch · Sahne · mit Basmatireis oder Nudeln", "lachs-salat": "Gegrilltes Lachsfilet · Avocado · Limette · Ranch-Dressing", "mango curry": "Fruchtige Mango-Curry-Sahnesauce · mit Basmatireis oder Nudeln", "margherita": "Tomatensauce & Mozzarella", "mix fries platte": "Avocado Fries, Mozzarella Sticks, Blumenkohl, Onion Rings & Calamari mit Aioli & Sweet-Chili", "mozzarella sticks": "Goldbraun gebacken mit Cheesy-Garlic-Sauce", "paccheri avocado": "Beef oder Smoky Chicken · Avocado · Spiegelei · Cheese-Sauce · überbacken", "paccheri bacon": "Beef oder Smoky Chicken · Cheese-Sauce · Tomatensauce · Beef-Bacon-Zwiebelmarmelade · überbacken", "paccheri chef": "Hähnchen · Paprika · Zwiebeln · Knoblauch · Sahne & Curry-Tomatensauce · überbacken", "paccheri eatdesi premium": "Hackfleisch · Schinken · Champignons · Erbsen · Tomaten-Sahnesauce · überbacken", "paccheri erbe": "Brokkoli · Spinat · Cheese-Sauce · Parmesan · Röstzwiebeln", "paccheri napoli": "Klassische Knoblauch-Tomatensauce", "paccheri roast pfeffer feta": "Cheese-Sauce · Honig · Walnuss · Feta-Käse · überbacken", "paccheri roasty garlic": "Beef oder Smoky Chicken · Gerösteter Knoblauch · rote Zwiebeln · Cheese-Sauce · überbacken", "paccheri salmon": "Lachs · Avocado · cremige Cheese-Sauce · überbacken", "paccheri trüffel": "Beef oder Smoky Chicken · Trüffelcreme · Champignons · Cheese-Sauce · überbacken", "paccheri veggie": "Grillgemüse · Cheese-Sauce · Tomatensauce", "palak": "Cremige Spinat-Tomaten-Sahnesauce · mit Basmatireis oder Nudeln", "papadam": "Dünne, knusprige Linsenwaffeln", "pommes frites": "Klassisch, knusprig, leicht gesalzen", "premium lachssteak (250g)": "Zart & aromatisch · Guacamole · Bratkartoffeln · gemischter Salat", "premium rumpsteak (250g)": "Auf den Punkt · Bratkartoffeln · frischer Salat", "rahm schnitzel": "Champignons, Zwiebeln, cremige Rahmsauce", "raj mah": "Kidneybohnen in würziger Tomaten-Zwiebel-Sauce", "roasty pfeffer-feta": "Ofengeroesteter Pfeffer-Feta, Feigen, Walnuesse, Honig", "salat italia": "Schinken · Artischocken · Mais · Oliven · Mozzarella · Cheesy-Garlic", "salat mix groß": "Lauchzwiebeln · Ranch-Dressing", "salat mix klein": "Lauchzwiebeln · Ranch-Dressing", "salmon tacos": "Gegrillter Lachs · Avocado · Limette · Guacamole · Ranch Sauce", "samosa": "Gefuellte Teigtaschen: Kartoffeln, Erbsen, Gewuerze, Tamarinden-Chutney", "scampi": "Garnelen & Knoblauch", "schnitzel chef": "Paprika, Zwiebeln, Knoblauch, Curry-Tomatensahnesauce, Mozzarella ueberbacken", "schnitzel erbe": "Brokkoli, Spinat, Cheese-Sauce, Parmesan, Roestzwiebeln", "schnitzel hawaii": "Schinken, Ananas, Sahnesauce, Mozzarella ueberbacken", "schnitzel wiener art": "Klassisch paniertes Putenschnitzel, knusprig gebacken", "smashed aioli burger": "Smash Patty · Gerösteter Knoblauch · Cheddar · Zwiebeln · Jalapeños · Aioli", "smashed bacon bomb": "Beef oder Smoky Chicken · Gemüse · Parmesan · Beef-Bacon-Zwiebel-Jam · Sahne · Mozzarella überbacken", "smashed bacontor burger": "Smash Patty · Beef-Bacon-Zwiebelmarmelade · Cheddar · Jalapeños · Gurke · Hot-BBQ", "smashed cheesy burger": "Smash Patty · Cheddar · Gurke · Mayo · Ketchup", "smashed lachs bomb": "Gegrillter Lachs · Parmesan · Rahmspinat · Mozzarella überbacken", "smashed veggie bomb": "Gemüse · Spinat · Parmesan · Sahne · Mozzarella überbacken", "surf & turf salat": "Beef oder Smoky Chicken + Garnelen · Limette · Cheesy-Garlic-Dressing", "surf & turf tacos": "Beef oder Smoky Chicken + Garnelen · Parmesan · Limette · Cheesy-Garlic Sauce", "sweet potato fries": "Suesskartoffelpommes mit feiner Gewuerznote", "tandoori mix grill": "Lammkoteletts · Garnelen · Hähnchen · Basmatireis & Salat", "tandoori tacos": "Gegrillter Paneer · Knoblauch · Paprika · Zwiebeln · Limette · Cheesy-Garlic-Sauce", "tikka masala": "Joghurt-mariniert & gegrillt · Paprika · Zwiebeln · Masala-Sauce · mit Basmatireis oder Nudeln", "tonno": "Thunfisch & Zwiebeln", "tonno salat": "Thunfisch · Oliven · Ei · Ranch-Dressing", "trüffel burger": "Patty · Champignons · Cheddar · Beef-Bacon-Zwiebelmarmelade · Trüffel-Creme", "veggie burger": "Veggie-Patty · Cheddar · Salat · Tomaten · Gurke · Sweet-Chili", "vindaloo": "Sehr scharf · Currysauce · Rote Zwiebeln · Kartoffeln · intensiver Chili", "wonder bites 12 stk.": "Haehnchensticks, Tempura-Panko, hausgemacht", "wonder bites 6 stk.": "Haehnchensticks, Tempura-Panko, hausgemacht", "wonder shrimps 12 stk.": "Garnelen mit Knoblauch gegrillt, Aioli & Limette", "wonder shrimps 6 stk.": "Garnelen mit Knoblauch gegrillt, Aioli & Limette"};
 function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGroups }) {
   var R = React;
   var [activeCat, setActiveCat] = R.useState(Object.keys(menuData)[0]||'');
@@ -18642,6 +18695,30 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
   var [newCat, setNewCat] = R.useState('');
   var [showNewCat, setShowNewCat] = R.useState(false);
   var [form, setForm] = R.useState({nr:'',name:'',price:'',description:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});
+
+  /* v496: Beschreibungen aus der Vorlage uebernehmen - fuellt NUR Artikel
+     auf, die noch KEINE eigene Beschreibung haben, und trifft nur bei
+     einem Namens-Treffer. Nichts wird automatisch gespeichert - der
+     Admin sieht vorher, wie viele Treffer es gibt, und muss danach noch
+     ganz normal "Speisekarte speichern" druecken. */
+  var vorlageTreffer = 0;
+  Object.values(menuData||{}).forEach(function(arr){
+    (arr||[]).forEach(function(it){
+      if(it && !((it.description||'').trim()) && BELKS_BESCHREIBUNGS_VORLAGE[(it.name||'').trim().toLowerCase()]) vorlageTreffer++;
+    });
+  });
+  var uebernehmeVorlage = function(){
+    if(!vorlageTreffer) return;
+    if(!confirm(vorlageTreffer+' Artikel gefunden, die zur Vorlage passen. Beschreibungen jetzt übernehmen und sofort speichern?')) return;
+    var neu = {};
+    Object.keys(menuData||{}).forEach(function(cat){
+      neu[cat] = (menuData[cat]||[]).map(function(it){
+        var treffer = it && !((it.description||'').trim()) && BELKS_BESCHREIBUNGS_VORLAGE[(it.name||'').trim().toLowerCase()];
+        return treffer ? Object.assign({}, it, {description: treffer}) : it;
+      });
+    });
+    onUpdate(neu);
+  };
   var [showGroupForm, setShowGroupForm] = R.useState(false);
   var [editingGroup, setEditingGroup] = R.useState(null);
   var [groupForm, setGroupForm] = R.useState({name:'',required:false,multiple:false,choices:[{name:'',price:''}]});
@@ -18808,6 +18885,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
             ),
             R.createElement('div',{style:{display:'flex',gap:6}},
               R.createElement('button',{onClick:function(){setEditing(null);setForm({nr:'',name:'',price:'',description:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});setShowForm(true);},style:bS(C.green)},'+ Artikel'),
+              vorlageTreffer>0 && R.createElement('button',{onClick:uebernehmeVorlage,title:'Vorgefertigte Beschreibungen fuer bekannte Standard-Gerichte (Pommes, Calamari, Wonder Bites, ...) uebernehmen',style:{padding:'8px 12px',borderRadius:8,border:'2px solid #ffb300',background:'#fff8e1',color:'#e65100',fontWeight:700,cursor:'pointer',fontSize:12}},'🪄 '+vorlageTreffer+' Beschreibungen übernehmen'),
               R.createElement('button',{onClick:function(){deleteCat(activeCat);},style:{padding:'8px 10px',borderRadius:8,border:'none',background:'#ffebee',color:C.red,fontWeight:700,cursor:'pointer',fontSize:13}},'Loeschen')
             )
           ),
@@ -25579,7 +25657,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v495"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v497"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -29021,6 +29099,22 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
       /*#__PURE__*/React.createElement("span", { style:{ width:6, height:6, borderRadius:"50%", background: effectiveOnline?"#4caf50":"#ef5350", boxShadow: effectiveOnline?"0 0 5px #4caf50":"none", cursor:"pointer", display:"inline-block" } }),
       /*#__PURE__*/React.createElement("span", { style:{ fontSize:10, fontWeight:700, color:"#fff" } }, effectiveOnline?"Online":"Offline")
     ),
+    /* v497: LUECKE 1 - sichtbarer Hinweis, wenn der TSE-Ausfall anhaelt
+       (die letzten 3 Belege liefen alle lokal statt ueber Swissbit/fiskaly).
+       Ein einzelner Ausrutscher zeigt nichts - erst wenn es sich haeuft,
+       soll das Personal es sehen und den Anbieter/das Netz pruefen. */
+    (function(){
+      try{
+        var _ts = window.TSE && window.TSE.status();
+        if(!_ts || !_ts.ausfallAnhaltend) return null;
+        return React.createElement("div", {
+          title: "Die TSE (Kassensignatur) ist gerade nicht erreichbar - es wird lokal signiert. Bitte Internet/Anbieter prüfen. Betroffene Belege stehen in den Einstellungen unter TSE.",
+          style:{ display:"flex", alignItems:"center", gap:4, background:"rgba(239,83,80,0.35)", border:"1px solid rgba(239,83,80,0.8)",
+                  borderRadius:12, padding:"3px 8px", cursor:"help" }
+        }, React.createElement("span",{style:{fontSize:11}},"⚠️"),
+           React.createElement("span",{style:{fontSize:10,fontWeight:700,color:"#fff"}},"TSE-Ausfall"));
+      }catch(e){ return null; }
+    })(),
     /*#__PURE__*/React.createElement("span", { style:{ color:"#fff", fontSize:12, opacity:.85, fontWeight:600 } }, now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }))
   ), loggedInUser && /*#__PURE__*/React.createElement("span", {
     onClick: () => { if(window.confirm("Benutzer wechseln? (PIN-Auswahl)")){ setLoggedInUser(null); LS.set("eatdesi_session", null); setLoginUser(null); setLoginPin(""); } },
@@ -29679,9 +29773,10 @@ function TSESetupView() {
   var R = React;
   var [cfg, setCfgState] = R.useState(function(){ return window.TSE.getCfg(); });
   var [st, setSt] = R.useState(function(){ return window.TSE.status(); });
+  var [ausfaelle, setAusfaelle] = R.useState(function(){ return window.TSE.ausfallListe ? window.TSE.ausfallListe() : []; });   /* v497 */
   var [saved, setSaved] = R.useState(false);
 
-  var refresh = function(){ setSt(window.TSE.status()); };
+  var refresh = function(){ setSt(window.TSE.status()); if(window.TSE.ausfallListe) setAusfaelle(window.TSE.ausfallListe()); };
   R.useEffect(function(){ var t = setInterval(refresh, 3000); return function(){ clearInterval(t); }; }, []);
 
   var upd = function(field, val){
@@ -29750,6 +29845,27 @@ function TSESetupView() {
         '⚠️ Hinweis: Der lokale Modus ist NICHT KassenSichV-zertifiziert. Für den legalen Dauerbetrieb tragen Sie unten Ihre fiskaly-Zugangsdaten ein. Alle Belege werden bis dahin lückenlos protokolliert.'
       ) : null
     ),
+
+    /* v497: LUECKE 1 - sichtbare Liste der echten Ausfaelle (nicht des
+       normalen lokalen Testbetriebs). Swissbit verlangt, dass ein Ausfall
+       dokumentiert wird - hier steht, wann er passiert ist und ob er
+       inzwischen nachsigniert wurde (Feld ist vorbereitet, das eigentliche
+       Nachsignieren ist ein spaeterer Schritt, sobald Swissbit angebunden
+       ist). */
+    ausfaelle.length > 0 ? R.createElement('div', { style:{ background:'#fff', borderRadius:12, padding:16, border:'2px solid #ef9a9a', marginBottom:12 } },
+      R.createElement('div', { style:{ fontWeight:800, marginBottom:10, fontSize:14, color:'#c62828' } }, '⚠️ TSE-Ausfälle (' + ausfaelle.length + ')'),
+      R.createElement('div', { style:{ fontSize:12, color:'#888', marginBottom:10, lineHeight:1.5 } },
+        'Diese Belege wurden lokal signiert, weil die TSE in dem Moment nicht erreichbar war. Sie sind gültig gebucht - der Ausfall muss aber dokumentiert bleiben.'),
+      R.createElement('div', { style:{ maxHeight:220, overflowY:'auto' } },
+        ausfaelle.slice().reverse().map(function(a, i){
+          var d = new Date(a.zeit);
+          return R.createElement('div', { key:i, style:{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'7px 0', borderBottom:'1px solid #f5f5f5', fontSize:12.5 } },
+            R.createElement('span', null, d.toLocaleDateString('de-DE') + ' · ' + d.toLocaleTimeString('de-DE')),
+            R.createElement('span', { style:{ fontWeight:700, color: a.nachsigniert ? '#2e7d32' : '#e65100' } }, a.nachsigniert ? '✓ nachsigniert' : 'offen')
+          );
+        })
+      )
+    ) : null,
 
     // KONFIGURATION
     R.createElement('div', { style:{ background:'#fff', borderRadius:12, padding:16, border:'1px solid #eee', marginBottom:12 } },
