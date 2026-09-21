@@ -1263,14 +1263,26 @@ function updateShopModePills(){
   var hint=document.getElementById('shopModeHint');
   if(hint && SERVICES.allClosed){ hint.innerHTML='<span style="color:var(--red)">⏸️ '+SERVICES.allMsg+'</span>'; }
 }
+/* v499: dieselbe Allergen-Liste (EU 1169/2011) wie in der Kasse - nur die
+   Kurz-IDs wandern durch die Cloud, hier werden sie fuer den Gast wieder
+   in lesbare Namen uebersetzt. */
+const BELKS_ALLERGENE_NAMEN = {
+  gluten:'Gluten (Getreide)', krebstiere:'Krebstiere', eier:'Eier', fisch:'Fisch',
+  erdnuesse:'Erdnüsse', soja:'Soja', milch:'Milch (Laktose)', schalenfruechte:'Schalenfrüchte (Nüsse)',
+  sellerie:'Sellerie', senf:'Senf', sesam:'Sesam', sulfite:'Schwefeldioxid/Sulfite',
+  lupinen:'Lupinen', weichtiere:'Weichtiere'
+};
 function renderCard(it){
   const hasOpt=effectiveOptions(it).length>0;   /* v491: kannte bisher nur it.options, nie die Options-Gruppen */
   const veg=it.vegan?'<span class="tag vegan">VEGAN</span>':(it.veg?'<span class="tag veg">VEGGIE</span>':'');
   const optTag=hasOpt?'<span class="tag opt">Optionen</span>':'';
   const topTag=it.top?'<span class="tag top">⭐ Beliebt</span>':'';
   const desc=it.description?`<p class="desc">${it.description}</p>`:'';
+  const allergTags=(it.allergene||[]).map(a=>BELKS_ALLERGENE_NAMEN[a]).filter(Boolean);
+  const allergBlock=allergTags.length?`<p class="desc" style="font-size:11px;color:var(--paper-2)">Enthält: ${allergTags.join(', ')}</p>`:'';
+  const alcTag=it.alcohol?'<span class="tag" style="background:rgba(198,40,40,.18);color:#ef9a9a">🔞 18+</span>':'';
   const priced=(it.options||[]).some(o=>o&&o.priced);
-  return `<div class="card${it.top?' top':''}"><div class="nr">Nr. ${it.nr}</div><h4>${it.name}</h4>${desc}<div class="tags">${topTag}${veg}${optTag}</div>
+  return `<div class="card${it.top?' top':''}"><div class="nr">Nr. ${it.nr}</div><h4>${it.name}</h4>${desc}${allergBlock}<div class="tags">${topTag}${veg}${optTag}${alcTag}</div>
     <div class="foot"><div class="price">${priced?'<small>ab </small>':''}${eur(it.price)}</div>
     <button class="add" onclick="onAdd('${String(it._key||it.id||'').replace(/'/g,"\\'")}')">+ Hinzufügen</button></div></div>`;
 }
@@ -1321,7 +1333,10 @@ function openOpt(it){
 function closeOpt(){$('#optScrim').classList.remove('show');document.body.style.overflow='';modalItem=null;}
 function drawOpt(){
   const it=modalItem; const opts=effectiveOptions(it);
+  const allergTags=(it.allergene||[]).map(a=>BELKS_ALLERGENE_NAMEN[a]).filter(Boolean);
   let h=`<h3>${it.name}</h3><p class="sub">Nr. ${it.nr} · ${(opts&&opts.length)?(it.description||'Wähle deine Optionen'):(it.description||'Direkt hinzufügen')}</p>`;
+  if(allergTags.length) h+=`<p class="sub" style="color:#c62828">⚠️ Enthält: ${allergTags.join(', ')}</p>`;
+  if(it.alcohol) h+=`<p class="sub" style="color:#c62828">🔞 Enthält Alkohol</p>`;
   opts.forEach((o,gi)=>{
     const multi=!!o.multi, req=o.required?'<span class="req">PFLICHT</span>':'';
     h+=`<div class="optgrp"><div class="label"><span>${o.label}</span>${req}</div>`;
@@ -1368,9 +1383,10 @@ function addToCart(it,opts,unit,qty,note){
   note=(note||'').trim();
   const sig=it.id+'|'+opts.map(o=>o.label+':'+o.name).join(',')+'|'+note;
   const ex=cart.find(c=>c.sig===sig);
-  if(ex)ex.qty+=qty; else cart.push({uid:Date.now()+Math.random(),sig,id:it.id,name:it.name,nr:it.nr,cat:it._cat,taxRate:it.taxRate,opts,unit,qty,note});
+  if(ex)ex.qty+=qty; else cart.push({uid:Date.now()+Math.random(),sig,id:it.id,name:it.name,nr:it.nr,cat:it._cat,taxRate:it.taxRate,alcohol:!!it.alcohol,opts,unit,qty,note});
   updateCart(); toast(qty+'× '+it.name+' hinzugefügt');
 }
+function cartHasAlcohol(){ return cart.some(c=>c.alcohol); }   /* v499: Grundlage fuer die Altersbestaetigung beim Checkout */
 function removeCart(uid){cart=cart.filter(c=>c.uid!==uid);updateCart();}
 function chgQty(uid,d){const c=cart.find(x=>x.uid===uid);if(!c)return;c.qty=Math.max(1,c.qty+d);updateCart();}
 function cartTotal(){return cart.reduce((s,c)=>s+c.unit*c.qty,0);}
@@ -1515,6 +1531,11 @@ function goCheckout(){
 
     <div class="field"><label>Zahlungsart</label><select id="f_pay">
       <option value="bar">Bar bei ${isDine?'vor Ort':timeWord}</option><option value="ec">EC/Karte bei ${isDine?'vor Ort':timeWord}</option></select></div>
+    ${cartHasAlcohol()?`<div class="field" style="background:rgba(198,40,40,.12);border:1px solid rgba(198,40,40,.4);border-radius:10px;padding:10px">
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;font-weight:400">
+        <input type="checkbox" id="f_ageok" style="margin-top:3px">
+        <span>🔞 Meine Bestellung enthält Alkohol. Ich bestätige, dass ich <b>mindestens 18 Jahre alt</b> bin und die Ware bei Zustellung persönlich entgegennehme.</span>
+      </label><div class="err">Bitte bestätigen, dass du volljährig bist</div></div>`:''}
     <div class="field"><label>Anmerkung (optional)</label><textarea id="f_note" rows="2" placeholder="z.B. ohne Zwiebeln, Allergien…"></textarea></div>`;
   $('#drawerFoot').innerHTML=`
     <div class="sumrow"><span>Zwischensumme</span><span>${eur(sub)}</span></div>
@@ -1524,6 +1545,7 @@ function goCheckout(){
     ${redeemBox}
     ${_rd?`<div class="row" style="display:flex;justify-content:space-between;font-weight:800;color:#b8860b;margin:4px 0">⭐ Punkte-Rabatt<span>−${eur(_rd.val)}</span></div>`:''}
     <button class="checkout" id="placeBtn" ${belowMin?'disabled':''} onclick="placeOrder()">${belowMin?('Noch '+eur(z.min-sub)+' bis Mindestbestellwert'):('Zahlungspflichtig bestellen · '+eur(tot))}</button>
+    <div style="font-size:11px;color:var(--paper-2);text-align:center;margin-top:8px;line-height:1.5">Mit dem Absenden akzeptierst du unsere <a href="#" onclick="openLegal('agb');return false" style="color:var(--gold)">AGB</a> und unsere <a href="#" onclick="openLegal('datenschutz');return false" style="color:var(--gold)">Datenschutzerklärung</a>.</div>
     <button style="width:100%;margin-top:9px;color:var(--paper-2);font-size:13px;font-weight:600" onclick="renderCartList()">← Zurück zum Warenkorb</button>`;
   // Adresse aus Liefer-Check übernehmen (falls vorhanden)
   if(isDeliv && window._delivPrefill){
@@ -1553,6 +1575,16 @@ async function placeOrder(){
   const isDeliv=mode==='lieferung', isDine=mode==='dinein';
   const name=$('#f_name').value.trim(), phone=$('#f_phone').value.trim();
   let inv=false; inv=bad('f_name',!name)||inv; inv=bad('f_phone',phone.length<5)||inv;
+  /* v499: Jugendschutz - ohne die Bestaetigung keine Bestellung mit Alkohol.
+     Rechtsgrundlage/Umsetzung mit Anwalt final abstimmen; das hier ist die
+     technische Absicherung dafuer. */
+  if(cartHasAlcohol()){
+    const ageBox=document.getElementById('f_ageok');
+    const okAge=ageBox && ageBox.checked;
+    const ageField=ageBox && ageBox.closest('.field');
+    if(ageField) ageField.classList.toggle('bad', !okAge);
+    if(!okAge) inv=true;
+  }
   let street='',zip='',city='',guests='';
   if(isDeliv){street=$('#f_street').value.trim();zip=$('#f_zip').value.trim();city=$('#f_city').value.trim();
     inv=bad('f_street',!street)||inv; inv=bad('f_zip',!zip)||inv; inv=bad('f_city',!city)||inv;
@@ -2651,7 +2683,23 @@ let EVENTS = [
 ];
 let HOURS_CFG = { open:'11:30', close:'21:30', closedDay:2 };
 var HOURS = HOURS_CFG; // Alias, damit alter Code mit HOURS.* weiter funktioniert
-let AI_KEY = '';
+/* v500: GEFUNDEN (Sicherheits-Check) - der Gemini-Schluessel lag bisher
+   direkt in der oeffentlich lesbaren Konfiguration UND wurde als
+   sichtbarer URL-Parameter direkt aus dem Browser an Google geschickt.
+   Jeder Besucher konnte ihn auslesen und fuer sich selbst nutzen - auf
+   Kosten von Belks. Jetzt: der Schluessel lebt NUR NOCH als Secret in
+   der Supabase Edge Function "ai-proxy" (siehe ai-proxy/index.ts), nie
+   im Browser. AI_ENABLED ersetzt das fruehere AI_KEY als einfaches
+   An/Aus-Flag - ob die Assistentin ueberhaupt aktiviert ist, nicht mehr
+   OB und WELCHER Schluessel im Browser steht. */
+let AI_ENABLED = true;
+async function geminiProxyCall(model, body){
+  return await fetch(SUPA_URL+'/functions/v1/ai-proxy', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY},
+    body:JSON.stringify({model:model, body:body})
+  });
+}
 let GALLERY = [
   {url:'mix-fries.jpg', cap:'Mix Fries'},
   {url:'indien-mix-grill.jpg', cap:'Indien Mix Grill'},
@@ -2781,7 +2829,7 @@ async function loadConfig(){
       if(c.restLoc)REST_LOC=Object.assign(REST_LOC,c.restLoc);
       if(c.services)SERVICES=Object.assign(SERVICES,c.services);
       if(c.hours){HOURS_CFG=c.hours; HOURS.open=c.hours.open;HOURS.close=c.hours.close;HOURS.closedDay=c.hours.closedDay;}
-      if(c.aiKey)AI_KEY=c.aiKey;
+      if(typeof c.aiEnabled==='boolean')AI_ENABLED=c.aiEnabled;
       if(c.company)COMPANY=Object.assign(COMPANY,c.company);
       if(c.gallery&&Array.isArray(c.gallery))GALLERY=c.gallery;
     }}
@@ -2987,7 +3035,7 @@ async function loadMenuFromCloud(){
   }catch(e){console.warn('menu cloud load',e);}
 }
 async function saveConfig(){
-  const cfg={zones:ZONES,offers:OFFERS,events:EVENTS,hours:HOURS_CFG,aiKey:AI_KEY,company:COMPANY,gallery:GALLERY,deliveryCfg:DELIVERY_CFG,restLoc:REST_LOC,services:SERVICES};
+  const cfg={zones:ZONES,offers:OFFERS,events:EVENTS,hours:HOURS_CFG,aiEnabled:AI_ENABLED,company:COMPANY,gallery:GALLERY,deliveryCfg:DELIVERY_CFG,restLoc:REST_LOC,services:SERVICES};
   try{
     const r=await belksConfigSchreiben(cfg);
     if(r.ok||r.status===201||r.status===409){
@@ -3077,6 +3125,8 @@ function legalDatenschutz(){
   <p>Bei einer Anfrage über unser Formular verarbeiten wir die angegebenen Kontaktdaten (Name, Telefon, ggf. E-Mail, Datum, Personenzahl, Nachricht), um Ihre Anfrage zu bearbeiten und Ihnen ein Angebot zu unterbreiten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und lit. f DSGVO.</p>
   <h2>6. Hosting & technische Bereitstellung</h2>
   <p>Diese Website wird über GitHub Pages bereitgestellt; Bestell- und Anfragedaten werden über den Cloud-Dienst Supabase gespeichert. Mit diesen Anbietern bestehen die datenschutzrechtlich erforderlichen Vereinbarungen. Beim Aufruf der Seite werden technisch notwendige Server-Logdaten (z.B. IP-Adresse, Zeitpunkt) verarbeitet (Art. 6 Abs. 1 lit. f DSGVO).</p>
+  <h2>6a. Benachrichtigungs-E-Mails (EmailJS)</h2>
+  <p>Um uns über eingehende Bestellungen bzw. Anfragen zu informieren, nutzen wir den Dienst EmailJS. Dabei werden die zur Benachrichtigung notwendigen Angaben (z.B. Bestellinhalt, Kontaktdaten) technisch über diesen Dienst versendet. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und lit. f DSGVO (Betriebsorganisation).</p>
   <h2>7. Cookies und lokale Speicherung im Browser</h2>
   <p>Diese Website setzt keine Tracking- oder Marketing-Cookies ein. Wir nutzen ausschließlich technisch notwendige lokale Speicherung im Browser Ihres Geräts (sog. Local Storage), um z.B. Ihren Warenkorb, Ihre Anmeldung im Kundenkonto und einen einmaligen Begrüßungshinweis zu speichern. Diese Daten verlassen Ihr Gerät nicht von selbst und werden nicht an Dritte weitergegeben. Da es sich um technisch notwendige Funktionen handelt, ist gemäß § 25 Abs. 2 TTDSG keine gesonderte Einwilligung erforderlich.</p>
   <h2>8. Desi-Assistentin (KI-Chat)</h2>
@@ -3110,7 +3160,9 @@ function legalAGB(){
   <h2>§ 7 Stornierung</h2>
   <p>Eine Stornierung ist nur möglich, solange mit der Zubereitung noch nicht begonnen wurde. Bitte kontaktieren Sie uns hierfür umgehend telefonisch unter ${c.phone}.</p>
   <h2>§ 8 Allergene & Zusatzstoffe</h2>
-  <p>Informationen zu Allergenen und Zusatzstoffen erhalten Sie auf Anfrage telefonisch oder vor Ort. Bei Unverträglichkeiten weisen Sie uns bitte vor der Bestellung darauf hin.</p>
+  <p>Allergene werden, soweit vom Betreiber bei einem Gericht hinterlegt, direkt bei diesem Gericht angezeigt. Ist zu einem Gericht keine Angabe hinterlegt, liegt hierzu aktuell keine vollständige Online-Kennzeichnung vor – erkundigen Sie sich in diesem Fall bitte vor der Bestellung telefonisch oder vor Ort. Bei Unverträglichkeiten weisen Sie uns bitte in jedem Fall vor der Bestellung ausdrücklich darauf hin.</p>
+  <h2>§ 8a Alkoholhaltige Produkte</h2>
+  <p>Die Abgabe alkoholhaltiger Getränke erfolgt gemäß Jugendschutzgesetz ausschließlich an Personen ab 18 Jahren. Enthält Ihre Bestellung Alkohol, bestätigen Sie im Bestellvorgang ausdrücklich Ihre Volljährigkeit. Bei Lieferung ist die Entgegennahme alkoholhaltiger Ware durch eine erkennbar minderjährige Person ausgeschlossen; im Zweifel behalten wir uns eine Alterskontrolle bei Übergabe vor.</p>
   <h2>§ 9 Haftung</h2>
   <p>Wir haften unbeschränkt bei Vorsatz und grober Fahrlässigkeit sowie bei Verletzung von Leben, Körper und Gesundheit. Im Übrigen ist die Haftung auf vorhersehbare, vertragstypische Schäden begrenzt.</p>
   <h2>§ 10 Schlussbestimmungen</h2>
@@ -3664,33 +3716,35 @@ function drawMenuInfo(){
 }
 
 /* ---- AI SETTINGS ---- */
+/* v500: kein Schluessel-Eingabefeld mehr - der Schluessel lebt nur noch
+   als Server-Secret (siehe ai-proxy/index.ts), nie im Browser. Hier nur
+   noch: An/Aus, und ein Verbindungstest, der den Schluessel selbst nie
+   zu sehen bekommt. */
 function drawAI(){
   $('#adminBody').innerHTML=`<div class="acard"><h3>🪔 Desi-Assistentin (Gemini)</h3>
-    <p class="hint">Dein Google-Gemini API-Key. Derselbe wie im POS. Hol ihn unter aistudio.google.com/apikey. Wird sicher in Supabase gespeichert.</p>
-    <div class="afield"><label>Gemini API-Key</label><input id="aiKeyInput" placeholder="AIza..." value="${AI_KEY||''}"></div>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button class="btn-save" onclick="saveAiKey()">💾 Speichern</button>
-      <button class="btn-add" onclick="aiTestKey()">🔌 Verbindung testen</button>
+    <p class="hint">Der Gemini API-Key liegt aus Sicherheitsgründen NICHT mehr hier im Browser, sondern ausschließlich als Secret in der Supabase Edge Function <code>ai-proxy</code>. So kann ihn niemand mehr aus dem Quelltext der Website auslesen.</p>
+    <div class="afield" style="display:flex;align-items:center;gap:10px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="aiEnabledInput" ${AI_ENABLED?'checked':''}> Assistentin aktiviert
+      </label>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px">
+      <button class="btn-save" onclick="saveAiEnabled()">💾 Speichern</button>
+      <button class="btn-add" onclick="aiTestConnection()">🔌 Verbindung testen</button>
       <span id="aiTestRes" style="font-size:13px;color:var(--paper-2)"></span></div>
-    <p style="font-size:12px;color:var(--gold-deep);margin-top:14px">Ohne Key beantwortet die Assistentin Standardfragen (Öffnungszeiten, Lieferzonen, Menü) trotzdem – nur ohne freies Gespräch.</p></div>`;
+    <p style="font-size:12px;color:var(--gold-deep);margin-top:14px">Ist die Assistentin aus oder die Server-Funktion nicht erreichbar, beantwortet sie Standardfragen (Öffnungszeiten, Lieferzonen, Menü) trotzdem – nur ohne freies Gespräch.</p></div>`;
 }
-async function saveAiKey(){
-  const k=$('#aiKeyInput').value.trim();
-  AI_KEY=k;
-  // bestehende Config laden, aiKey ergaenzen, zurueckschreiben -> nichts geht verloren
-  const cfg={zones:ZONES,offers:OFFERS,events:EVENTS,hours:HOURS_CFG,aiKey:AI_KEY,company:COMPANY,gallery:GALLERY,deliveryCfg:DELIVERY_CFG,restLoc:REST_LOC,services:SERVICES};
+async function saveAiEnabled(){
+  const on=$('#aiEnabledInput').checked;
+  AI_ENABLED=on;
+  // bestehende Config laden, aiEnabled ergaenzen, zurueckschreiben -> nichts geht verloren.
+  // aiKey wird hier BEWUSST NIE MEHR mitgeschickt - ein alter, noch gespeicherter
+  // Schluessel verschwindet dadurch beim naechsten Speichern von selbst.
+  const cfg={zones:ZONES,offers:OFFERS,events:EVENTS,hours:HOURS_CFG,aiEnabled:AI_ENABLED,company:COMPANY,gallery:GALLERY,deliveryCfg:DELIVERY_CFG,restLoc:REST_LOC,services:SERVICES};
   try{
     const r=await belksConfigSchreiben(cfg);
     if(r.ok||r.status===201||r.status===409){
-      // Gegenpruefung: wirklich in Supabase angekommen?
-      let ok=false;
-      try{
-        const g=await fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+CONFIG_KEY+'&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}});
-        if(g.ok){const j=await g.json(); if(j&&j[0]&&j[0].value){const c=JSON.parse(j[0].value); ok=(c.aiKey===AI_KEY);}}
-      }catch(e){}
       toast('✓ Gespeichert');
-      if(ok) alert('✓ Gemini-Key gespeichert und geprueft.\n\nDie Assistentin fuehrt jetzt freie Gespraeche. Lade die Gaeste-Seite einmal neu, damit der Key dort aktiv wird.');
-      else alert('✓ Gespeichert, aber Gegenpruefung unklar.\n\nBitte teste im Gaeste-Chat. Falls dort weiter Standardantworten kommen, Seite neu laden.');
     } else {
       belksSpeicherFehler(r, true);
     }
@@ -3699,14 +3753,13 @@ async function saveAiKey(){
     alert('⚠️ Speichern fehlgeschlagen: '+(e&&e.message?e.message:'Netzwerkfehler')+'\n\nInternet pruefen und nochmal versuchen.');
   }
 }
-async function aiTestKey(){
-  const k=$('#aiKeyInput').value.trim(); const res=$('#aiTestRes');
-  if(!k){res.textContent='Bitte Key eingeben';return;}
+async function aiTestConnection(){
+  const res=$('#aiTestRes');
   res.textContent='Teste…';
   try{
-    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key='+k,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:'sag nur OK'}]}]})});
-    if(r.ok){res.innerHTML='<span style="color:#a4c46f">✓ Verbindung OK</span>';AI_KEY=k;}
-    else{const e=await r.json();res.innerHTML='<span style="color:var(--red)">✗ '+(e.error?.message||'Fehler '+r.status)+'</span>';}
+    const r=await geminiProxyCall('gemini-2.5-flash-lite', {contents:[{parts:[{text:'sag nur OK'}]}]});
+    if(r.ok){res.innerHTML='<span style="color:#a4c46f">✓ Verbindung OK</span>';}
+    else{const e=await r.json();res.innerHTML='<span style="color:var(--red)">✗ '+(e.error?.message||e.error||'Fehler '+r.status)+'</span>';}
   }catch(e){res.innerHTML='<span style="color:var(--red)">✗ '+e.message+'</span>';}
 }
 
@@ -3777,14 +3830,12 @@ function openAI(){
   $('#aiPanel').classList.add('show');$('#aiFab').style.display='none';
   dismissAiTeaser();   /* v487: Sprechblase weg, sobald der Chat wirklich aufgeht */
   if(!aiOpened){aiOpened=true; aiAddMsg('bot','Namaste! 🪔 Ich bin die Desi-Assistentin von eatDeSi. Frag mich nach Öffnungszeiten, Gerichten, Lieferung oder Catering – per Text oder Mikrofon.');}
-  // AI-Key frisch aus Supabase holen, falls der Inhaber ihn gerade erst gespeichert
-  // hat (sonst bliebe AI_KEY leer und es kaemen nur Standardantworten).
-  if(!AI_KEY){
-    fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+CONFIG_KEY+'&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}})
-      .then(function(g){return g.ok?g.json():null;})
-      .then(function(j){ if(j&&j[0]&&j[0].value){ try{var c=JSON.parse(j[0].value); if(c.aiKey)AI_KEY=c.aiKey;}catch(e){} } })
-      .catch(function(){});
-  }
+  // aiEnabled frisch aus Supabase holen, falls der Inhaber die Assistentin
+  // gerade erst (de)aktiviert hat.
+  fetch(SUPA_URL+'/rest/v1/pos_state?key=eq.'+CONFIG_KEY+'&select=value',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY}})
+    .then(function(g){return g.ok?g.json():null;})
+    .then(function(j){ if(j&&j[0]&&j[0].value){ try{var c=JSON.parse(j[0].value); if(typeof c.aiEnabled==='boolean')AI_ENABLED=c.aiEnabled;}catch(e){} } })
+    .catch(function(){});
 }
 function closeAI(){$('#aiPanel').classList.remove('show');$('#aiFab').style.display='flex';aiStopSpeak();}
 /* v487: Begruessungs-Sprechblase - einmal pro Besuch (sessionStorage),
@@ -3819,24 +3870,22 @@ async function aiAsk(userText){
   const typing=aiAddMsg('bot','…');typing.classList.add('typing');
   aiHistory.push({role:'user',parts:[{text:userText}]});
 
-  // Fallback ohne Key: einfache Regeln
-  if(!AI_KEY){
+  // Fallback ohne aktivierte KI: einfache Regeln
+  if(!AI_ENABLED){
     const ans=aiFallback(userText); typing.remove(); aiReply(ans); return;
   }
   var MODEL='gemini-2.5-flash-lite';
   try{
     const body={system_instruction:{parts:[{text:aiContext()}]},contents:aiHistory.slice(-10),
       generationConfig:{temperature:0.6,maxOutputTokens:400}};
-    var r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+MODEL+':generateContent?key='+AI_KEY,
-      {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var r=await geminiProxyCall(MODEL, body);
     var j=await r.json();
     // Rate-Limit: kurz warten + einmal wiederholen
     if(j&&j.error&&(j.error.code===429||/quota|rate|exceeded/i.test(j.error.message||''))){
       var wait=8; var mm=(j.error.message||'').match(/retry in ([\d.]+)s/i); if(mm)wait=Math.min(Math.ceil(parseFloat(mm[1]))+1,20);
       typing.textContent='Einen Moment bitte… ('+wait+'s)';
       await new Promise(function(res){setTimeout(res,wait*1000);});
-      r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+MODEL+':generateContent?key='+AI_KEY,
-        {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      r=await geminiProxyCall(MODEL, body);
       j=await r.json();
     }
     let ans=j?.candidates?.[0]?.content?.parts?.[0]?.text || aiFallback(userText);
