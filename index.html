@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v500</title>
+<title>eatDeSi POS v504</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -9264,6 +9264,22 @@ window.callAI = async function(prompt, maxTokens, opt) {
 
 // callAIVision: wie callAI, aber MIT Bild (Foto-Scan, z.B. Lieferando-Tablet).
 // b64jpeg = reiner Base64-String (ohne "data:image/jpeg;base64," Prefix).
+/* v503: GEFUNDEN (Sicherheits-Check) - Gast-Text (Bestell-Notiz, Name,
+   Adresse) landete beim Drucken UNGEPRUEFT in rohem HTML, das per
+   document.write() in ein Fenster im selben Sicherheitsbereich wie die
+   Kasse selbst geschrieben wird. Ein Gast haette dort z.B. <script>
+   eintragen koennen - beim Drucken durch das Personal waere das
+   ausgefuehrt worden, mit Zugriff auf die Kassendaten (localStorage,
+   Sitzung). Alles, was ein GAST eingegeben haben KOENNTE (Notizen, Name,
+   Adresse, Telefonnummer, Kundennummer) wird jetzt vor dem Einbauen in
+   HTML-Text sauber escaped. Zahlen/interne Werte (Preise, IDs) brauchen
+   das nicht. React-Anzeigen selbst waren NIE betroffen - die escapen
+   automatisch; nur eigenes HTML-Zusammenbauen (fuers Drucken) war es. */
+window.belksEscapeHtml = function(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+};
 window.callAIVision = async function(prompt, b64jpeg, maxTokens, mimeType) {
   var cfg = {};
   try { cfg = JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer")) || '{}') || {}; } catch(e) {}
@@ -9876,15 +9892,15 @@ function belksStationsBon(titel, liste, label, printerCfg, bonTyp, notiz){
        losgekocht, bevor jemand sie liest. Deshalb vor die Kategorien und
        fett, nicht als Fussnote. */
     if (notiz && String(notiz).trim()) {
-      L += '<div class="row bold"><span>** ' + String(notiz).trim() + ' **</span><span></span></div>';
+      L += '<div class="row bold"><span>** ' + window.belksEscapeHtml(String(notiz).trim()) + ' **</span><span></span></div>';
       L += '<div class="blank"></div>';
     }
     Object.keys(nachKat).forEach(function(cat){
-      L += '<div class="center bold">- ' + cat + ' -</div>';
+      L += '<div class="center bold">- ' + window.belksEscapeHtml(cat) + ' -</div>';
       nachKat[cat].forEach(function(i){
-        L += '<div class="row bold"><span>' + (i.qty||1) + 'x ' + (i.nr ? i.nr + '. ' : '') + (i.name||'') + '</span><span></span></div>';
-        if (i.note)        L += '<div class="row"><span>  ' + i.note + '</span><span></span></div>';
-        if (i.kitchenNote) L += '<div class="row"><span>  ' + i.kitchenNote + '</span><span></span></div>';
+        L += '<div class="row bold"><span>' + (i.qty||1) + 'x ' + (i.nr ? window.belksEscapeHtml(i.nr) + '. ' : '') + window.belksEscapeHtml(i.name||'') + '</span><span></span></div>';
+        if (i.note)        L += '<div class="row"><span>  ' + window.belksEscapeHtml(i.note) + '</span><span></span></div>';
+        if (i.kitchenNote) L += '<div class="row"><span>  ' + window.belksEscapeHtml(i.kitchenNote) + '</span><span></span></div>';
       });
       L += '<div class="blank"></div>';
     });
@@ -9921,12 +9937,12 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
   const deliveryBlock = _hatKunde ? `
     <div class="line"></div>
     <div class="bold" style="font-size:12px;margin-bottom:3px">${_istLieferung ? "🚴 Lieferadresse" : "📦 Abholung — Kunde"}</div>
-    ${deliveryInfo.name ? `<div>${deliveryInfo.name}</div>` : ""}
-    ${deliveryInfo.street ? `<div>${deliveryInfo.street}</div>` : ""}
-    ${(deliveryInfo.plz || deliveryInfo.city) ? `<div>${[deliveryInfo.plz, deliveryInfo.city].filter(Boolean).join(" ")}</div>` : ""}
-    ${deliveryInfo.phone ? `<div>📞 ${deliveryInfo.phone}</div>` : ""}
-    ${deliveryInfo.kundenNr ? `<div style="font-size:11px">Kunden-Nr: ${deliveryInfo.kundenNr}</div>` : ""}
-    ${deliveryInfo.note ? `<div style="font-size:11px">${deliveryInfo.note}</div>` : ""}
+    ${deliveryInfo.name ? `<div>${window.belksEscapeHtml(deliveryInfo.name)}</div>` : ""}
+    ${deliveryInfo.street ? `<div>${window.belksEscapeHtml(deliveryInfo.street)}</div>` : ""}
+    ${(deliveryInfo.plz || deliveryInfo.city) ? `<div>${window.belksEscapeHtml([deliveryInfo.plz, deliveryInfo.city].filter(Boolean).join(" "))}</div>` : ""}
+    ${deliveryInfo.phone ? `<div>📞 ${window.belksEscapeHtml(deliveryInfo.phone)}</div>` : ""}
+    ${deliveryInfo.kundenNr ? `<div style="font-size:11px">Kunden-Nr: ${window.belksEscapeHtml(deliveryInfo.kundenNr)}</div>` : ""}
+    ${deliveryInfo.note ? `<div style="font-size:11px">${window.belksEscapeHtml(deliveryInfo.note)}</div>` : ""}
   ` : "";
   // AUDIT-FIX v156: Fallbacks nur fuer eatdesi-bw — fremde Toechter drucken NIE BW-Daten
   const _isBWbon = (typeof LOCATION_ID!=='undefined' && LOCATION_ID==='eatdesi-bw');
@@ -10321,10 +10337,10 @@ function BonModal({
   const deliveryBlock = hasDelivery ? `
     <div class="line"></div>
     <div class="bold" style="font-size:12px">🚴 Lieferadresse</div>
-    ${customerName ? `<div>${customerName}</div>` : ""}
-    ${customerStreet ? `<div>${customerStreet}</div>` : ""}
-    ${(customerPlz || customerCity) ? `<div>${[customerPlz, customerCity].filter(Boolean).join(" ")}</div>` : ""}
-    ${customerPhone ? `<div>📞 ${customerPhone}</div>` : ""}
+    ${customerName ? `<div>${window.belksEscapeHtml(customerName)}</div>` : ""}
+    ${customerStreet ? `<div>${window.belksEscapeHtml(customerStreet)}</div>` : ""}
+    ${(customerPlz || customerCity) ? `<div>${window.belksEscapeHtml([customerPlz, customerCity].filter(Boolean).join(" "))}</div>` : ""}
+    ${customerPhone ? `<div>📞 ${window.belksEscapeHtml(customerPhone)}</div>` : ""}
   ` : "";
   // -- ESC/POS font size helper --
   const getFontCmd = () => {
@@ -10441,7 +10457,7 @@ function BonModal({
   // Schlanker Bon NUR fuer Kueche/Bar: nur Tisch/Kunde + Speisen/Getraenke, grosse Schrift
   const kvBonHtml = (title, lines) => {
     var _kbW = (printerSettings?.width || 384); try { var _kc=getBonConfig(); if(_kc && _kc.kueche && _kc.kueche.width===58) _kbW=304; } catch(e){}
-    const kundeInfo = customerName ? `<div class="center bold" style="font-size:14pt;margin:2px 0">${customerName}</div>` : "";
+    const kundeInfo = customerName ? `<div class="center bold" style="font-size:14pt;margin:2px 0">${window.belksEscapeHtml(customerName)}</div>` : "";
     /* ═══ v386: KUNDENDATEN AUF DEN GAESTEBON ═══
        Der Gaestebon zeigte nur den Namen. Telefonnummer und Lieferadresse
        standen nirgends - der Fahrer bekam sie also nur ueber den
@@ -10456,15 +10472,15 @@ function BonModal({
        "erst um 19:30", "Allergie Nuss". */
     const notizBlock = (tischNotiz && String(tischNotiz).trim()) ? `
       <div class="line"></div>
-      <div class="center bold">** ${String(tischNotiz).trim()} **</div>` : "";
+      <div class="center bold">** ${window.belksEscapeHtml(String(tischNotiz).trim())} **</div>` : "";
     var _kbLief = !!(customerStreet || customerCity);
     var _kbHat  = !!(customerName || customerPhone || customerStreet);
     const kundeBlock = _kbHat ? `
       <div class="line"></div>
       <div class="center bold" style="font-size:12pt">${_kbLief ? "\uD83D\uDEB4 Lieferadresse" : "\uD83D\uDCE6 Abholung"}</div>
-      ${customerStreet ? `<div class="center" style="font-size:12pt">${customerStreet}</div>` : ""}
-      ${(customerPlz || customerCity) ? `<div class="center" style="font-size:12pt">${[customerPlz, customerCity].filter(Boolean).join(" ")}</div>` : ""}
-      ${customerPhone ? `<div class="center" style="font-size:12pt">\uD83D\uDCDE ${customerPhone}</div>` : ""}
+      ${customerStreet ? `<div class="center" style="font-size:12pt">${window.belksEscapeHtml(customerStreet)}</div>` : ""}
+      ${(customerPlz || customerCity) ? `<div class="center" style="font-size:12pt">${window.belksEscapeHtml([customerPlz, customerCity].filter(Boolean).join(" "))}</div>` : ""}
+      ${customerPhone ? `<div class="center" style="font-size:12pt">\uD83D\uDCDE ${window.belksEscapeHtml(customerPhone)}</div>` : ""}
     ` : "";
     return `<html><head><meta name="viewport" content="width=device-width"><style>
     /* v386: 12pt statt 18px, durchgehend fett - so gewuenscht und so, wie
@@ -10486,8 +10502,8 @@ function BonModal({
   const printGast = () => {
     const lines = items.map(i => `
       <div class="row bold"><span>${i.qty}× ${i.nr}. ${i.name}</span><span>${fmt(i.finalPrice * i.qty)}</span></div>
-      ${i.note ? `<div style="padding-left:10px;font-size:11pt">→ ${i.note}</div>` : ""}
-      ${i.kitchenNote ? `<div style="padding-left:10px;font-size:11pt">${i.kitchenNote}</div>` : ""}
+      ${i.note ? `<div style="padding-left:10px;font-size:11pt">→ ${window.belksEscapeHtml(i.note)}</div>` : ""}
+      ${i.kitchenNote ? `<div style="padding-left:10px;font-size:11pt">${window.belksEscapeHtml(i.kitchenNote)}</div>` : ""}
     `).join("") + `
       <div class="line"></div>
       <div class="row bold"><span>Netto</span><span>${fmt(netto)}</span></div>
@@ -10529,7 +10545,7 @@ function BonModal({
     const lines = cats.map((cat, ci) =>
       `<div class="bold center" style="font-size:16px;margin:6px 0 4px">- ${cat} -</div><div>&nbsp;</div>` +
       groups[cat].map(i =>
-        `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px;margin-bottom:2px">→ ${i.note}</div>` : ""}${i.kitchenNote ? `<div style="color:blue;font-size:16px;margin-bottom:2px">📝 ${i.kitchenNote}</div>` : ""}<div>&nbsp;</div>`
+        `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px;margin-bottom:2px">→ ${window.belksEscapeHtml(i.note)}</div>` : ""}${i.kitchenNote ? `<div style="color:blue;font-size:16px;margin-bottom:2px">📝 ${window.belksEscapeHtml(i.kitchenNote)}</div>` : ""}<div>&nbsp;</div>`
       ).join("")
     ).join("");
     doPrint(kvBonHtml("🍳 KÜCHE — SPEISEN", lines));
@@ -10548,7 +10564,7 @@ function BonModal({
     const lines = cats.map((cat, ci) =>
       `<div class="bold center" style="font-size:16px;margin:6px 0 4px">- ${cat} -</div><div>&nbsp;</div>` +
       groups[cat].map(i =>
-        `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px;margin-bottom:2px">→ ${i.note}</div>` : ""}<div>&nbsp;</div>`
+        `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.nr}. ${i.name}</div>${i.note ? `<div style="color:green;font-size:16px;margin-bottom:2px">→ ${window.belksEscapeHtml(i.note)}</div>` : ""}<div>&nbsp;</div>`
       ).join("")
     ).join("");
     doPrint(kvBonHtml("🍺 BAR — GETRÄNKE", lines));
@@ -11214,7 +11230,7 @@ function EinzelnView({ items, paid, gastNr, label, printerSettings, onGastPaid, 
       try {
         let L = (gitems||[]).map(i => {
           const head = `${i.qty}× ${i.nr?i.nr+'. ':''}${i.name}`;
-          const noteLine = i.note ? `<div style="font-size:12px;padding-left:14px">(${i.note})</div>` : "";
+          const noteLine = i.note ? `<div style="font-size:12px;padding-left:14px">(${window.belksEscapeHtml(i.note)})</div>` : "";
           return `<div class="row"><span>${head}</span><span>${fmt(i.finalPrice*i.qty)}</span></div>${noteLine}`;
         }).join("");
         L += `<div class="line"></div>`;
@@ -13688,8 +13704,8 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
       var mkLines = function(list){ return list.map(function(i){
         /* v471: Hier stand nur Menge und Name. Auswahl und Notiz des Gastes
            kamen bei Priya-Bestellungen nie in der Kueche an. */
-        var _opt = (i.note && i.note !== 'AI Bestellung') ? `<div class="row"><span>${i.note}</span><span></span></div>` : '';
-        var _kn  = i.kitchenNote ? `<div class="row"><span>** ${i.kitchenNote} **</span><span></span></div>` : '';
+        var _opt = (i.note && i.note !== 'AI Bestellung') ? `<div class="row"><span>${window.belksEscapeHtml(i.note)}</span><span></span></div>` : '';
+        var _kn  = i.kitchenNote ? `<div class="row"><span>** ${window.belksEscapeHtml(i.kitchenNote)} **</span><span></span></div>` : '';
         return `<div class="bold" style="font-size:22px;margin:6px 0 2px">${i.qty}× ${i.name}</div>${_opt}${_kn}<div>&nbsp;</div>`;
       }).join(""); };
       await BTPrint.connect(addr);
@@ -17781,7 +17797,7 @@ function OrderListView({
             let bonLines = (o.items||[]).map(i => {
               const price = fmt(i.finalPrice*i.qty);
               const head = i.qty+"× "+(i.nr?i.nr+". ":"")+i.name;
-              const noteLine = i.note ? "<div style=\"font-size:12px;padding-left:14px\">("+i.note+")</div>" : "";
+              const noteLine = i.note ? "<div style=\"font-size:12px;padding-left:14px\">("+window.belksEscapeHtml(i.note)+")</div>" : "";
               return "<div class=\"row\"><span>"+head+"</span><span>"+price+"</span></div>"+noteLine;
             }).join("");
             /* v330: auch beim Nachdruck muss die Liefergebuehr erscheinen. */
@@ -24070,7 +24086,7 @@ function _bewHtml(items, total, label, fmt80, F) {
   var PS = '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print();},600);}<\/scr' + 'ipt>';
 
   var rows = items.map(function(i){
-    var name = i.qty + '\xd7 ' + (i.nr||'') + ' ' + i.name + (i.note ? ' (' + i.note + ')' : '');
+    var name = i.qty + '\xd7 ' + (i.nr||'') + ' ' + window.belksEscapeHtml(i.name) + (i.note ? ' (' + window.belksEscapeHtml(i.note) + ')' : '');
     var amt  = (i.finalPrice * i.qty).toFixed(2);
     return fmt80
       ? '<div style="display:flex;justify-content:space-between;font-size:11px;margin:1px 0"><span>' + name + '</span><span>' + amt + '\u20ac</span></div>'
@@ -24080,9 +24096,9 @@ function _bewHtml(items, total, label, fmt80, F) {
      setzt htmlToLines Name und Preis auf die zwei Seiten der Zeile.
      Vorher klebte beides aneinander: "Pommes Frites4.90EUR". */
   var rows80 = items.map(function(i){
-    var name = i.qty + 'x ' + (i.nr ? (i.nr + '. ') : '') + i.name;
+    var name = i.qty + 'x ' + (i.nr ? (i.nr + '. ') : '') + window.belksEscapeHtml(i.name);
     var amt  = (i.finalPrice * i.qty).toFixed(2) + ' EUR';
-    var note = i.note ? '<div style="font-size:11px">  (' + i.note + ')</div>' : '';
+    var note = i.note ? '<div style="font-size:11px">  (' + window.belksEscapeHtml(i.note) + ')</div>' : '';
     return '<div class="row"><span>' + name + '</span><span>' + amt + '</span></div>' + note;
   }).join('');
 
@@ -25243,7 +25259,7 @@ function GutscheinView({ gutscheine, setGutscheine, loggedInUser, printerSetting
       L += '<div class="line"></div>';
       L += '<div class="row"><span>Gutscheinwert</span><span>' + fmt(g.betrag) + '</span></div>';
       if (g.zahlart) L += '<div class="row"><span>Bezahlt mit</span><span>' + g.zahlart + '</span></div>';
-      if (g.note) L += '<div class="row"><span>Notiz</span><span>' + g.note + '</span></div>';
+      if (g.note) L += '<div class="row"><span>Notiz</span><span>' + window.belksEscapeHtml(g.note) + '</span></div>';
       L += '<div class="row"><span>Ausgestellt</span><span>' + fmtD(erstellt) + '</span></div>';
       L += '<div class="row"><span>G\u00fcltig bis</span><span>' + fmtD(gueltig) + '</span></div>';
       L += '<div class="line"></div>';
@@ -25695,7 +25711,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v500"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v504"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27241,8 +27257,8 @@ function App() {
          nicht belegen, was vereinbart war.
          Option/Notiz bleiben auf eigenen Zeilen, damit der Preis immer in
          einer Reihe mit dem Namen steht. */
-      const noteLine  = i.note ? `<div style="font-size:12px;padding-left:14px">(${i.note})</div>` : "";
-      const knoteLine = i.kitchenNote ? `<div style="font-size:12px;padding-left:14px">${i.kitchenNote}</div>` : "";
+      const noteLine  = i.note ? `<div style="font-size:12px;padding-left:14px">(${window.belksEscapeHtml(i.note)})</div>` : "";
+      const knoteLine = i.kitchenNote ? `<div style="font-size:12px;padding-left:14px">${window.belksEscapeHtml(i.kitchenNote)}</div>` : "";
       return `<div class="row"><span>${head}</span><span>${price}</span></div>${noteLine}${knoteLine}`;
     }).join("");
     if(_fee>0) L += `<div class="row"><span>Liefergebühr</span><span>${fmt(_fee)}</span></div>`;
