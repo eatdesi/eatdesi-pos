@@ -2028,7 +2028,30 @@ async function shaHex(str){
   const h=await crypto.subtle.digest('SHA-256',b);
   return Array.from(new Uint8Array(h)).map(x=>x.toString(16).padStart(2,'0')).join('');
 }
-async function custHashPw(phone,pw){ return shaHex(normPhone(phone)+':'+String(pw)); }
+/* v498: ECHTES PASSWORT-SALT - GEFUNDEN (Sicherheits-Check): bisher war
+   das "Salt" die Telefonnummer selbst - bekannt/erratbar, kein echter
+   Schutz gegen vorab berechnete Tabellen. Jetzt holt sich der Browser
+   vom Server ein Salt, das aus einem GEHEIMEN, nur dort bekannten
+   "Pepper" errechnet wird (siehe website_sql_teil7_passwort_salt.sql) -
+   ohne den Pepper nicht nachrechenbar, selbst wenn Telefonnummer und
+   Standort bekannt sind.
+   custHashPwLegacy() bleibt erhalten (nur fuers Einloggen, als zweiter
+   Versuch) - so muss niemand sein Passwort neu vergeben: passt beim
+   Login nur noch das alte Format, wird im selben Moment still auf das
+   neue umgestellt (siehe belks_kunde_login in der SQL-Datei). */
+async function custSalt(phone){
+  try{
+    var j = await kundeRPC('belks_kunde_salt', {p_loc:LOCATION_ID, p_phone:String(phone||'')});
+    if(j && typeof j === 'string' && j.length > 10) return j;
+  }catch(e){ console.warn('Salt-Abruf fehlgeschlagen', e); }
+  return null; // Server nicht erreichbar o.ae. - siehe Fallback unten
+}
+async function custHashPw(phone,pw){
+  var salt = await custSalt(phone);
+  if(!salt) return custHashPwLegacy(phone,pw); // ohne Verbindung lieber das alte Format als gar keins
+  return shaHex(salt+':'+String(pw));
+}
+async function custHashPwLegacy(phone,pw){ return shaHex(normPhone(phone)+':'+String(pw)); }
 /* ===== 🔒 KUNDENKONTEN UEBER SERVER-FUNKTIONEN =====
    Frueher lud jede Seite die KOMPLETTE Kundenliste in den Browser
    (Namen, Nummern, Adressen, Passwort-Pruefsummen) und schrieb sie
@@ -2112,8 +2135,8 @@ async function kundeBekannt(phone){
   return j||{bekannt:false};
 }
 // Anmelden -> eigenes Konto ODER null
-async function kundeLogin(phone,hash){
-  return await kundeRPC('belks_kunde_login',{p_loc:LOCATION_ID,p_phone:String(phone||''),p_hash:String(hash||'')});
+async function kundeLogin(phone,hash,hashLegacy){
+  return await kundeRPC('belks_kunde_login',{p_loc:LOCATION_ID,p_phone:String(phone||''),p_hash:String(hash||''),p_hash_legacy:String(hashLegacy||'')});
 }
 // Anlegen/aendern -> {ok:true,kunde:{...}} ODER {ok:false,grund:'...'}
 async function kundeSpeichern(phone,hash,daten){
@@ -2234,7 +2257,8 @@ async function acctLoginGo(){
   if(!pw){ if(err) err.textContent='Bitte Passwort eingeben.'; return; }
   if(err) err.textContent='Prüfe…';
   var h=await custHashPw(np, pw);
-  var found=await kundeLogin(np, h);
+  var hLegacy=await custHashPwLegacy(np, pw);   /* v498: zweiter Versuch fuers stille Umstellen alter Konten */
+  var found=await kundeLogin(np, h, hLegacy);
   if(found && found.ohnePasswort){
     if(err) err.textContent='';
     return renderAcctSetPw(np, found, false);
@@ -2290,7 +2314,8 @@ async function acctPwLogin(np){
   if(!pw){ if(err) err.textContent='Bitte Passwort eingeben.'; return; }
   if(err) err.textContent='Anmelden…';
   var h=await custHashPw(np, pw);
-  var found=await kundeLogin(np, h);
+  var hLegacy=await custHashPwLegacy(np, pw);   /* v498: zweiter Versuch fuers stille Umstellen alter Konten */
+  var found=await kundeLogin(np, h, hLegacy);
   if(!found){ if(err) err.textContent='❌ Falsches Passwort oder Konto nicht gefunden.'; return; }
   if(found.ohnePasswort) return renderAcctSetPw(np, found, false);
   var c={phone:found.phone||np, name:found.name||'', points:(typeof found.points==='number')?found.points:null, email:found.email||'', street:found.street||'', zip:found.zip||'', city:found.city||'', sess:h};
@@ -3046,17 +3071,23 @@ function legalDatenschutz(){
   <p>Wenn Sie über die Website bestellen, erheben wir die zur Abwicklung notwendigen Daten:</p>
   <ul><li>Name</li><li>Telefonnummer</li><li>bei Lieferung: Lieferadresse (Straße, PLZ, Ort)</li><li>Bestellinhalt, Zahlungsart, Anmerkungen</li></ul>
   <p>Diese Daten werden ausschließlich zur Zubereitung, Abholung bzw. Lieferung Ihrer Bestellung verwendet und an unser Kassensystem übermittelt. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO.</p>
-  <h2>4. Anfragen (Catering, Buffet, Feier, Reservierung)</h2>
+  <h2>4. Kundenkonto (Registrierung, Anmeldung, Treuepunkte)</h2>
+  <p>Wenn Sie freiwillig ein Kundenkonto anlegen, speichern wir Ihre Telefonnummer als Kennung sowie die von Ihnen angegebenen Daten (Name, optional E-Mail und Lieferadresse) und den Verlauf Ihrer gesammelten Treuepunkte. Ihr Passwort speichern wir zu keinem Zeitpunkt im Klartext, sondern ausschließlich als kryptographischen Hashwert mit individuellem Zufallswert (Salt); ein Rückschluss auf das ursprüngliche Passwort ist damit nicht möglich. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO. Sie können die Löschung Ihres Kontos jederzeit bei uns formlos beantragen.</p>
+  <h2>5. Anfragen (Catering, Buffet, Feier, Reservierung)</h2>
   <p>Bei einer Anfrage über unser Formular verarbeiten wir die angegebenen Kontaktdaten (Name, Telefon, ggf. E-Mail, Datum, Personenzahl, Nachricht), um Ihre Anfrage zu bearbeiten und Ihnen ein Angebot zu unterbreiten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und lit. f DSGVO.</p>
-  <h2>5. Hosting & technische Bereitstellung</h2>
+  <h2>6. Hosting & technische Bereitstellung</h2>
   <p>Diese Website wird über GitHub Pages bereitgestellt; Bestell- und Anfragedaten werden über den Cloud-Dienst Supabase gespeichert. Mit diesen Anbietern bestehen die datenschutzrechtlich erforderlichen Vereinbarungen. Beim Aufruf der Seite werden technisch notwendige Server-Logdaten (z.B. IP-Adresse, Zeitpunkt) verarbeitet (Art. 6 Abs. 1 lit. f DSGVO).</p>
-  <h2>6. Desi-Assistentin (KI-Chat)</h2>
-  <p>Unsere optionale Chat-Assistentin verarbeitet Ihre eingegebenen Nachrichten, um Ihre Fragen zu beantworten. Bei aktivierter Funktion werden Anfragen an den Dienst Google Gemini übermittelt. Geben Sie hier bitte keine sensiblen personenbezogenen Daten ein. Die Sprachein- und -ausgabe erfolgt lokal in Ihrem Browser.</p>
-  <h2>7. Speicherdauer</h2>
+  <h2>7. Cookies und lokale Speicherung im Browser</h2>
+  <p>Diese Website setzt keine Tracking- oder Marketing-Cookies ein. Wir nutzen ausschließlich technisch notwendige lokale Speicherung im Browser Ihres Geräts (sog. Local Storage), um z.B. Ihren Warenkorb, Ihre Anmeldung im Kundenkonto und einen einmaligen Begrüßungshinweis zu speichern. Diese Daten verlassen Ihr Gerät nicht von selbst und werden nicht an Dritte weitergegeben. Da es sich um technisch notwendige Funktionen handelt, ist gemäß § 25 Abs. 2 TTDSG keine gesonderte Einwilligung erforderlich.</p>
+  <h2>8. Desi-Assistentin (KI-Chat)</h2>
+  <p>Unsere optionale Chat-Assistentin verarbeitet Ihre eingegebenen Nachrichten, um Ihre Fragen zu beantworten. Bei aktivierter Funktion werden Anfragen an den Dienst Google Gemini (Google Ireland Limited bzw. Google LLC) übermittelt. Geben Sie hier bitte keine sensiblen personenbezogenen Daten ein. Die Sprachein- und -ausgabe erfolgt lokal in Ihrem Browser.</p>
+  <h2>9. Karten- und Adressdienste (OpenStreetMap)</h2>
+  <p>Zur Anzeige unseres Liefergebiets und zur Prüfung eingegebener Adressen nutzen wir den Kartendienst OpenStreetMap sowie dessen Adress-Suche (Nominatim). Dabei wird Ihre eingegebene Adresse sowie technisch Ihre IP-Adresse an Server der OpenStreetMap Foundation übermittelt. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO (Erleichterung der Adresseingabe und Lieferbarkeitsprüfung).</p>
+  <h2>10. Speicherdauer</h2>
   <p>Wir speichern personenbezogene Daten nur so lange, wie es für die genannten Zwecke oder aufgrund gesetzlicher Aufbewahrungsfristen (insb. steuer- und handelsrechtlich) erforderlich ist.</p>
-  <h2>8. Ihre Rechte</h2>
+  <h2>11. Ihre Rechte</h2>
   <p>Sie haben das Recht auf Auskunft (Art. 15), Berichtigung (Art. 16), Löschung (Art. 17), Einschränkung (Art. 18), Datenübertragbarkeit (Art. 20) sowie Widerspruch (Art. 21 DSGVO). Zudem besteht ein Beschwerderecht bei einer Aufsichtsbehörde.</p>
-  <h2>9. Kontakt für Datenschutz</h2>
+  <h2>12. Kontakt für Datenschutz</h2>
   <p>Bei Fragen zum Datenschutz wenden Sie sich an: ${ph(c.email,'E-Mail eintragen')}.</p>
   <p style="font-size:12px;color:var(--gold-deep);margin-top:24px">Hinweis: Diese Datenschutzerklärung ist eine sorgfältig erstellte Vorlage. Bitte vor Veröffentlichung rechtlich prüfen lassen.</p>`;
 }
@@ -3084,6 +3115,8 @@ function legalAGB(){
   <p>Wir haften unbeschränkt bei Vorsatz und grober Fahrlässigkeit sowie bei Verletzung von Leben, Körper und Gesundheit. Im Übrigen ist die Haftung auf vorhersehbare, vertragstypische Schäden begrenzt.</p>
   <h2>§ 10 Schlussbestimmungen</h2>
   <p>Es gilt das Recht der Bundesrepublik Deutschland. Sollten einzelne Bestimmungen unwirksam sein, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt.</p>
+  <h2>§ 11 Treuepunkte</h2>
+  <p>Mit einem Kundenkonto können bei Bestellungen freiwillig Treuepunkte gesammelt und gegen den im Bestellvorgang angezeigten Wert eingelöst werden. Es handelt sich um ein unentgeltliches Bonusprogramm ohne Rechtsanspruch; eine Barauszahlung ist ausgeschlossen. Punkte sind nicht auf Dritte übertragbar. Wir behalten uns vor, das Programm mit angemessener Vorankündigung zu ändern oder einzustellen; bereits gesammelte Punkte behalten dabei ihre Gültigkeit bis zur Einlösung oder Löschung des Kundenkontos.</p>
   <p style="font-size:12px;color:var(--gold-deep);margin-top:24px">Hinweis: Diese AGB sind eine sorgfältig erstellte Vorlage. Bitte vor Veröffentlichung rechtlich prüfen lassen.</p>`;
 }
 
