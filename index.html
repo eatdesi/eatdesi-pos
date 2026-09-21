@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v497</title>
+<title>eatDeSi POS v500</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -570,7 +570,7 @@ window.BELKS_FIRMA_FELDER = ['name','address','phone','footer','googleLink',
   'firmaName','firmaZusatz','firmaStrasse','firmaPlzOrt','firmaStNr',
   'firmaUst','firmaGericht','firmaEmail','firmaWeb','firmaPhone',
   'stNr','street','city','email','taxId','slogan','oeffnung',
-  'sumupKey','geminiKey','grabsteinMin',
+  'sumupKey','aiEnabled','grabsteinMin',
   /* v405: Frist der fiskalischen Marken. Gehoert zum Restaurant, nicht zum
      Geraet - sonst haette jedes Handy eine andere Schutzfrist. */
   'grabsteinTage',
@@ -9182,6 +9182,31 @@ window.belksAiSchluessel = function(){
   return String(k || '').trim();
 };
 
+/* v500: GEFUNDEN (Sicherheits-Check) - genau wie auf der Website lag der
+   Gemini-Schluessel hier in den Firmendaten, die ueber alle Geraete/
+   Standorte hinweg synchronisiert werden - also in der Cloud landeten,
+   lesbar fuer jeden, der die Tabelle abfragt. Jetzt: der Schluessel lebt
+   NUR NOCH als Secret in der Supabase Edge Function "ai-proxy" (siehe
+   ai-proxy/index.ts), nie im Geraet, nie in der Cloud-Konfiguration.
+   belksAiSchluessel() bleibt aus Kompatibilitaetsgruenden bestehen, wird
+   aber fuer den echten Aufruf nicht mehr gebraucht - dafuer sorgt
+   geminiProxyCall(). */
+window.belksAiAktiv = function(){
+  try {
+    var f = window.belksFirmaLesen ? window.belksFirmaLesen()
+          : JSON.parse(localStorage.getItem('eatdesi_firma') || 'null');
+    return !(f && f.aiEnabled === false);   // Vorgabe: an, ausser ausdruecklich abgeschaltet
+  } catch(e) { return true; }
+};
+window.geminiProxyCall = async function(model, body){
+  var resp = await fetch(SUPA_URL + '/functions/v1/ai-proxy', {
+    method: 'POST',
+    headers: window.belksSupaKopf(),
+    body: JSON.stringify({ model: model, body: body })
+  });
+  return resp;
+};
+
 /* ═══ v411: KONTINGENT ═══
    Google zaehlt Anfragen je Minute (kostenloser Tarif: 20). Ist es voll,
    kommt Fehler 429 - MIT der Angabe, wie lange zu warten ist. Diese Angabe
@@ -9201,53 +9226,40 @@ window.belksIstKontingent = function(fehler){
 window.callAI = async function(prompt, maxTokens, opt) {
   var cfg = {};
   try { cfg = JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer")) || '{}') || {}; } catch(e) {}
-  var provider = cfg.aiProvider || 'gemini';
-  var key = window.belksAiSchluessel();
-  if (!key) throw new Error('Kein Gemini API-Key. Bitte in Drucker-Einstellungen eingeben.');
-
-  if (provider === 'gemini') {
-    var model = cfg.geminiModel || 'gemini-2.5-flash-lite';
-    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
-    var resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: maxTokens || 600, temperature: 0.7 }
-      })
-    });
-    if (!resp.ok) {
-      var errTxt = '';
-      try { var ej = await resp.json(); errTxt = (ej.error && ej.error.message) || ''; } catch(e){}
-      /* v411: Beim Kontingent EINMAL warten und neu versuchen. Google nennt
-         die Wartezeit selbst. Ein zweiter Anlauf reicht: haelt es danach
-         immer noch, ist das Kontingent wirklich erschoepft und der Benutzer
-         soll es erfahren, statt minutenlang im Kreis zu warten. */
-      if (resp.status === 429 && !(opt && opt.schonGewartet)) {
-        var warte = window.belksWartezeitAus(errTxt);
-        try { if (opt && typeof opt.beiWarten === 'function') opt.beiWarten(Math.round(warte/1000)); } catch(e){}
-        await new Promise(function(r){ setTimeout(r, warte); });
-        return await window.callAI(prompt, maxTokens,
-          Object.assign({}, opt || {}, { schonGewartet: true }));
-      }
-      if (resp.status === 429) {
-        /* Verstaendlich statt woertlich. Die englische Meldung samt Links
-           half im Restaurant niemandem. */
-        throw new Error('Google-Kontingent ersch\u00f6pft (kostenloser Tarif: '
-          + '20 Anfragen je Minute). Bitte kurz warten \u2013 oder in den '
-          + 'Firmendaten ein anderes Modell bzw. einen bezahlten Schl\u00fcssel '
-          + 'hinterlegen.');
-      }
-      throw new Error('Gemini Fehler (' + resp.status + '): ' + errTxt);
+  if (!window.belksAiAktiv()) throw new Error('Die KI ist in den Firmendaten ausgeschaltet.');
+  var model = cfg.geminiModel || 'gemini-2.5-flash-lite';
+  var resp = await window.geminiProxyCall(model, {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { maxOutputTokens: maxTokens || 600, temperature: 0.7 }
+  });
+  if (!resp.ok) {
+    var errTxt = '';
+    try { var ej = await resp.json(); errTxt = (ej.error && ej.error.message) || ej.error || ''; } catch(e){}
+    /* v411: Beim Kontingent EINMAL warten und neu versuchen. Google nennt
+       die Wartezeit selbst. Ein zweiter Anlauf reicht: haelt es danach
+       immer noch, ist das Kontingent wirklich erschoepft und der Benutzer
+       soll es erfahren, statt minutenlang im Kreis zu warten. */
+    if (resp.status === 429 && !(opt && opt.schonGewartet)) {
+      var warte = window.belksWartezeitAus(errTxt);
+      try { if (opt && typeof opt.beiWarten === 'function') opt.beiWarten(Math.round(warte/1000)); } catch(e){}
+      await new Promise(function(r){ setTimeout(r, warte); });
+      return await window.callAI(prompt, maxTokens,
+        Object.assign({}, opt || {}, { schonGewartet: true }));
     }
-    var data = await resp.json();
-    var text = '';
-    try { text = data.candidates[0].content.parts[0].text; } catch(e) { text = ''; }
-    if (!text) throw new Error('Gemini: leere Antwort');
-    return text;
+    if (resp.status === 429) {
+      /* Verstaendlich statt woertlich. Die englische Meldung samt Links
+         half im Restaurant niemandem. */
+      throw new Error('Google-Kontingent ersch\u00f6pft (kostenloser Tarif: '
+        + '20 Anfragen je Minute). Bitte kurz warten \u2013 oder in den '
+        + 'Firmendaten ein anderes Modell hinterlegen.');
+    }
+    throw new Error('Gemini Fehler (' + resp.status + '): ' + errTxt);
   }
-
-  throw new Error('Unbekannter AI-Provider: ' + provider);
+  var data = await resp.json();
+  var text = '';
+  try { text = data.candidates[0].content.parts[0].text; } catch(e) { text = ''; }
+  if (!text) throw new Error('Gemini: leere Antwort');
+  return text;
 };
 
 // callAIVision: wie callAI, aber MIT Bild (Foto-Scan, z.B. Lieferando-Tablet).
@@ -9255,20 +9267,14 @@ window.callAI = async function(prompt, maxTokens, opt) {
 window.callAIVision = async function(prompt, b64jpeg, maxTokens, mimeType) {
   var cfg = {};
   try { cfg = JSON.parse((window.belksDruckerLesen ? window.belksDruckerLesen() : localStorage.getItem("eatdesi_printer")) || '{}') || {}; } catch(e) {}
-  var key = window.belksAiSchluessel();      // v388: beide Orte, siehe oben
-  if (!key) throw new Error('Kein Gemini API-Key. Bitte in Drucker-Einstellungen eingeben.');
+  if (!window.belksAiAktiv()) throw new Error('Die KI ist in den Firmendaten ausgeschaltet.');
   var model = cfg.geminiModel || 'gemini-2.5-flash-lite';
-  var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
-  var resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [
-        { text: prompt },
-        { inline_data: { mime_type: mimeType || 'image/jpeg', data: b64jpeg } }
-      ] }],
-      generationConfig: { maxOutputTokens: maxTokens || 800, temperature: 0.1 }
-    })
+  var resp = await window.geminiProxyCall(model, {
+    contents: [{ parts: [
+      { text: prompt },
+      { inline_data: { mime_type: mimeType || 'image/jpeg', data: b64jpeg } }
+    ] }],
+    generationConfig: { maxOutputTokens: maxTokens || 800, temperature: 0.1 }
   });
   if (!resp.ok) {
     var errTxt = '';
@@ -12933,7 +12939,7 @@ function AiKellnerinView({ printerSettings, floors, tableOrders, setTableOrders,
     { code:"pa", name:"ਪੰਜਾਬੀ", flag:"🇮🇳", greeting:"ਸਤਿ ਸ਼੍ਰੀ ਅਕਾਲ! ਮੈਂ ਪ੍ਰਿਆ ਹਾਂ, ਤੁਹਾਡੀ AI ਵੇਟ੍ਰੈੱਸ। ਮੈਂ ਤੁਹਾਡੀ ਕੀ ਮਦਦ ਕਰ ਸਕਦੀ ਹਾਂ?" }
   ];
 
-  const geminiKey = printerSettings?.geminiKey || "";
+  const aiAktiv = window.belksAiAktiv ? window.belksAiAktiv() : true;   /* v500: ersetzt geminiKey - der Schluessel selbst ist nicht mehr im Browser */
   const allTables = TABLES.map(function(t){return t.id;});
   const floorTables = (floors||[]).flatMap(f=>(f.tables||[]).filter(t=>!(f.hidden||[]).includes(t)));
 
@@ -13580,7 +13586,7 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
 
   const sendMsg = async (text) => {
     if (!text.trim() || loading) return;
-    if (!geminiKey) { setMicError("⚠️ Bitte zuerst Gemini API Key in Drucker Einstellungen eingeben."); return; }
+    if (!aiAktiv) { setMicError("⚠️ Die KI ist in den Firmendaten ausgeschaltet."); return; }
     const userMsg = {role:"user", text: text.trim()};
     const newMsgs = [...msgs, userMsg];
     setMsgs(newMsgs);
@@ -13604,14 +13610,10 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
       outer:
       for (let mi = 0; mi < _models.length; mi++) {
         for (let att = 0; att < 3; att++) {
-          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${_models[mi]}:generateContent?key=${geminiKey}`, {
-            method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({
-              system_instruction:{parts:[{text: systemPrompt}]},
-              contents: history,
-              generationConfig:{ maxOutputTokens:600, temperature:0.7 }
-            })
+          const res = await window.geminiProxyCall(_models[mi], {
+            system_instruction:{parts:[{text: systemPrompt}]},
+            contents: history,
+            generationConfig:{ maxOutputTokens:600, temperature:0.7 }
           });
           let d = {}; try { d = await res.json(); } catch(e) {}
           data = d;
@@ -13786,21 +13788,18 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
        zeigt die Antwort des Dienstes ungefiltert. */
     /*#__PURE__*/React.createElement("button", {
       onClick: async () => {
-        if (!geminiKey) { alert("\u26A0\uFE0F Kein Gemini API Key hinterlegt.\n\n\u2630 \u2192 Drucker Einstellungen \u2192 AI Kellnerin.\nKostenlos holen: aistudio.google.com/apikey"); return; }
+        if (!aiAktiv) { alert("\u26A0\uFE0F Die KI ist in den Firmendaten ausgeschaltet.\n\n\u2630 \u2192 Firmendaten \u2192 KI aktivieren."); return; }
         const modell = (printerSettings && printerSettings.geminiModel) || 'gemini-2.5-flash';   // v343
         try {
-          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modell}:generateContent?key=${geminiKey}`, {
-            method:"POST", headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({ contents:[{role:"user",parts:[{text:"Antworte nur mit dem Wort: OK"}]}],
-                                   generationConfig:{ maxOutputTokens:10 } })
-          });
+          const res = await window.geminiProxyCall(modell, { contents:[{role:"user",parts:[{text:"Antworte nur mit dem Wort: OK"}]}],
+                                 generationConfig:{ maxOutputTokens:10 } });
           let d = {}; try { d = await res.json(); } catch(e) {}
           if (d && d.error) {
             alert("\u274C KI-Dienst antwortet mit einem Fehler\n\n"
                 + "Modell: " + modell + "\n"
                 + "Code: " + ((d.error.status||"") + " " + (d.error.code||"")) + "\n\n"
                 + (d.error.message || "keine Meldung") + "\n\n"
-                + "Schl\u00fcssel endet auf: \u2026" + String(geminiKey).slice(-6));
+                + "Hinweis: der Schl\u00fcssel liegt jetzt server-seitig (ai-proxy) - bitte dort pr\u00fcfen, nicht in den Firmendaten.");
             return;
           }
           const antwort = (((d.candidates||[])[0]||{}).content||{}).parts;
@@ -13809,7 +13808,7 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
               + "\n\nWenn Priya trotzdem Fehler meldet, liegt es nicht am Schl\u00fcssel.");
         } catch(e) {
           alert("\u274C Der KI-Dienst war nicht erreichbar.\n\n" + (e && e.message ? e.message : e)
-              + "\n\nMeist fehlt Internet oder eine Firewall blockiert generativelanguage.googleapis.com.");
+              + "\n\nMeist fehlt Internet, oder die Edge Function \"ai-proxy\" ist noch nicht eingerichtet.");
         }
       },
       style:{ background:"rgba(255,255,255,0.15)", border:"1.5px dashed rgba(255,255,255,.5)", color:"#fff",
@@ -13820,15 +13819,10 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
       style:{ background:"rgba(255,255,255,0.15)", border:"1.5px dashed rgba(255,255,255,.5)", color:"#fff",
               borderRadius:10, padding:"8px 14px", marginBottom:14, cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:700 }
     }, "\uD83D\uDD0E Mikrofon & Plugins pr\u00fcfen"),
-    /* v341: Ein offensichtlich falscher Key soll auffallen, BEVOR jemand
-       mit einem Gast am Telefon auf eine Antwort wartet. */
-    geminiKey && !belksGeminiKeyForm(geminiKey).ok && /*#__PURE__*/React.createElement("div", { style:{ background:"#ffebee", borderRadius:10, padding:"10px 16px", marginBottom:14, fontSize:12.5, color:"#c62828", fontWeight:700, maxWidth:380 } },
-      "\u274C Der hinterlegte Gemini-Key ist unbrauchbar (" + belksGeminiKeyForm(geminiKey).grund + ").",
-      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:500, fontSize:11, marginTop:4 } },
-        "\u2630 \u2192 Drucker Einstellungen \u2192 Google Gemini API Key. Kostenlos: aistudio.google.com/apikey")
-    ),
-    !geminiKey && /*#__PURE__*/React.createElement("div", { style:{ background:"#ffebee", borderRadius:10, padding:"10px 16px", marginBottom:20, fontSize:13, color:"#c62828", textAlign:"center" } },
-      "⚠️ API Key fehlt — Drucker Einstellungen"
+    /* v500: die Format-Pruefung des Schluessels entfaellt - der Schluessel
+       selbst ist gar nicht mehr im Browser, dafuer sorgt jetzt ai-proxy. */
+    !aiAktiv && /*#__PURE__*/React.createElement("div", { style:{ background:"#ffebee", borderRadius:10, padding:"10px 16px", marginBottom:20, fontSize:13, color:"#c62828", textAlign:"center" } },
+      "\u26A0\uFE0F Die KI ist ausgeschaltet \u2014 Firmendaten \u2192 KI aktivieren"
     ),
     // Language picker
     /*#__PURE__*/React.createElement("div", { style:{ background:"rgba(255,255,255,0.15)", borderRadius:14, padding:14, width:"100%", maxWidth:380, marginBottom:20 } },
@@ -13864,8 +13858,8 @@ Bereits bestellt: ${order.length>0 ? order.map(o=>`${o.qty}x ${o.name}`).join(",
         }, t))
       )
     ),
-    /*#__PURE__*/React.createElement("button", { onClick:startSession, disabled:!geminiKey,
-      style:{ padding:"16px 48px", borderRadius:50, border:"none", background:geminiKey?"#fff":"#888", color:geminiKey?C.green:"#ccc", cursor:geminiKey?"pointer":"not-allowed", fontFamily:"inherit", fontWeight:900, fontSize:18, boxShadow:"0 4px 20px rgba(0,0,0,0.3)" }
+    /*#__PURE__*/React.createElement("button", { onClick:startSession, disabled:!aiAktiv,
+      style:{ padding:"16px 48px", borderRadius:50, border:"none", background:aiAktiv?"#fff":"#888", color:aiAktiv?C.green:"#ccc", cursor:aiAktiv?"pointer":"not-allowed", fontFamily:"inherit", fontWeight:900, fontSize:18, boxShadow:"0 4px 20px rgba(0,0,0,0.3)" }
     }, "▶ Starten — Tisch ", selTable)
   );
 
@@ -18685,6 +18679,18 @@ function ReportsView({
    unten. Nur eigene, individuelle Gerichte (z.B. "Schnitzel Peppe Rosa")
    muessen weiterhin von Hand beschrieben werden - fuer die gibt es keine
    Vorlage, die koennte niemand kennen ausser dir. */
+/* v499: die 14 gesetzlichen Allergene nach EU-Verordnung 1169/2011 Anhang II.
+   Kurze IDs fuer die Speicherung, volle Namen fuer die Anzeige - sowohl in
+   der Kasse als auch auf der Website (gleiche Liste, damit nichts auseinanderlaeuft). */
+var BELKS_ALLERGENE = [
+  {id:'gluten', name:'Gluten (Getreide)'}, {id:'krebstiere', name:'Krebstiere'},
+  {id:'eier', name:'Eier'}, {id:'fisch', name:'Fisch'},
+  {id:'erdnuesse', name:'Erdnüsse'}, {id:'soja', name:'Soja'},
+  {id:'milch', name:'Milch (Laktose)'}, {id:'schalenfruechte', name:'Schalenfrüchte (Nüsse)'},
+  {id:'sellerie', name:'Sellerie'}, {id:'senf', name:'Senf'},
+  {id:'sesam', name:'Sesam'}, {id:'sulfite', name:'Schwefeldioxid/Sulfite'},
+  {id:'lupinen', name:'Lupinen'}, {id:'weichtiere', name:'Weichtiere'}
+];
 var BELKS_BESCHREIBUNGS_VORLAGE = {"4 stagioni": "Schinken, Champignons, Artischocken, Ei", "allu tikki chaat": "Kartoffel-Patty, Tomaten, Zwiebeln, Gurke, Kichererbsen, Sweet-Chili & Ranch-Dip", "avocado burger": "Patty · Avocado · Cheddar · Spiegelei · Ranch-Sauce", "avocado fries": "Frische Avocado, Tempura-Panko, Sweet-Chili-Sauce", "avocado tacos": "Beef oder Smoky Chicken · Avocado · Parmesan · Guacamole · Limette · Ranch Sauce", "avocado-ranch-salat": "Beef oder Smoky Chicken · Avocado · Spiegelei · Limette · Ranch-Dressing", "biella italia": "Doppel-Patty · Beef-Bacon-Zwiebelmarmelade · Champignons · Mozzarella · Cheesy-Garlic", "biryani": "Aromatisch gewürzter Basmatireis · Rosted Zwiebel · Rosinen · Sour Cream Dip", "blumenkohl tinga tacos": "Knuspriger Blumenkohl · Paprika · Limette · Sour Cream", "born bacon": "Patty · Gegrilltes Chicken · Senf · Beef-Bacon-Zwiebelmarmelade · Spiegelei · Cheddar · Sweet-BBQ", "bull bbq": "Hackfleisch, Salami, Champignons, Zwiebeln, Jalapenos, BBQ-Sauce", "butter curry": "Cremige Tomaten-Curry-Sahnesauce · Honig · Cashewnüsse · mit Basmatireis oder Nudeln", "butter naan": "Butterweiches Fladenbrot", "calamari": "Knusprig gebacken mit Limette & Aioli", "capricciosa": "Schinken, Salami, Champignons, Peperoni", "capsicum cheese tacos": "Beef oder Smoky Chicken · Paprika · Zwiebelmarmelade · Parmesan · Limette · Sour Cream", "chana masala": "Kichererbsen in würziger Tomaten-Currysauce", "cheese fries": "Beef oder Smoky Chicken · Cheesy-Garlic · Jalapeños · Mozzarella überbacken · Rosted Zwiebeln", "chilli chicken": "Knuspriges Hähnchenbrustfilet · rote Zwiebeln · Paprika · süß-sauer Sauce", "crispy blumenkohl": "Blumenkohlroeschen, Tempura-Panko, Ranch-Dip", "crispy onion rings": "Goldene Zwiebel Ringe mit Guacamole-Dip", "curry": "Klassische Tomaten-Currysauce · Rote Zwiebeln · mit Basmatireis oder Nudeln", "dal makhni": "Linsen in cremiger Butter-Sahnesauce", "der klassiker": "Saftiges Patty · Salat · Tomaten · Gurke · rote Zwiebeln · Mayo · Ketchup · Senf", "diavola": "Salami, Paprika, Chili, Olivenoel", "eatdesi lammkotelett grill": "Saftige gegrillte Lammkoteletts · Bratkartoffeln & Salat", "fantasia": "Smoky Chicken, Zwiebeln, Paprika, Salat, Cheesy-Garlic-Sauce", "feta deluxe salat": "Pfeffer-Feta · Feigen · Walnüsse · Honig · Limette · Olivenöl", "feta salat": "Cremiger Feta · Oliven · Limette · Olivenöl", "garlic naan": "Knoblauch-Fladenbrot", "garlic tacos": "Beef oder Smoky Chicken · Gerösteter Knoblauch · Parmesan · Limette · rote Zwiebeln · Aioli", "guacamole shrimps": "Gegrillte Garnelen, Knoblauch, Guacamole", "indien mix grill": "Hähnchen · Garnelen · Lachs · Salat & Basmatireis", "kasoori naan": "Aromatische Kräuter & Knoblauch", "korma": "Milde Kokos-Currysauce · Kokosmilch · Sahne · mit Basmatireis oder Nudeln", "lachs-salat": "Gegrilltes Lachsfilet · Avocado · Limette · Ranch-Dressing", "mango curry": "Fruchtige Mango-Curry-Sahnesauce · mit Basmatireis oder Nudeln", "margherita": "Tomatensauce & Mozzarella", "mix fries platte": "Avocado Fries, Mozzarella Sticks, Blumenkohl, Onion Rings & Calamari mit Aioli & Sweet-Chili", "mozzarella sticks": "Goldbraun gebacken mit Cheesy-Garlic-Sauce", "paccheri avocado": "Beef oder Smoky Chicken · Avocado · Spiegelei · Cheese-Sauce · überbacken", "paccheri bacon": "Beef oder Smoky Chicken · Cheese-Sauce · Tomatensauce · Beef-Bacon-Zwiebelmarmelade · überbacken", "paccheri chef": "Hähnchen · Paprika · Zwiebeln · Knoblauch · Sahne & Curry-Tomatensauce · überbacken", "paccheri eatdesi premium": "Hackfleisch · Schinken · Champignons · Erbsen · Tomaten-Sahnesauce · überbacken", "paccheri erbe": "Brokkoli · Spinat · Cheese-Sauce · Parmesan · Röstzwiebeln", "paccheri napoli": "Klassische Knoblauch-Tomatensauce", "paccheri roast pfeffer feta": "Cheese-Sauce · Honig · Walnuss · Feta-Käse · überbacken", "paccheri roasty garlic": "Beef oder Smoky Chicken · Gerösteter Knoblauch · rote Zwiebeln · Cheese-Sauce · überbacken", "paccheri salmon": "Lachs · Avocado · cremige Cheese-Sauce · überbacken", "paccheri trüffel": "Beef oder Smoky Chicken · Trüffelcreme · Champignons · Cheese-Sauce · überbacken", "paccheri veggie": "Grillgemüse · Cheese-Sauce · Tomatensauce", "palak": "Cremige Spinat-Tomaten-Sahnesauce · mit Basmatireis oder Nudeln", "papadam": "Dünne, knusprige Linsenwaffeln", "pommes frites": "Klassisch, knusprig, leicht gesalzen", "premium lachssteak (250g)": "Zart & aromatisch · Guacamole · Bratkartoffeln · gemischter Salat", "premium rumpsteak (250g)": "Auf den Punkt · Bratkartoffeln · frischer Salat", "rahm schnitzel": "Champignons, Zwiebeln, cremige Rahmsauce", "raj mah": "Kidneybohnen in würziger Tomaten-Zwiebel-Sauce", "roasty pfeffer-feta": "Ofengeroesteter Pfeffer-Feta, Feigen, Walnuesse, Honig", "salat italia": "Schinken · Artischocken · Mais · Oliven · Mozzarella · Cheesy-Garlic", "salat mix groß": "Lauchzwiebeln · Ranch-Dressing", "salat mix klein": "Lauchzwiebeln · Ranch-Dressing", "salmon tacos": "Gegrillter Lachs · Avocado · Limette · Guacamole · Ranch Sauce", "samosa": "Gefuellte Teigtaschen: Kartoffeln, Erbsen, Gewuerze, Tamarinden-Chutney", "scampi": "Garnelen & Knoblauch", "schnitzel chef": "Paprika, Zwiebeln, Knoblauch, Curry-Tomatensahnesauce, Mozzarella ueberbacken", "schnitzel erbe": "Brokkoli, Spinat, Cheese-Sauce, Parmesan, Roestzwiebeln", "schnitzel hawaii": "Schinken, Ananas, Sahnesauce, Mozzarella ueberbacken", "schnitzel wiener art": "Klassisch paniertes Putenschnitzel, knusprig gebacken", "smashed aioli burger": "Smash Patty · Gerösteter Knoblauch · Cheddar · Zwiebeln · Jalapeños · Aioli", "smashed bacon bomb": "Beef oder Smoky Chicken · Gemüse · Parmesan · Beef-Bacon-Zwiebel-Jam · Sahne · Mozzarella überbacken", "smashed bacontor burger": "Smash Patty · Beef-Bacon-Zwiebelmarmelade · Cheddar · Jalapeños · Gurke · Hot-BBQ", "smashed cheesy burger": "Smash Patty · Cheddar · Gurke · Mayo · Ketchup", "smashed lachs bomb": "Gegrillter Lachs · Parmesan · Rahmspinat · Mozzarella überbacken", "smashed veggie bomb": "Gemüse · Spinat · Parmesan · Sahne · Mozzarella überbacken", "surf & turf salat": "Beef oder Smoky Chicken + Garnelen · Limette · Cheesy-Garlic-Dressing", "surf & turf tacos": "Beef oder Smoky Chicken + Garnelen · Parmesan · Limette · Cheesy-Garlic Sauce", "sweet potato fries": "Suesskartoffelpommes mit feiner Gewuerznote", "tandoori mix grill": "Lammkoteletts · Garnelen · Hähnchen · Basmatireis & Salat", "tandoori tacos": "Gegrillter Paneer · Knoblauch · Paprika · Zwiebeln · Limette · Cheesy-Garlic-Sauce", "tikka masala": "Joghurt-mariniert & gegrillt · Paprika · Zwiebeln · Masala-Sauce · mit Basmatireis oder Nudeln", "tonno": "Thunfisch & Zwiebeln", "tonno salat": "Thunfisch · Oliven · Ei · Ranch-Dressing", "trüffel burger": "Patty · Champignons · Cheddar · Beef-Bacon-Zwiebelmarmelade · Trüffel-Creme", "veggie burger": "Veggie-Patty · Cheddar · Salat · Tomaten · Gurke · Sweet-Chili", "vindaloo": "Sehr scharf · Currysauce · Rote Zwiebeln · Kartoffeln · intensiver Chili", "wonder bites 12 stk.": "Haehnchensticks, Tempura-Panko, hausgemacht", "wonder bites 6 stk.": "Haehnchensticks, Tempura-Panko, hausgemacht", "wonder shrimps 12 stk.": "Garnelen mit Knoblauch gegrillt, Aioli & Limette", "wonder shrimps 6 stk.": "Garnelen mit Knoblauch gegrillt, Aioli & Limette"};
 function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGroups }) {
   var R = React;
@@ -18715,6 +18721,31 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
       neu[cat] = (menuData[cat]||[]).map(function(it){
         var treffer = it && !((it.description||'').trim()) && BELKS_BESCHREIBUNGS_VORLAGE[(it.name||'').trim().toLowerCase()];
         return treffer ? Object.assign({}, it, {description: treffer}) : it;
+      });
+    });
+    onUpdate(neu);
+  };
+
+  /* v499: Alkohol-Schnellmarkierung - erkennt anhand des KATEGORIE-Namens
+     (Bier, Wein, Cocktail, ...), nicht anhand des Artikels selbst, weil
+     das der einzige verlaessliche Anhaltspunkt bei bestehenden Artikeln
+     ist. Markiert NUR Artikel, die noch nicht markiert sind - niemand
+     wird versehentlich zweimal geprueft oder ueberschrieben. */
+  var ALKOHOL_KATEGORIE_MUSTER = /bier|wein|cocktail|aperitif|digestiv|spirituos|whisky|whiskey|rum\b|wodka|vodka|\bgin\b|likör|liqueur|sangria|secco|prosecco|sekt|champagner|schnaps/i;
+  var alkoholTreffer = 0;
+  Object.keys(menuData||{}).forEach(function(cat){
+    if(ALKOHOL_KATEGORIE_MUSTER.test(cat)){
+      (menuData[cat]||[]).forEach(function(it){ if(it && !it.alcohol) alkoholTreffer++; });
+    }
+  });
+  var markiereAlkohol = function(){
+    if(!alkoholTreffer) return;
+    if(!confirm(alkoholTreffer+' Artikel in Getränke-Kategorien wie Bier/Wein/Cocktails gefunden, die noch nicht als Alkohol markiert sind. Jetzt markieren? Bitte danach kurz durchsehen, ob wirklich alle stimmen (z.B. \"Alkoholfrei\"-Varianten prüfen).')) return;
+    var neu = {};
+    Object.keys(menuData||{}).forEach(function(cat){
+      neu[cat] = (menuData[cat]||[]).map(function(it){
+        if(it && !it.alcohol && ALKOHOL_KATEGORIE_MUSTER.test(cat)) return Object.assign({}, it, {alcohol:true});
+        return it;
       });
     });
     onUpdate(neu);
@@ -18886,6 +18917,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
             R.createElement('div',{style:{display:'flex',gap:6}},
               R.createElement('button',{onClick:function(){setEditing(null);setForm({nr:'',name:'',price:'',description:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});setShowForm(true);},style:bS(C.green)},'+ Artikel'),
               vorlageTreffer>0 && R.createElement('button',{onClick:uebernehmeVorlage,title:'Vorgefertigte Beschreibungen fuer bekannte Standard-Gerichte (Pommes, Calamari, Wonder Bites, ...) uebernehmen',style:{padding:'8px 12px',borderRadius:8,border:'2px solid #ffb300',background:'#fff8e1',color:'#e65100',fontWeight:700,cursor:'pointer',fontSize:12}},'🪄 '+vorlageTreffer+' Beschreibungen übernehmen'),
+              alkoholTreffer>0 && R.createElement('button',{onClick:markiereAlkohol,title:'Artikel in Bier/Wein/Cocktail-Kategorien als Alkohol markieren (wichtig fuer die Altersbestaetigung im Webshop)',style:{padding:'8px 12px',borderRadius:8,border:'2px solid #c62828',background:'#ffebee',color:'#c62828',fontWeight:700,cursor:'pointer',fontSize:12}},'🔞 '+alkoholTreffer+' als Alkohol markieren'),
               R.createElement('button',{onClick:function(){deleteCat(activeCat);},style:{padding:'8px 10px',borderRadius:8,border:'none',background:'#ffebee',color:C.red,fontWeight:700,cursor:'pointer',fontSize:13}},'Loeschen')
             )
           ),
@@ -18933,11 +18965,34 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                 R.createElement('input',{type:'checkbox',checked:form.veg,onChange:function(e){setForm(Object.assign({},form,{veg:e.target.checked}));}}), 'Veg'),
               R.createElement('label',{style:{display:'flex',alignItems:'center',gap:5,fontSize:13,cursor:'pointer'}},
                 R.createElement('input',{type:'checkbox',checked:form.vegan,onChange:function(e){setForm(Object.assign({},form,{vegan:e.target.checked}));}}), 'Vegan'),
+              R.createElement('label',{style:{display:'flex',alignItems:'center',gap:5,fontSize:13,cursor:'pointer',color:form.alcohol?'#c62828':'#333'}},
+                R.createElement('input',{type:'checkbox',checked:!!form.alcohol,onChange:function(e){setForm(Object.assign({},form,{alcohol:e.target.checked}));}}), '🔞 Alkohol'),
               R.createElement('select',{value:form.taxRate||'food',onChange:function(e){setForm(Object.assign({},form,{taxRate:e.target.value}));},
                 style:{padding:'4px 8px',borderRadius:6,border:'1.5px solid #ddd',fontSize:12,fontFamily:'inherit'}},
                 R.createElement('option',{value:'food'},'7% Speisen'),
                 R.createElement('option',{value:'drinks'},'19% Getraenke'),
                 R.createElement('option',{value:'takeaway'},'7% Takeaway')
+              )
+            ),
+            /* v499: PFLICHTANGABE nach LMIV/EU 1169/2011 - die 14
+               gesetzlichen Allergene. Bisher stand nur "auf Anfrage" in
+               den AGB, was fuer online bestellbare Gerichte rechtlich
+               duenn ist. Wird NICHTS angehakt, zeigt die Website (wie
+               bei der Beschreibung) ehrlich nichts Erfundenes an - das
+               muss jemand wissen, der die Kueche wirklich kennt. */
+            R.createElement('div',{style:{marginBottom:12}},
+              R.createElement('div',{style:{fontSize:12,fontWeight:700,color:'#555',marginBottom:6}},'Allergene (Pflichtangabe, EU 1169/2011)'),
+              R.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:6}},
+                BELKS_ALLERGENE.map(function(a){
+                  var aktiv=(form.allergene||[]).indexOf(a.id)>=0;
+                  return R.createElement('label',{key:a.id,style:{display:'flex',alignItems:'center',gap:4,fontSize:11.5,padding:'4px 8px',borderRadius:6,border:'1px solid '+(aktiv?'#e65100':'#ddd'),background:aktiv?'#fff3e0':'#fafafa',cursor:'pointer'}},
+                    R.createElement('input',{type:'checkbox',checked:aktiv,style:{margin:0},onChange:function(e){
+                      var arr=(form.allergene||[]).slice();
+                      if(e.target.checked){ if(arr.indexOf(a.id)<0) arr.push(a.id); } else { arr=arr.filter(function(x){return x!==a.id;}); }
+                      setForm(Object.assign({},form,{allergene:arr}));
+                    }}), a.name
+                  );
+                })
               )
             ),
             // --- Sichtbarkeit: Im Haus / Webshop / Beide ---
@@ -19094,6 +19149,8 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                       R.createElement('div',{style:{fontWeight:600,fontSize:14,color:C.pink}},
                         item.nr?item.nr+'. ':'',item.name,
                         !item.description&&R.createElement('span',{title:'Keine Beschreibung für Priya (die KI) hinterlegt',style:{marginLeft:5,fontSize:11,color:'#e65100'}},'📝'),
+                        item.alcohol&&R.createElement('span',{title:'Alkohol - Altersbestätigung im Webshop nötig',style:{marginLeft:4,fontSize:11}},'🔞'),
+                        (!item.allergene||!item.allergene.length)&&R.createElement('span',{title:'Keine Allergene hinterlegt (Pflichtangabe)',style:{marginLeft:4,fontSize:11,color:'#c62828'}},'⚠️'),
                         item.vegan&&R.createElement('span',{style:{marginLeft:4,fontSize:11,color:'#4caf50'}},'(V)'),
                         item.veg&&!item.vegan&&R.createElement('span',{style:{marginLeft:4,fontSize:11,color:'#8bc34a'}},'(Veg)')
                       ),
@@ -19493,43 +19550,24 @@ function PrinterSettingsView({
     )
   ),
   // -- AI Kellnerin Settings --
+  /* v500: GEFUNDEN (Sicherheits-Check) - der Schluessel lag bisher als
+     Klartext in den Firmendaten, die ueber alle Geraete/Standorte hinweg
+     synchronisiert werden - also in der Cloud landeten, lesbar fuer
+     jeden, der die Tabelle abfragt. Jetzt lebt der Schluessel NUR NOCH
+     als Secret in der Supabase Edge Function "ai-proxy" (siehe
+     ai-proxy/index.ts). Hier steht nur noch ein einfaches An/Aus. */
   /*#__PURE__*/React.createElement("div", { style:{ background:"#f3e5f5", borderRadius:12, padding:14, marginBottom:12, border:"2px solid #ce93d8" } },
     /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, color:"#6a1b9a", fontSize:14, marginBottom:4 } }, "\uD83E\uDD16 AI Kellnerin — Google Gemini"),
-    /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#888", marginBottom:10 } },
-      "Kostenlos: aistudio.google.com \u2192 Get API Key"
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#888", marginBottom:10, lineHeight:1.5 } },
+      "Der API-Key liegt aus Sicherheitsgr\u00fcnden nicht mehr hier, sondern ausschlie\u00dflich als Secret in der Supabase Edge Function \u201Eai-proxy\u201C. So kann ihn niemand mehr aus der Kasse oder der Cloud-Konfiguration auslesen."
     ),
-    /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#555", marginBottom:4, fontWeight:600 } }, "Google Gemini API Key"),
-    /* v341: Beim Kopieren aus dem Browser haengt fast immer ein
-       Zeilenumbruch oder Leerzeichen am Schluessel. Google lehnt ihn dann
-       ab - mit derselben Meldung wie bei einem voellig falschen Key. */
-    /* v349: Ohne Sichtbarkeit bleibt jede Meldung ueber den Schluessel
-       eine Behauptung. Der Knopf steht direkt daneben. */
-    /*#__PURE__*/React.createElement("button", {
-      onClick: () => setKeySichtbar(v => !v),
-      style:{ float:"right", marginTop:-2, marginBottom:4, background:"none", border:"none", cursor:"pointer", fontSize:16, padding:"0 2px" },
-      title: keySichtbar ? "Schl\u00fcssel verbergen" : "Schl\u00fcssel anzeigen"
-    }, keySichtbar ? "\uD83D\uDE48" : "\uD83D\uDC41\uFE0F"),
-    /*#__PURE__*/React.createElement("input", { type: keySichtbar ? "text" : "password", value:form.geminiKey||"", placeholder:"AIza...",
-      onChange:e=>setForm(f=>({...f, geminiKey:String(e.target.value||"").replace(/\s+/g,"")})),
-      style:{ width:"100%", padding:"10px 12px", borderRadius:8, border:"2px solid #ce93d8", fontSize:13, fontFamily:"monospace", boxSizing:"border-box", marginBottom:10 }
-    }),
-    /* v341: Hier stand fruher bei JEDEM Text ein gruener Haken - auch bei
-       "0000". Genau daran ist der Betrieb haengen geblieben. */
-    form.geminiKey && belksGeminiKeyForm(form.geminiKey).ok && /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:8, padding:"8px 10px", fontSize:12, color:C.green, fontWeight:700 } },
-      /* v381: nicht mehr das Format behaupten, sondern zeigen, was da ist. */
-      "\u2705 " + (belksGeminiKeyForm(form.geminiKey).form || "sieht brauchbar aus"),
-      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:500, fontSize:11, color:"#4a7c4e", marginTop:3 } },
-        "Ob er wirklich funktioniert, zeigt \uD83E\uDDE0 \u201EKI-Dienst pr\u00fcfen\u201C in der AI Kellnerin.")
+    /*#__PURE__*/React.createElement("label", { style:{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", fontSize:13, fontWeight:600, color:"#555", marginBottom:8 } },
+      /*#__PURE__*/React.createElement("input", { type:"checkbox", checked: form.aiEnabled !== false,
+        onChange:e=>setForm(f=>({...f, aiEnabled:e.target.checked})) }),
+      "AI Kellnerin aktiviert"
     ),
-    form.geminiKey && !belksGeminiKeyForm(form.geminiKey).ok && /*#__PURE__*/React.createElement("div", { style:{ background:"#ffebee", border:"2px solid #ef9a9a", borderRadius:8, padding:"8px 10px", fontSize:12, color:"#c62828", fontWeight:700 } },
-      "\u274C Das sieht nicht wie ein Gemini-Key aus \u2014 " + belksGeminiKeyForm(form.geminiKey).grund,
-      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:500, fontSize:11, marginTop:3 } },
-        "Kostenlos neu erstellen: aistudio.google.com/apikey \u2013 neue Schl\u00fcssel beginnen mit AQ., \u00e4ltere mit AIza. Beide gehen.",
-        /*#__PURE__*/React.createElement("div", { style:{ marginTop:4 } },
-          "Achtung: Der Schl\u00fcssel gilt nur f\u00fcr DIESES Restaurant \u2013 in den anderen H\u00e4usern muss er ebenfalls eingetragen werden."))
-    ),
-    !form.geminiKey && /*#__PURE__*/React.createElement("div", { style:{ background:"#fff8e1", borderRadius:8, padding:"6px 10px", fontSize:11, color:"#e65100" } },
-      "\u26A0\uFE0F Kein Key \u2014 AI Kellnerin nicht verf\xFCgbar"
+    form.aiEnabled === false && /*#__PURE__*/React.createElement("div", { style:{ background:"#fff8e1", borderRadius:8, padding:"6px 10px", fontSize:11, color:"#e65100" } },
+      "\u26A0\uFE0F Ausgeschaltet \u2014 AI Kellnerin nicht verf\u00fcgbar"
     )
   ),
   /*#__PURE__*/React.createElement("div", {
@@ -25657,7 +25695,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v497"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v500"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -31448,7 +31486,7 @@ function BelksZentraleView(){
   var [tischzahl,setTischzahl]=R.useState('30');
   var [bonFuss,setBonFuss]=R.useState('Danke & bis bald! \uD83D\uDE4F');
   var [sumupKey,setSumupKey]=R.useState('');
-  var [aiKey,setAiKey]=R.useState('');
+  var [aiEnabled,setAiEnabled]=R.useState(true);   /* v500: ersetzt aiKey - der Schluessel liegt jetzt nur noch server-seitig */
   var [website,setWebsite]=R.useState('');
   // v213: Speisekarte gleich beim Anlegen mitgeben (optional)
   // v217: eigene Links der Tochter fuer die Website
@@ -31614,7 +31652,7 @@ function BelksZentraleView(){
           if(_l(facebook))     _firma.facebook     = _l(facebook);
           if(_l(tiktok))       _firma.tiktok       = _l(tiktok);
           var _sk = String(sumupKey||'').trim(); if(_sk) _firma.sumupKey = _sk;
-          var _ak = String(aiKey||'').trim();    if(_ak) _firma.geminiKey = _ak;
+          if(!aiEnabled) _firma.aiEnabled = false;   // Vorgabe ist "an" - nur "aus" muss ausdruecklich gespeichert werden
           var _tz = parseInt(tischzahl,10); if(!(_tz>=1&&_tz<=200)) _tz = 30;
 
           var _schreib = function(suffix, wert){
@@ -31657,7 +31695,7 @@ function BelksZentraleView(){
         else msg+=' \u00b7 Restaurant-Passwort: '+pw+' (kein E-Mail-Login verbunden)';
         setOk(msg);
         setName('');setCode('');setCodeTouched(false);setStreet('');setCity('');setPhone('');setEmail('');setEmail2('');setLoginPwNew('');
-        setSteuernr('');setUstId('');setAmtsger('');setTischzahl('30');setSumupKey('');setAiKey('');setWebsite('');
+        setSteuernr('');setUstId('');setAmtsger('');setTischzahl('30');setSumupKey('');setAiEnabled(true);setWebsite('');
         setBonFuss('Danke & bis bald! \uD83D\uDE4F');
         setKarteText('');setKarteInfo('');
         setGoogleReview('');setMenuPdf('');setInstagram('');setFacebook('');setTiktok('');
@@ -31774,8 +31812,12 @@ function BelksZentraleView(){
         onChange:function(e){setTischzahl(e.target.value);},style:iS,placeholder:'30'}),
       lbl('\uD83D\uDCB3 SumUp Affiliate Key (optional, sp\u00e4ter m\u00f6glich)'),
       R.createElement('input',{value:sumupKey,onChange:function(e){setSumupKey(e.target.value);},style:iS,placeholder:'aus developer.sumup.com \u2192 Affiliate Keys'}),
-      lbl('\uD83E\uDD16 AI-Schl\u00fcssel Google Gemini (optional)'),
-      R.createElement('input',{value:aiKey,onChange:function(e){setAiKey(e.target.value);},style:iS,placeholder:'aus aistudio.google.com/apikey'}),
+      lbl('\uD83E\uDD16 AI-Kellnerin (Google Gemini)'),
+      R.createElement('div',{style:{fontSize:11,color:'#666',lineHeight:1.5,marginBottom:6}},
+        'Der Schl\u00fcssel liegt aus Sicherheitsgr\u00fcnden nicht mehr hier, sondern nur noch als Secret in der Supabase Edge Function \u201Eai-proxy\u201C.'),
+      R.createElement('label',{style:{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13,marginBottom:10}},
+        R.createElement('input',{type:'checkbox',checked:aiEnabled,onChange:function(e){setAiEnabled(e.target.checked);}}),
+        'AI Kellnerin aktiviert'),
       // ══ v217: eigene Links der Tochter ══
       R.createElement('div',{style:{marginTop:14,marginBottom:6,paddingTop:12,borderTop:'2px solid #eee',
         fontWeight:800,fontSize:14,color:'#1565c0'}},'\uD83C\uDF10 Website-Links (optional)'),
