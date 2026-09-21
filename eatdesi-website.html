@@ -2312,6 +2312,10 @@ async function acctLoginGo(){
   var h=await custHashPw(np, pw);
   var hLegacy=await custHashPwLegacy(np, pw);   /* v498: zweiter Versuch fuers stille Umstellen alter Konten */
   var found=await kundeLogin(np, h, hLegacy);
+  /* v504: Login-Sperre nach 5 Fehlversuchen (siehe website_sql_teil8) -
+     ohne diese Abfrage haette der Gast nur "falsches Passwort" gelesen,
+     obwohl in Wahrheit die Sperre aktiv ist. */
+  if(found && found.gesperrt){ if(err) err.textContent='🔒 Zu viele Fehlversuche. Bitte in ca. '+(found.minuten||15)+' Minuten erneut versuchen.'; return; }
   if(found && found.ohnePasswort){
     if(err) err.textContent='';
     return renderAcctSetPw(np, found, false);
@@ -2369,6 +2373,7 @@ async function acctPwLogin(np){
   var h=await custHashPw(np, pw);
   var hLegacy=await custHashPwLegacy(np, pw);   /* v498: zweiter Versuch fuers stille Umstellen alter Konten */
   var found=await kundeLogin(np, h, hLegacy);
+  if(found && found.gesperrt){ if(err) err.textContent='🔒 Zu viele Fehlversuche. Bitte in ca. '+(found.minuten||15)+' Minuten erneut versuchen.'; return; }
   if(!found){ if(err) err.textContent='❌ Falsches Passwort oder Konto nicht gefunden.'; return; }
   if(found.ohnePasswort) return renderAcctSetPw(np, found, false);
   var c={phone:found.phone||np, name:found.name||'', points:(typeof found.points==='number')?found.points:null, email:found.email||'', street:found.street||'', zip:found.zip||'', city:found.city||'', sess:h};
