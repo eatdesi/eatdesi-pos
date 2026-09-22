@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v504</title>
+<title>eatDeSi POS v505</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -25711,7 +25711,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v504"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v505"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -37995,12 +37995,105 @@ async function updateOrderNoteInSupabase(bonNr, newNote) {
 }
 
 // Bestellungen von Supabase laden
-async function pullOrdersFromSupabase() {
+/* v505: DATENVERBRAUCH (Egress) SENKEN
+   Bisher holte JEDES Geraet alle 3 Sekunden saemtliche Bestellungen der
+   letzten 7 Tage komplett (bis 500 Zeilen mit allen Artikeln) - rund 1.200
+   Mal pro Stunde, fast immer unveraendert. Am 22.09. war damit das
+   Supabase-Kontingent (5 GB/Monat) bei 3 Nutzern ueberschritten.
+   Jetzt:
+   - Ein VOLLER Abruf wie bisher nur noch jede Minute (mit Spalte
+     "geaendert": alle 5 Minuten), beim Start, nach dem Aufwachen und nach
+     dem Hochladen eigener Bestellungen.
+   - Dazwischen nur, was NEU oder GEAENDERT ist. Das Ergebnis wird in einen
+     Zwischenspeicher mit dem letzten vollen Stand eingemischt, und
+     mergeRemoteOrders bekommt wie immer die GANZE Liste. Wichtig: diese
+     Funktion ersetzt die lokale Liste durch die uebergebene - eine halbe
+     Liste wuerde Bestellungen verschwinden lassen.
+   - Hat die Tabelle die Spalte "geaendert" (SQL Teil 13, vom Server
+     gesetzt), kommen auch Stornos und Statuswechsel sofort. Ohne sie nur
+     neue Bestellungen sofort, Aenderungen spaetestens nach einer Minute.
+   Sicherheitsnetz: Jeder Fehler im Zwischenweg faellt beim naechsten
+   vollen Abruf weg, weil der den Zwischenspeicher komplett neu aufbaut. */
+var BELKS_ORDERS_VOLL_MS = 60000;
+var BELKS_ORDERS_VOLL_MS_MIT_SPALTE = 300000;
+window.__belksOrderCache = null;
+window.belksOrdersVollErzwingen = function(){ window.__belksOrderVollNoetig = true; };
+function _belksOrdZeit(v){ var t = v ? new Date(v).getTime() : NaN; return isNaN(t) ? 0 : t; }
+function _belksOrdCacheBauen(rows, jetzt){
+  var c = { rows: {}, maxCreated: 0, maxGeaendert: 0, hatGeaendert: false, letzterVoll: jetzt };
+  (rows || []).forEach(function(r){
+    if (!r) return;
+    if ('geaendert' in r) c.hatGeaendert = true;
+    c.rows[String(r.bon_nr || '')] = r;
+    c.maxCreated = Math.max(c.maxCreated, _belksOrdZeit(r.created_at));
+    c.maxGeaendert = Math.max(c.maxGeaendert, _belksOrdZeit(r.geaendert));
+  });
+  return c;
+}
+function _belksOrdCacheListe(c){
+  return Object.keys(c.rows).map(function(k){ return c.rows[k]; })
+    .sort(function(a,b){ return _belksOrdZeit(b.created_at) - _belksOrdZeit(a.created_at); });
+}
+async function pullOrdersFromSupabase(erzwingeVoll) {
   try {
-    var since = new Date(Date.now() - 7*24*60*60*1000).toISOString();
-    var resp = await supaFetch('/rest/v1/eatdesi_orders?location_id=eq.' + LOCATION_ID + '&created_at=gte.' + since + '&order=created_at.desc&limit=500');
-    if (!resp.ok) return null;
-    return await resp.json();
+    var jetzt = Date.now();   /* nur Taktung, kein Zeitstempel fuer Daten */
+    var since = new Date(jetzt - 7*24*60*60*1000).toISOString();
+    var basis = '/rest/v1/eatdesi_orders?location_id=eq.' + LOCATION_ID;
+    var c = window.__belksOrderCache;
+    var abstand = (c && c.hatGeaendert) ? BELKS_ORDERS_VOLL_MS_MIT_SPALTE : BELKS_ORDERS_VOLL_MS;
+    var voll = !!erzwingeVoll || !!window.__belksOrderVollNoetig || !c
+      || (jetzt - c.letzterVoll) >= abstand || (jetzt - c.letzterVoll) < 0
+      || (!c.maxCreated && !c.maxGeaendert);
+
+    if (voll) {
+      var vorAbruf = (typeof window.belksJetzt === 'function') ? window.belksJetzt() : jetzt;
+      var resp = await supaFetch(basis + '&created_at=gte.' + since + '&order=created_at.desc&limit=500');
+      if (!resp.ok) return null;
+      var rows = await resp.json();
+      if (!Array.isArray(rows)) return null;
+      window.__belksOrderCache = _belksOrdCacheBauen(rows, jetzt);
+      window.__belksOrderCache.letzterAbruf = vorAbruf;
+      window.__belksOrderVollNoetig = false;
+      window.__belksOrderAbrufe = window.__belksOrderAbrufe || { voll: 0, klein: 0 };
+      window.__belksOrderAbrufe.voll++;
+      return rows;
+    }
+
+    /* Zwischenweg: nur Neues/Geaendertes, mit Ueberlappung, damit nichts
+       durch Uhr-Abweichung oder spaet bestaetigte Schreibvorgaenge fehlt.
+       Die Grenze richtet sich nach dem LETZTEN ABRUF, nicht nur nach dem
+       neuesten Datensatz: sonst kaeme nach dem Einspielen von Teil 13 (alle
+       alten Zeilen tragen dieselbe Zeit) die ganze Tabelle alle 3 Sekunden. */
+    var filter;
+    var srvJetzt = (typeof window.belksJetzt === 'function') ? window.belksJetzt() : jetzt;
+    if (c.hatGeaendert && c.maxGeaendert) {
+      filter = '&geaendert=gt.' + new Date(Math.max(c.maxGeaendert, c.letzterAbruf || 0) - 30000).toISOString();
+    } else {
+      filter = '&created_at=gt.' + new Date(Math.max(c.maxCreated, c.letzterAbruf || 0) - 120000).toISOString();
+    }
+    var r2 = await supaFetch(basis + filter + '&order=created_at.desc&limit=500');
+    if (!r2.ok) {
+      /* Spalte weg oder Anfrage abgelehnt: naechstes Mal voll holen. */
+      window.__belksOrderVollNoetig = true;
+      return null;
+    }
+    var neu = await r2.json();
+    if (!Array.isArray(neu)) { window.__belksOrderVollNoetig = true; return null; }
+    c.letzterAbruf = srvJetzt;   /* Zeit VOR der Anfrage - sicher statt knapp */
+    window.__belksOrderAbrufe = window.__belksOrderAbrufe || { voll: 0, klein: 0 };
+    window.__belksOrderAbrufe.klein++;
+    if (neu.length >= 500) window.__belksOrderVollNoetig = true;   // zu viel auf einmal
+    var grenze = _belksOrdZeit(since);
+    neu.forEach(function(r){
+      if (!r) return;
+      /* Nur was auch der volle Abruf enthalten wuerde (7 Tage) - sonst
+         taucht ein alter stornierter Beleg kurz auf und verschwindet wieder. */
+      if (_belksOrdZeit(r.created_at) < grenze) return;
+      c.rows[String(r.bon_nr || '')] = r;
+      c.maxCreated = Math.max(c.maxCreated, _belksOrdZeit(r.created_at));
+      c.maxGeaendert = Math.max(c.maxGeaendert, _belksOrdZeit(r.geaendert));
+    });
+    return _belksOrdCacheListe(c);
   } catch(e) { return null; }
 }
 
@@ -39680,9 +39773,53 @@ function _setLocalStamp(remoteKey, ts) {
 }
 
 // Pull mit updated_at, damit wir wissen ob Remote neuer ist
+/* v505: ERST FRAGEN, DANN LADEN
+   Bisher kam bei jeder Pruefung der komplette Inhalt (Speisekarte,
+   Takeaway-Liste, Firmendaten ...) ueber die Leitung, auch wenn er
+   unveraendert war - die Takeaway-Liste alle 3 Sekunden.
+   Jetzt: zuerst nur updated_at + version (wenige Bytes). Stimmen beide mit
+   dem zuletzt geladenen Stand ueberein, kommt der Inhalt aus dem
+   Zwischenspeicher. Nur bei einer Aenderung wird der Inhalt geladen.
+   Zurueck kommt eine normale Antwort (Response) - der ganze Rest von
+   pullStateWithTime (Rechte, Version, Nachholen) laeuft unveraendert. */
+window.__belksStateCache = {};
+window.__belksStateAbrufe = { kopf: 0, voll: 0 };
+async function belksStateHolen(remoteKey){
+  var url = '/rest/v1/pos_state?key=eq.' + LOCATION_ID + '_' + remoteKey;
+  var c = window.__belksStateCache[remoteKey];
+  if (c && typeof Response === 'function') {
+    var kopf = await supaFetch(url + '&select=updated_at,version');
+    window.__belksStateAbrufe.kopf++;
+    if (!kopf || !kopf.ok) return kopf;   // Fehler unveraendert weiterreichen
+    var k = null;
+    try { k = await kopf.clone().json(); } catch(e) { k = null; }
+    if (Array.isArray(k) && k[0] && String(k[0].updated_at) === c.updated_at
+        && String(k[0].version) === c.version) {
+      return new Response(JSON.stringify([{ value: c.value, updated_at: k[0].updated_at, version: k[0].version }]),
+        { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (Array.isArray(k) && !k.length) {
+      delete window.__belksStateCache[remoteKey];
+      return kopf;   // Schluessel gibt es in der Cloud nicht (mehr)
+    }
+  }
+  var resp = await supaFetch(url + '&select=value,updated_at,version');   /* v440 */
+  window.__belksStateAbrufe.voll++;
+  try {
+    if (resp && resp.ok) {
+      var d = await resp.clone().json();
+      if (Array.isArray(d) && d[0] && d[0].value != null && d[0].updated_at != null) {
+        window.__belksStateCache[remoteKey] = { value: d[0].value, updated_at: String(d[0].updated_at), version: String(d[0].version) };
+      } else {
+        delete window.__belksStateCache[remoteKey];
+      }
+    }
+  } catch(e) { delete window.__belksStateCache[remoteKey]; }
+  return resp;
+}
 async function pullStateWithTime(remoteKey) {
   try {
-    var resp = await supaFetch('/rest/v1/pos_state?key=eq.' + LOCATION_ID + '_' + remoteKey + '&select=value,updated_at,version');   /* v440 */
+    var resp = await belksStateHolen(remoteKey);
   try { if (!resp || !resp.ok) window.__reqFehl = (window.__reqFehl||0) + 1; } catch(e){}
     // v192: 401/403 = keine gueltige Anmeldung bzw. keine Berechtigung.
     // Das MUSS auffallen, sonst haelt die App das Restaurant faelschlich fuer leer.
@@ -40185,6 +40322,12 @@ async function runSync() {
   _syncRunning = true;
   updateSyncBadge('syncing');
   try {
+    /* v505: Lagen eigene Bestellungen in der Warteschlange, danach einmal
+       voll abrufen - ihre Zeit kann aelter sein als der Zwischenweg sieht. */
+    try {
+      var _pq = JSON.parse(localStorage.getItem('eatdesi_pending_push') || '[]') || [];
+      if (_pq.some(function(p){ return p && p.bonNr && !(p.key && ('value' in p)); })) window.belksOrdersVollErzwingen();
+    } catch(e) { window.belksOrdersVollErzwingen(); }
     await pushPendingOrders();
     var remoteOrders = await pullOrdersFromSupabase();
     if (remoteOrders) mergeRemoteOrders(remoteOrders);
@@ -40439,6 +40582,8 @@ window.belksUser = {
    Also: auf den laufenden warten (hoechstens 8 s), dann einen eigenen
    Durchgang starten und dessen Ende abwarten. */
 window.runSyncJetzt = async function(){
+  /* v505: Der Knopf holt immer den VOLLEN Stand, nicht nur Neues. */
+  try { window.belksOrdersVollErzwingen(); } catch(e){ console.warn('Voll-Abruf nicht vorgemerkt', e); }
   var warte = 0;
   while (_syncRunning && warte < 8000) {
     await new Promise(function(r){ setTimeout(r, 200); });
