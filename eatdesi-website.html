@@ -278,6 +278,17 @@ h2.head{font-family:'Fraunces',serif;font-weight:900;font-size:clamp(30px,5vw,46
 .done .ic{width:80px;height:80px;border-radius:50%;background:var(--gold);color:var(--ink);font-size:42px;display:grid;place-items:center;margin:0 auto 22px;box-shadow:0 0 0 8px rgba(200,160,78,.16)}
 .done h3{font-family:'Fraunces',serif;font-size:28px;color:var(--cream);margin:0 0 8px}
 .done .bn{font-family:'Fraunces',serif;font-size:34px;color:var(--gold-glow);margin:14px 0}
+/* Bewertungs-Karte: Bestaetigung + Kundenkonto */
+.bewert{display:block;margin:18px auto 0;max-width:340px;padding:16px 16px 14px;border:1.5px solid var(--gold);border-radius:16px;background:linear-gradient(180deg,rgba(200,160,78,.16),rgba(200,160,78,.05));text-align:center;text-decoration:none;color:var(--cream)}
+.bewert .st{font-size:26px;letter-spacing:4px;line-height:1;color:var(--gold-glow)}
+.bewert .t{font-family:'Fraunces',serif;font-size:19px;font-weight:700;margin:8px 0 4px;color:var(--cream)}
+.bewert .s{font-size:13px;color:var(--paper);opacity:.85;margin:0 0 12px}
+.bewert .b{display:block;padding:12px;border-radius:12px;background:var(--gold);color:var(--ink);font-weight:800;font-size:16px}
+.bewert.klein{margin:8px 0 2px;padding:10px 12px;max-width:none}
+.bewert.klein .st{font-size:18px;letter-spacing:3px}
+.bewert.klein .b{padding:9px;font-size:14px;margin-top:8px}
+@media (prefers-reduced-motion:no-preference){.bewert.neu .st{animation:bewertGlanz 1.6s ease-out 1}}
+@keyframes bewertGlanz{0%{opacity:.2;transform:scale(.85)}60%{opacity:1;transform:scale(1.08)}100%{transform:scale(1)}}
 .done p{color:var(--paper-2);font-size:14px;max-width:34ch;margin:0 auto 6px}
 
 /* ---------- FOOTER ---------- */
@@ -1701,8 +1712,12 @@ async function placeOrder(){
         upsertCustomerAfterOrder({phone:phone,name:name,email:email,street:street,zip:zip,city:city,total:total,bonNr:bonNr,consent:consent,redeemUse:(_redeem?_redeem.use:0)}).then(function(k){
           try{
             var _oc=getCust()||{};
-            if(k){ setCust({phone:phone,name:k.name||name||_oc.name||'',points:(typeof k.points==='number')?k.points:(_oc.points!=null?_oc.points:null),email:k.email||_oc.email||'',street:k.street||'',zip:k.zip||'',city:k.city||''}); }
-            else if(consent){ setCust({phone:phone,name:name||_oc.name||'',points:_oc.points!=null?_oc.points:null}); }
+            /* FIX: Die Anmeldung (sess) ging hier verloren -> "Bitte neu anmelden".
+               Nur behalten, wenn dieselbe Nummer bestellt hat - sonst gehoert
+               die Anmeldung zu einem anderen Konto. */
+            var _sess=(_oc.sess && normPhone(_oc.phone)===normPhone(phone))?_oc.sess:undefined;
+            if(k){ setCust({phone:phone,name:k.name||name||_oc.name||'',points:(typeof k.points==='number')?k.points:(_oc.points!=null?_oc.points:null),email:k.email||_oc.email||'',street:k.street||'',zip:k.zip||'',city:k.city||'',sess:_sess}); }
+            else if(consent){ setCust({phone:phone,name:name||_oc.name||'',points:_oc.points!=null?_oc.points:null,sess:_sess}); }
           }catch(e){}
         });
       }catch(e){}}
@@ -1714,6 +1729,25 @@ async function retryMinimal(bonNr,tableId,items,total,pay,name,phone,note){
   try{const r=await belksBestellungPosten({location_id:LOCATION_ID,bon_nr:bonNr,table_id:tableId+' · '+note,items:JSON.stringify(items),total,payment:pay,customer_name:name,customer_phone:phone,source:'WEBSHOP',created_at:new Date().toISOString(),storniert:false});
     return r.ok||r.status===201||r.status===409;}catch(e){return false;}
 }
+/* ⭐ BEWERTUNG
+   Link: zuerst der echte Google-Bewertungslink aus dem Admin-Bereich,
+   sonst der allgemeine Link. Kein Link -> keine Karte.
+   Bewusst neutral formuliert und OHNE Punkte/Rabatt als Gegenleistung:
+   Google verbietet belohnte oder nur positiv erbetene Bewertungen. */
+function belksBewertLink(){
+  var l=(COMPANY&&COMPANY.google_review)||window.GOOGLE_LINK||'';
+  return /^https:\/\//i.test(l)?l:'';
+}
+function belksBewertKarte(klein){
+  var l=belksBewertLink(); if(!l) return '';
+  var href=l.replace(/"/g,'%22');
+  if(klein) return '<a class="bewert klein" href="'+href+'" target="_blank" rel="noopener"><div class="st">★★★★★</div><span class="b">⭐ Jetzt bewerten</span></a>';
+  return '<a class="bewert neu" href="'+href+'" target="_blank" rel="noopener">'
+    +'<div class="st">★★★★★</div>'
+    +'<div class="t">Hat’s geschmeckt?</div>'
+    +'<p class="s">Deine Bewertung auf Google hilft uns als kleinem Restaurant enorm – dauert nur 30 Sekunden.</p>'
+    +'<span class="b">⭐ Jetzt bewerten</span></a>';
+}
 function showDone(bonNr,total,isDeliv){
   const isDine=mode==='dinein';
   const word=isDeliv?'Lieferzeit':(isDine?'Tischzeit':'Abholzeit');
@@ -1722,7 +1756,7 @@ function showDone(bonNr,total,isDeliv){
     <p>Wir prüfen sie gerade und bestätigen gleich deine ${word}.</p>
     ${(isDine&&TABLE_NO)?('<p style="margin-top:6px">🍽️ Für <b>Tisch '+TABLE_NO+'</b> – dein Essen wird direkt an deinen Tisch gebracht.</p>'):''}<div class="bn">${bonNr}</div>
     <div id="liveStatus" style="margin-top:14px"></div>
-    <p style="margin-top:10px">Gesamt: <b style="color:var(--gold-glow)">${eur(total)}</b></p></div>`;
+    <p style="margin-top:10px">Gesamt: <b style="color:var(--gold-glow)">${eur(total)}</b></p>${belksBewertKarte(false)}</div>`;
   $('#drawerFoot').innerHTML=`<button class="checkout" onclick="closeCart()">Fertig</button>`;
   startStatusTracking(bonNr, isDeliv, isDine);
 }
@@ -2534,15 +2568,22 @@ async function renderAccount(c){
     if(!box) return;
     if(mine===null){ box.innerHTML='Bitte einmal neu anmelden, dann erscheinen deine Bestellungen hier.'; return; }
     if(!mine.length){ box.innerHTML='Noch keine Bestellungen mit dieser Nummer. Bei deiner nächsten Bestellung einfach dieselbe Handynummer angeben. 😊'; return; }
-    box.innerHTML='<div style="font-weight:800;color:#333;margin-bottom:6px">🧾 Deine letzten Bestellungen</div>'+mine.map(function(o){
+    /* Bewerten: gross und gut sichtbar, aber nur EINMAL - bei der neuesten
+       abgeschlossenen Bestellung. Farben passend zum dunklen Fenster
+       (vorher #333 auf Dunkel = kaum lesbar). */
+    var _bewertGezeigt=false;
+    box.innerHTML='<div style="font-weight:800;color:var(--cream);margin-bottom:6px">🧾 Deine letzten Bestellungen</div>'+mine.map(function(o){
       var d=new Date(o.created_at);
       var st=acctStatusLabel(o);
-      var rateBtn=(st.t.indexOf('Abgeschlossen')>=0 && window.GOOGLE_LINK)?('<a href="'+window.GOOGLE_LINK+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:3px;font-size:11px;font-weight:800;color:#b8860b;text-decoration:none">⭐ Jetzt bewerten – 5 Sterne? 😊</a>'):'';
-      return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #eee">'
-        +'<div><div style="font-weight:700;color:#333">'+d.toLocaleDateString('de-DE')+' · '+d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})+'</div>'
-        +'<div style="font-size:11px;color:#999">Bon '+String(o.bon_nr).replace(/</g,'&lt;')+'</div>'+rateBtn+'</div>'
-        +'<div style="text-align:right"><div style="font-weight:800;color:#333">'+eur(o.total||0)+'</div>'
+      var rateBtn='';
+      if(!_bewertGezeigt && st.t.indexOf('Abgeschlossen')>=0){ rateBtn=belksBewertKarte(true); if(rateBtn) _bewertGezeigt=true; }
+      return '<div style="padding:9px 0;border-bottom:1px solid var(--line)">'
+        +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">'
+        +'<div><div style="font-weight:700;color:var(--cream)">'+d.toLocaleDateString('de-DE')+' · '+d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})+'</div>'
+        +'<div style="font-size:11px;color:#aaa">Bon '+String(o.bon_nr).replace(/</g,'&lt;')+'</div></div>'
+        +'<div style="text-align:right"><div style="font-weight:800;color:var(--cream)">'+eur(o.total||0)+'</div>'
         +'<div style="font-size:11px;font-weight:700;color:'+st.c+'">'+st.t+'</div></div>'
+        +'</div>'+rateBtn
         +'</div>';
     }).join('');
   }catch(e){ if(box) box.innerHTML='⚠️ Bestellungen konnten nicht geladen werden – bitte später erneut versuchen.'; }
