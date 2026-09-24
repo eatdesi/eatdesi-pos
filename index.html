@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v505</title>
+<title>eatDeSi POS v506</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -14000,37 +14000,68 @@ function belksOrderSumme(o){
 /* v307: Der Export haengt jetzt am Tagesabschluss. Damit nichts doppelt
    gepflegt wird, bauen Abschluss, Nachhol-Banner und der Knopf im Backup
    alle dieselbe Datei ueber diese eine Stelle. */
-function belksExportPaket(orders, bezeichnung){
+function belksExportPaket(orders, bezeichnung, ausgaben){
   var loc = "pos";
   try{ loc = localStorage.getItem("eatdesi_location_id") || "pos"; }catch(e){}
   var liste = (orders || []).filter(belksBezahlt);
   var summe = liste.reduce(function(s2, o){ return s2 + belksOrderSumme(o); }, 0);
+  /* v506: Der Z-Bericht liegt jetzt IN der Datei. Vorher standen dort nur
+     die Bestellungen, und die Tagessummen musste man nachrechnen. */
+  var z = belksZBericht(orders, ausgaben);
   return {
     loc: loc,
     anzahl: liste.length,
     summe: Math.round(summe * 100) / 100,
+    zbericht: z,
     inhalt: {
       typ: "belks_bestellungen",
       restaurant: loc,
       zeitraum: bezeichnung,
       erstellt: new Date().toISOString(),
+      geraet: window._deviceId || '',
       anzahl: liste.length,
       summe: Math.round(summe * 100) / 100,
+      zbericht: z,
+      stornos: (orders || []).filter(function(o){ return o && o.storniert; }),
       bestellungen: liste
     }
   };
 }
 /* Speichert den Tag und meldet zurueck, ob etwas zu speichern war. */
-function belksTagSichern(orders, tagText, dateiTeil, beiFehler){
-  var pk = belksExportPaket(orders, tagText);
+function belksTagSichern(orders, tagText, dateiTeil, beiFehler, ausgaben){
+  var pk = belksExportPaket(orders, tagText, ausgaben);
   if(!pk.anzahl) return { ok: true, anzahl: 0, weg: 'leer' };
   try{
     var weg = belksDateiSpeichern("belks_bestellungen_" + pk.loc + "_" + dateiTeil + ".json",
                                   JSON.stringify(pk.inhalt, null, 2), beiFehler);
+    /* v506: Der Z-Bericht zusaetzlich als CSV - zum Ansehen ohne die App,
+       fuer Steuerberater und Tabellenkalkulation. Schlaegt das fehl, ist
+       die JSON-Datei trotzdem geschrieben; die CSV ist nur die Beilage. */
+    try {
+      belksDateiSpeichern("belks_zbericht_" + pk.loc + "_" + dateiTeil + ".csv",
+                          belksZBerichtCsv(pk.zbericht, tagText, pk.loc), null);
+    } catch(eCsv){ console.warn('Z-Bericht-CSV:', eCsv); }
+    if(weg !== 'app_ohne_plugin') belksSichTagMerken(dateiTeil, pk);
     /* Nur wenn wirklich geschrieben wurde, gilt der Tag als gesichert -
        sonst bleibt der Merkzettel stehen und die Startseite erinnert. */
-    return { ok: weg !== 'app_ohne_plugin', anzahl: pk.anzahl, summe: pk.summe, weg: weg };
+    return { ok: weg !== 'app_ohne_plugin', anzahl: pk.anzahl, summe: pk.summe, weg: weg, zbericht: pk.zbericht };
   }catch(e){ return { ok: false, anzahl: pk.anzahl, weg: 'fehler' }; }
+}
+/* v506: Liste der letzten Sicherungen - damit man sieht, ob wirklich
+   jeder Tag gesichert wurde, ohne im Dateimanager zu suchen. */
+function belksSichTagMerken(dateiTeil, pk){
+  try{
+    var l = JSON.parse(localStorage.getItem('eatdesi_sicherung_liste') || '[]') || [];
+    l = l.filter(function(e){ return e && e.tag !== dateiTeil; });
+    l.push({ tag: dateiTeil, zeit: new Date().toISOString(), anzahl: pk.anzahl, summe: pk.summe,
+             geraet: window._deviceId || '', sd: window.__belksSdStatus || '' });
+    l = l.slice(-60);
+    localStorage.setItem('eatdesi_sicherung_liste', JSON.stringify(l));
+  }catch(e){ console.warn('Sicherungs-Liste:', e); }
+}
+function belksSichListe(){
+  try{ return JSON.parse(localStorage.getItem('eatdesi_sicherung_liste') || '[]') || []; }
+  catch(e){ return []; }
 }
 /* Merkzettel: welcher Tag wurde noch nicht als Datei gesichert?
    Der Auto-Abschluss um 04:00 kann keine Datei schreiben - dort wird nur
@@ -14068,6 +14099,111 @@ function belksDeZuIso(datumDe){
    Klick, ohne je zu pruefen, ob etwas geschrieben wurde. Das ist derselbe
    Fehler wie das stille .catch() bei der Anmeldung - die Kasse behauptet
    etwas, das sie nicht weiss. Ab jetzt sagt sie die Wahrheit. */
+/* ===================================================================
+   v506: TAGESSICHERUNG - SICHERUNGSGERAET UND ZIEL
+   Bisher schrieb die Tagesdatei irgendein Geraet, naemlich das, an dem
+   der Abschluss gemacht wurde. Beim automatischen Abschluss um 04:00
+   schrieb gar keins. Jetzt wird EIN Geraet benannt ("Sicherungsgeraet"),
+   geschuetzt mit dem Admin-PIN, und nur dieses sichert - dafuer immer,
+   auch beim automatischen Abschluss.
+   Ziel: Geraet (Ordner Dokumente), SD-Karte oder beides. Die SD-Karte
+   braucht das Android-Plugin BelksSdCard; fehlt es, faellt die Kasse
+   auf den Ordner Dokumente zurueck und sagt das auch.
+   Die Wahl steht bewusst NUR lokal auf dem Geraet: sie darf nicht durch
+   einen Cloud-Abgleich auf ein anderes Geraet wandern.
+   =================================================================== */
+var BELKS_SICH_KEY = 'eatdesi_sicherung';
+window.belksSichKonf = function(){
+  var k = null;
+  try { k = JSON.parse(localStorage.getItem(BELKS_SICH_KEY) || 'null'); } catch(e){ k = null; }
+  if(!k || typeof k !== 'object') k = {};
+  return { geraet: k.geraet || '', name: k.name || '', ziel: k.ziel || 'geraet', sdUri: k.sdUri || '', sdName: k.sdName || '' };
+};
+window.belksSichKonfSetzen = function(neu){
+  var k = window.belksSichKonf();
+  Object.keys(neu || {}).forEach(function(f){ k[f] = neu[f]; });
+  try { localStorage.setItem(BELKS_SICH_KEY, JSON.stringify(k)); }
+  catch(e){ console.warn('Sicherungs-Einstellung nicht gespeichert:', e); }
+  return k;
+};
+/* Ist DIESES Geraet das Sicherungsgeraet? Solange keins benannt ist,
+   bleibt es beim alten Verhalten: wer abschliesst, sichert. */
+window.belksIstSicherungsGeraet = function(){
+  var k = window.belksSichKonf();
+  if(!k.geraet) return true;
+  return k.geraet === window._deviceId;
+};
+window.belksSichGeraetBenannt = function(){ return !!window.belksSichKonf().geraet; };
+
+/* Das SD-Karten-Plugin, wenn die APK es mitbringt. */
+window.belksSdPlugin = function(){
+  try {
+    var c = window.Capacitor;
+    if(!(c && c.isNativePlatform && c.isNativePlatform())) return null;
+    return (c.Plugins && c.Plugins.BelksSdCard) || null;
+  } catch(e){ return null; }
+};
+/* Ordner auf der SD-Karte (oder einem USB-Stick) einmalig freigeben. */
+window.belksSdOrdnerWaehlen = async function(){
+  var p = window.belksSdPlugin();
+  if(!p) return { ok:false, grund:'kein_plugin' };
+  try {
+    var r = await p.pickFolder();
+    if(!r || !r.uri) return { ok:false, grund:'abgebrochen' };
+    window.belksSichKonfSetzen({ sdUri: r.uri, sdName: r.name || r.uri });
+    return { ok:true, name: r.name || r.uri };
+  } catch(e){
+    console.warn('SD-Ordner:', e);
+    return { ok:false, grund:'fehler', text: (e && e.message) ? e.message : String(e) };
+  }
+};
+
+/* ---- Z-Bericht: die Zahlen des Tages, nicht nur die Bestellungen ---- */
+function belksZBericht(orders, ausgaben){
+  var liste = (orders || []).filter(belksBezahlt);
+  var stornos = (orders || []).filter(function(o){ return o && o.storniert; });
+  var ausg = (ausgaben || []).reduce(function(s, e){ return s + ((e && e.amount) || 0); }, 0);
+  var z = {
+    bons: liste.length,
+    umsatzBrutto: 0, bar: 0, karte: 0, trinkgeld: 0, rabatte: 0,
+    mwst7: 0, mwst19: 0,
+    stornoAnzahl: stornos.length, stornoSumme: 0,
+    ausgaben: Math.round(ausg * 100) / 100
+  };
+  try {
+    z.umsatzBrutto = liste.reduce(function(s, o){ return s + belksOrderSumme(o); }, 0);
+    z.bar          = belksSummeBar(liste);
+    z.karte        = belksSummeKarte(liste);
+    z.trinkgeld    = liste.reduce(function(s, o){ return s + ((o && o.trinkgeld) || 0); }, 0);
+    z.rabatte      = liste.reduce(function(s, o){ return s + ((o && o.rabatt) || 0); }, 0);
+    z.mwst7        = liste.reduce(function(s, o){ return s + calcTax7((o && o.items) || []); }, 0);
+    z.mwst19       = liste.reduce(function(s, o){ return s + calcTax19((o && o.items) || []); }, 0);
+    z.stornoSumme  = stornos.filter(function(o){ return !o.stornoVorZahlung; })
+                            .reduce(function(s, o){ return s + ((o && o.total) || 0); }, 0);
+  } catch(e){
+    /* Keine stillen Nullen: Wenn hier etwas schiefgeht, sind 0,00 EUR Bar
+       und 0,00 EUR MwSt. schlimmer als gar keine Zahl - sie sehen echt aus.
+       Darum wird der Fehler in die Datei geschrieben. */
+    console.warn('Z-Bericht:', e);
+    z.unvollstaendig = true;
+    z.fehler = (e && e.message) ? e.message : String(e);
+  }
+  Object.keys(z).forEach(function(f){ if(typeof z[f] === 'number') z[f] = Math.round(z[f] * 100) / 100; });
+  return z;
+}
+/* Dieselben Zahlen als Zeilen zum Ansehen (Excel, Steuerberater). */
+function belksZBerichtCsv(z, bezeichnung, loc){
+  var zeilen = [
+    ['Restaurant', loc], ['Zeitraum', bezeichnung], ['Erstellt', new Date().toLocaleString('de-DE')],
+    ['Bons', z.bons], ['Umsatz brutto', z.umsatzBrutto], ['Bar', z.bar], ['Karte', z.karte],
+    ['Trinkgeld', z.trinkgeld], ['Rabatte', z.rabatte], ['MwSt 7%', z.mwst7], ['MwSt 19%', z.mwst19],
+    ['Stornos Anzahl', z.stornoAnzahl], ['Stornos Summe', z.stornoSumme], ['Ausgaben', z.ausgaben]
+  ];
+  if (z.unvollstaendig) zeilen.push(['ACHTUNG', 'Zahlen unvollstaendig: ' + (z.fehler || 'Berechnung fehlgeschlagen')]);
+  return zeilen.map(function(r){
+    return '"' + String(r[0]).replace(/"/g,'""') + '";"' + String(r[1]).replace(/"/g,'""') + '"';
+  }).join('\r\n') + '\r\n';
+}
 function belksDateiWeg(){
   var c = null;
   try { c = window.Capacitor; } catch(e) {}
@@ -14086,6 +14222,34 @@ function belksDateiWeg(){
    spaeter doch scheitert. */
 function belksDateiSpeichern(name, inhalt, beiFehler){
   var weg = belksDateiWeg();
+  /* v506: Zuerst die SD-Karte, wenn sie gewaehlt und freigegeben ist.
+     Sie ist ein ZUSATZ: das Ergebnis unten (Geraet/Browser) bleibt
+     unveraendert, damit nie der Eindruck entsteht, gespeichert zu haben,
+     wenn nur die Karte beschrieben wurde. Bei ziel='sd' wird trotzdem
+     zusaetzlich auf dem Geraet gesichert - eine einzige Kopie auf einer
+     Karte im selben Geraet ist kein Backup. */
+  try {
+    var k = window.belksSichKonf();
+    var sd = window.belksSdPlugin();
+    if((k.ziel === 'sd' || k.ziel === 'beide') && k.sdUri){
+      if(!sd){
+        window.__belksSdStatus = 'Plugin fehlt - nur auf dem Ger\u00e4t gespeichert';
+      } else {
+        var prSd = sd.writeFile({ uri: k.sdUri, name: name, data: inhalt });
+        if(prSd && typeof prSd.then === 'function'){
+          prSd.then(function(r){ window.__belksSdStatus = 'ok'; window.__belksLetzteSdDatei = (r && r.uri) || name; })
+              .catch(function(e){
+                window.__belksSdStatus = (e && e.message) ? e.message : String(e);
+                var t = '\u26A0\uFE0F Auf die SD-Karte konnte nicht geschrieben werden (' + window.__belksSdStatus
+                      + ').\nDie Datei liegt aber im Ordner "Dokumente".';
+                try { if(typeof beiFehler === 'function') beiFehler(t); else alert(t); } catch(_e){}
+              });
+        }
+      }
+    } else if(k.ziel !== 'geraet' && !k.sdUri){
+      window.__belksSdStatus = 'kein Ordner gew\u00e4hlt';
+    }
+  } catch(e){ console.warn('SD-Sicherung:', e); window.__belksSdStatus = 'Fehler: ' + e; }
   if(weg === 'app_ohne_plugin') return weg;          // gar nicht erst so tun als ob
   if(weg === 'plugin'){
     try{
@@ -14139,6 +14303,52 @@ function BackupView({ data, onRestore }) {
      unten - weit weg vom Knopf, den man gerade gedrueckt hat. Eigene
      Meldung direkt darunter. */
   const [expMsg, setExpMsg] = React.useState("");
+  /* v506: Sicherungsgeraet und Ziel (Geraet / SD-Karte / beides) */
+  const [sich, setSich] = React.useState(() => window.belksSichKonf());
+  const [sichMsg, setSichMsg] = React.useState("");
+  const istDiesesGeraet = sich.geraet === window._deviceId;
+  const darfSichAendern = (() => {
+    try {
+      const u = LS.get("eatdesi_session", null);
+      return !!(u && (u.role === "Admin" || u.role === "Manager"));
+    } catch (e) { return false; }
+  })();
+  const sichSetzen = (neu) => { setSich(window.belksSichKonfSetzen(neu)); };
+  const sichGeraetUmschalten = () => {
+    if (!darfSichAendern) { setSichMsg("\u26D4 Nur Admin oder Manager d\u00FCrfen das Sicherungsger\u00E4t festlegen."); return; }
+    if (istDiesesGeraet) {
+      sichSetzen({ geraet: "", name: "" });
+      setSichMsg("\u2139\uFE0F Kein Sicherungsger\u00E4t mehr. Es sichert wieder das Ger\u00E4t, an dem der Abschluss gemacht wird.");
+    } else {
+      let nm = "";
+      try { nm = window.prompt("Name f\u00FCr dieses Ger\u00E4t (z. B. \u201EHandy Theke\u201C):", sich.name || "Hauptger\u00E4t") || "Hauptger\u00E4t"; }
+      catch (e) { nm = "Hauptger\u00E4t"; }
+      sichSetzen({ geraet: window._deviceId, name: nm });
+      setSichMsg("\u2705 Dieses Ger\u00E4t (" + nm + ") sichert ab jetzt jeden Tagesabschluss, auch den automatischen um 04:00.");
+    }
+  };
+  const sdWaehlen = async () => {
+    setSichMsg("\u23F3 Ordner wird gew\u00E4hlt \u2026");
+    const r = await window.belksSdOrdnerWaehlen();
+    if (r.ok) { setSich(window.belksSichKonf()); setSichMsg("\u2705 SD-Ordner gew\u00E4hlt: " + r.name); return; }
+    if (r.grund === "kein_plugin")
+      setSichMsg("\u26A0\uFE0F Diese App-Version kann noch nicht auf die SD-Karte schreiben. Daf\u00FCr wird eine neue APK gebraucht. Bis dahin wird in den Ordner \u201EDokumente\u201C gesichert.");
+    else if (r.grund === "abgebrochen") setSichMsg("\u2139\uFE0F Abgebrochen \u2013 kein Ordner gew\u00E4hlt.");
+    else setSichMsg("\u274C Ordner konnte nicht gew\u00E4hlt werden: " + (r.text || ""));
+  };
+  const tagJetztSichern = () => {
+    const liste = tagOrders;
+    if (!liste.length) { setSichMsg("\u2139\uFE0F F\u00FCr diesen Tag gibt es keine bezahlten Bestellungen."); return; }
+    const erg = belksTagSichern(liste, tag, tag, (txt) => { if (txt) setSichMsg(txt); }, data.expenses || []);
+    if (erg.ok) {
+      const z = erg.zbericht || {};
+      setSichMsg("\u2705 " + erg.anzahl + " Bestellung(en) gesichert \u00B7 Bar " + fmt(z.bar || 0)
+        + " \u00B7 Karte " + fmt(z.karte || 0)
+        + (window.__belksSdStatus === "ok" ? " \u00B7 auch auf die SD-Karte" : ""));
+    } else {
+      setSichMsg(belksSpeicherText(erg.weg, erg.anzahl, ""));
+    }
+  };
   const alleBezahlt = (data.orders || []).filter(belksBezahlt);
   const tagOrders = alleBezahlt.filter(o => belksTagVon(o) === tag);
   const monatOrders = alleBezahlt.filter(o => belksTagVon(o).slice(0, 7) === String(tag).slice(0, 7));
@@ -14199,6 +14409,46 @@ function BackupView({ data, onRestore }) {
   };
   return /*#__PURE__*/React.createElement("div", { style:{ padding:14, overflowY:"auto", height:"calc(100vh - 90px)" } },
     /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, color:C.green, fontSize:15, marginBottom:14 } }, "\uD83D\uDCBE Backup & Restore"),
+
+    /* === v506: Taegliche Sicherung - Geraet und Ziel === */
+    /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:12, padding:14, marginBottom:12, border:"2px solid #66bb6a" } },
+      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, marginBottom:6, color:"#1b5e20" } }, "\uD83D\uDEE1\uFE0F T\u00E4gliche Sicherung"),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#33691e", marginBottom:10, lineHeight:1.5 } },
+        sich.geraet
+          ? (istDiesesGeraet
+              ? "\u2705 Dieses Ger\u00E4t ist das Sicherungsger\u00E4t" + (sich.name ? " (" + sich.name + ")" : "") + ". Es sichert jeden Tagesabschluss, auch den automatischen um 04:00."
+              : "\u2139\uFE0F Gesichert wird auf dem Ger\u00E4t \u201E" + (sich.name || sich.geraet) + "\u201C. Dieses Ger\u00E4t sichert nicht.")
+          : "\u26A0\uFE0F Noch kein Sicherungsger\u00E4t festgelegt. Zurzeit sichert das Ger\u00E4t, an dem der Abschluss gemacht wird \u2013 beim automatischen Abschluss um 04:00 gar keins."),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: sichGeraetUmschalten,
+        style:{ width:"100%", padding:10, borderRadius:10, border:"none", background: istDiesesGeraet ? "#9e9e9e" : "#2e7d32", color:"#fff", fontWeight:700, fontSize:13, marginBottom:10 } },
+        istDiesesGeraet ? "Dieses Ger\u00E4t nicht mehr als Sicherungsger\u00E4t" : "Dieses Ger\u00E4t als Sicherungsger\u00E4t festlegen"),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#33691e", marginBottom:6, fontWeight:700 } }, "Wohin gesichert wird:"),
+      /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6, marginBottom:10 } },
+        [["geraet","\uD83D\uDCF1 Ger\u00E4t"],["sd","\uD83D\uDCBE SD-Karte"],["beide","\uD83D\uDCF1+\uD83D\uDCBE Beides"]].map(([w,t]) =>
+          /*#__PURE__*/React.createElement("button", {
+            key: w,
+            onClick: () => { sichSetzen({ ziel: w }); setSichMsg(w === "geraet" ? "" : (sich.sdUri ? "" : "\u2139\uFE0F Jetzt noch den Ordner auf der SD-Karte w\u00E4hlen.")); },
+            style:{ flex:1, padding:9, borderRadius:9, fontSize:12, fontWeight:700, cursor:"pointer",
+                    border: sich.ziel === w ? "2px solid #2e7d32" : "1px solid #c5e1a5",
+                    background: sich.ziel === w ? "#2e7d32" : "#fff", color: sich.ziel === w ? "#fff" : "#33691e" } }, t))),
+      (sich.ziel === "sd" || sich.ziel === "beide") && /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("button", {
+          onClick: sdWaehlen,
+          style:{ width:"100%", padding:9, borderRadius:9, border:"1px solid #2e7d32", background:"#fff", color:"#2e7d32", fontWeight:700, fontSize:12, marginBottom:8 } },
+          sich.sdUri ? "\uD83D\uDCC2 Anderen Ordner w\u00E4hlen" : "\uD83D\uDCC2 Ordner auf der SD-Karte w\u00E4hlen"),
+        sich.sdName && /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#33691e", marginBottom:8, wordBreak:"break-all" } }, "Ziel: " + sich.sdName)),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: tagJetztSichern,
+        style:{ width:"100%", padding:10, borderRadius:10, border:"none", background:"#1b5e20", color:"#fff", fontWeight:700, fontSize:13 } },
+        "\uD83D\uDCBE Tag " + tag + " jetzt sichern (mit Z-Bericht)"),
+      sichMsg && /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, marginTop:8, color:"#1b5e20", whiteSpace:"pre-wrap", wordBreak:"break-word" } }, sichMsg),
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#558b2f", marginTop:8, lineHeight:1.5 } },
+        "Gesichert werden Bestellungen, Stornos und der Z-Bericht (Bar, Karte, MwSt.) als JSON, dazu der Z-Bericht als CSV. Denk daran, die Dateien regelm\u00E4\u00DFig auch in Google Drive zu legen \u2013 eine Karte im selben Ger\u00E4t hilft bei Diebstahl oder Sturz nicht."),
+      (() => { const l = belksSichListe().slice(-5).reverse();
+        return l.length ? /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#33691e", marginTop:8 } },
+          /*#__PURE__*/React.createElement("b", null, "Zuletzt gesichert: "),
+          l.map(e => e.tag + " (" + e.anzahl + ")").join(" \u00B7 ")) : null; })()),
 
     // ── v306: Tagesexport: nur bezahlte Bestellungen ────────────────────
     /*#__PURE__*/React.createElement("div", { style:{ background:"#e3f2fd", borderRadius:12, padding:14, marginBottom:12, border:"2px solid #90caf9" } },
@@ -25711,7 +25961,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v505"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v506"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26371,9 +26621,30 @@ function App() {
                   hinweis: _umst ? 'Tisch-Abgleich auf den neuen Weg umgestellt' : undefined });
       LS.set("eatdesi_archive", arch);
       /* v307: Um 04:00 tippt niemand auf den Bildschirm - ohne Fingertipp
-         darf der Browser keine Datei schreiben. Also nur vormerken; die
-         Startseite fragt spaeter nach. Die Bestellungen liegen im Archiv. */
-      try { if ((completedOrders || []).filter(belksBezahlt).length) belksExportOffenSetzen(yKey); } catch (e) {}
+         darf der BROWSER keine Datei schreiben. Also nur vormerken; die
+         Startseite fragt spaeter nach. Die Bestellungen liegen im Archiv.
+         v506: In der Android-App gilt das nicht. Dort schreibt das
+         Dateisystem-Plugin ohne Fingertipp. Ist dieses Geraet das
+         Sicherungsgeraet, wird der Tag also JETZT gesichert - genau dafuer
+         gibt es das Sicherungsgeraet. Klappt es nicht, bleibt der
+         Merkzettel stehen wie bisher. */
+      try {
+        if ((completedOrders || []).filter(belksBezahlt).length) {
+          belksExportOffenSetzen(yKey);
+          var _kannAuto = false;
+          try { _kannAuto = (belksDateiWeg() === 'plugin') && window.belksIstSicherungsGeraet(); } catch (eK) {}
+          if (_kannAuto) {
+            var _ergAuto = belksTagSichern(completedOrders, yKey, belksDeZuIso(yKey), function (txt) {
+              try { belksExportOffenSetzen(yKey); } catch (e3) {}
+              console.warn('Auto-Tagessicherung:', txt);
+            }, expenses);
+            if (_ergAuto && _ergAuto.ok) {
+              belksExportOffenLoeschen();
+              console.log('Auto-Tagessicherung: ' + _ergAuto.anzahl + ' Bestellung(en) fuer ' + yKey + ' gesichert');
+            }
+          }
+        }
+      } catch (e) { console.warn('Auto-Tagessicherung:', e); }
       try { belksGrabsteineWeg(); } catch (e) {}   // v324
 
       /* v433: Alte Takeaway-Marken wegraeumen. Seit v433 wird ein
@@ -28006,12 +28277,17 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
        Speichern ab, meldet sich die Startseite am naechsten Morgen. */
     try {
       belksExportOffenSetzen(key);
+      /* v506: Nur das benannte Sicherungsgeraet schreibt die Tagesdatei.
+         Ist keins benannt, bleibt es beim alten Verhalten. */
+      if (!window.belksIstSicherungsGeraet()) {
+        console.log('Tagesexport: dieses Geraet ist nicht das Sicherungsgeraet - Datei wird dort geschrieben');
+      } else {
       const erg = belksTagSichern(completedOrders, key, belksDeZuIso(key), function (txt) {
         /* Schreiben doch fehlgeschlagen -> Merkzettel wieder setzen, damit
            die Startseite morgen erinnert. */
         try { belksExportOffenSetzen(key); } catch (e2) {}
         alert(txt);
-      });
+      }, expenses);
       if (erg.ok) belksExportOffenLoeschen();
       /* v309: Konnte die App keine Datei ablegen, bleibt der Merkzettel
          stehen - und der Chef sieht auf der Startseite, dass der Tag noch
@@ -28021,6 +28297,7 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
               "Diese App-Version (WebView) kann das noch nicht. Die Bestellungen sind in der Cloud " +
               "und im Archiv sicher \u2013 auf der Startseite steht jetzt ein Hinweis, damit der Tag " +
               "sp\u00E4ter in Chrome gesichert werden kann.");
+      }
     } catch (e) { console.warn("Tagesexport:", e); }
     setCompletedOrders([]);
     setExpenses([]);
