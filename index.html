@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v508</title>
+<title>eatDeSi POS v509</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -14321,72 +14321,139 @@ window.belksPdfTabelle = function(opt){
   var quer = !!o.quer;
   var breite = quer ? 842 : 595, hoehe = quer ? 595 : 842;
   var randL = 30, randO = hoehe - 40, unten = 40;
-  var zeilenH = 13, kopfH = 54;
-  var spalten = o.spalten || [];
-  var gesamt = spalten.reduce(function(s, c){ return s + (c.b || 60); }, 0);
-  /* Passt die Tabelle nicht auf die Seite, werden alle Spalten gleichmaessig
-     schmaler - lieber eng als abgeschnitten. */
-  var faktor = gesamt > (breite - 2*randL) ? (breite - 2*randL) / gesamt : 1;
-  var seiten = [], akt = [], y = randO - kopfH, seitenNr = 1;
+  var zeilenH = 13;
+  /* v509: MEHRERE ABSCHNITTE IN EINEM BERICHT
+     Vorher konnte das PDF genau eine Tabelle. Dem Gesundheitsamt reicht
+     eine Temperaturliste aber nicht - die Zapfanlagenreinigung nach
+     DIN 6650-6, Wareneingang, Fritteusenoel, Schaedlinge und die
+     Personalbelehrung sind eigene Nachweise und muessen mit allen Angaben
+     drinstehen. Jeder Abschnitt bringt seine eigenen Spalten mit. */
+  var abschnitte = o.abschnitte || [{ spalten: o.spalten || [], zeilen: o.zeilen || [] }];
+  var seiten = [], y = randO, seitenNr = 1, inhalt = '';
+  var aktSpalten = [], aktFaktor = 1, aktBreite = 0;
+  function kuerzen(txt, b, proZeichen){
+    var t2 = String(txt === undefined || txt === null ? '' : txt);
+    var max = Math.max(1, Math.floor((b * aktFaktor - 4) / proZeichen));
+    return t2.length > max ? t2.slice(0, max - 1) + '…' : t2;
+  }
   function kopfZeile(){
     var s = '', x = randL;
     s += 'BT /F2 9 Tf 0 0 0 rg\n';
-    spalten.forEach(function(c){
+    aktSpalten.forEach(function(c){
       /* Auch die Ueberschrift kuerzen - sonst schob sich ein langer
          Geraetename ueber die Nachbarspalte und die Kopfzeile war
          unlesbar (Geraetenamen sind frei eingetippt). */
-      var kt = String(c.t || '');
-      var maxK = Math.max(1, Math.floor(((c.b || 60) * faktor - 4) / 5.0));
-      if (kt.length > maxK) kt = kt.slice(0, maxK - 1) + '…';
-      s += '1 0 0 1 ' + (x + 2) + ' ' + y + ' Tm (' + belksPdfText(kt) + ') Tj\n';
-      x += (c.b || 60) * faktor;
+      s += '1 0 0 1 ' + (x + 2) + ' ' + y + ' Tm (' + belksPdfText(kuerzen(c.t, c.b || 60, 5.0)) + ') Tj\n';
+      x += (c.b || 60) * aktFaktor;
     });
     s += 'ET\n';
-    s += '0.6 w 0.4 0.4 0.4 RG ' + randL + ' ' + (y - 4) + ' m ' + (randL + gesamt*faktor) + ' ' + (y - 4) + ' l S\n';
+    s += '0.6 w 0.4 0.4 0.4 RG ' + randL + ' ' + (y - 4) + ' m ' + (randL + aktBreite) + ' ' + (y - 4) + ' l S\n';
     y -= zeilenH + 3;
     return s;
   }
-  function neueSeite(){
+  function seitenZahl(){
+    return 'BT /F1 8 Tf 0.45 0.45 0.45 rg 1 0 0 1 ' + randL + ' ' + (unten - 14) + ' Tm ('
+         + belksPdfText('Seite ' + seitenNr) + ') Tj ET\n';
+  }
+  function neueSeite(mitKopf){
     var s = '';
     y = randO;
     s += 'BT /F2 15 Tf 0 0 0 rg 1 0 0 1 ' + randL + ' ' + y + ' Tm (' + belksPdfText(o.titel || '') + ') Tj ET\n';
     y -= 18;
     s += 'BT /F1 9.5 Tf 0.25 0.25 0.25 rg 1 0 0 1 ' + randL + ' ' + y + ' Tm (' + belksPdfText(o.untertitel || '') + ') Tj ET\n';
     y -= 22;
-    s += kopfZeile();
+    if (mitKopf !== false) s += kopfZeile();
     return s;
   }
-  var inhalt = neueSeite();
-  (o.zeilen || []).forEach(function(z){
-    if (y < unten + zeilenH) {
-      inhalt += 'BT /F1 8 Tf 0.45 0.45 0.45 rg 1 0 0 1 ' + randL + ' ' + (unten - 14) + ' Tm ('
-             + belksPdfText('Seite ' + seitenNr) + ') Tj ET\n';
-      seiten.push(inhalt); seitenNr++; inhalt = neueSeite();
-    }
-    var x = randL;
-    inhalt += 'BT\n';
-    z.forEach(function(wert, i){
-      var sp = spalten[i] || {};
-      var rot = sp.rot && sp.rot(wert, z);
-      inhalt += (rot ? '/F2 9 Tf 0.78 0.11 0.11 rg' : '/F1 9 Tf 0 0 0 rg') + '\n';
-      /* Zu langen Text abschneiden, damit nichts in die Nachbarspalte laeuft. */
-      var txt = String(wert === undefined || wert === null ? '' : wert);
-      var max = Math.max(1, Math.floor(((sp.b || 60) * faktor - 4) / 4.6));
-      if (txt.length > max) txt = txt.slice(0, max - 1) + '…';
-      inhalt += '1 0 0 1 ' + (x + 2) + ' ' + y + ' Tm (' + belksPdfText(txt) + ') Tj\n';
-      x += (sp.b || 60) * faktor;
+  function umbruch(){
+    /* Ohne Kopfzeile: wer danach weiterschreibt, setzt seine eigene. Sonst
+       stand oben auf Seite 2 die Kopfzeile des VORIGEN Abschnitts. */
+    inhalt += seitenZahl();
+    seiten.push(inhalt); seitenNr++; inhalt = neueSeite(false);
+  }
+  /* Langer Text wird umgebrochen statt abgeschnitten. Bei einem Nachweis
+     fuer die Behoerde darf nicht die Haelfte der gereinigten Teile fehlen,
+     nur weil die Spalte schmal ist. */
+  function umbrechen(txt, b, proZeichen, maxZeilen){
+    var t2 = String(txt === undefined || txt === null ? '' : txt);
+    var max = Math.max(4, Math.floor((b * aktFaktor - 4) / proZeichen));
+    if (t2.length <= max) return [t2];
+    var worte = t2.split(' '), zeilen = [], akt = '';
+    worte.forEach(function(w){
+      while (w.length > max) {                   // ein einzelnes zu langes Wort
+        if (akt) { zeilen.push(akt); akt = ''; }
+        zeilen.push(w.slice(0, max - 1) + '‐');
+        w = w.slice(max - 1);
+      }
+      if (!akt) akt = w;
+      else if ((akt + ' ' + w).length <= max) akt += ' ' + w;
+      else { zeilen.push(akt); akt = w; }
     });
-    inhalt += 'ET\n';
-    y -= zeilenH;
+    if (akt) zeilen.push(akt);
+    if (zeilen.length > maxZeilen) {
+      zeilen = zeilen.slice(0, maxZeilen);
+      zeilen[maxZeilen - 1] = zeilen[maxZeilen - 1].slice(0, max - 1) + '…';
+    }
+    return zeilen;
+  }
+  abschnitte.forEach(function(ab, nr){
+    aktSpalten = ab.spalten || [];
+    var gesamt = aktSpalten.reduce(function(s, c){ return s + (c.b || 60); }, 0);
+    /* Passt die Tabelle nicht auf die Seite, werden alle Spalten
+       gleichmaessig schmaler - lieber eng als abgeschnitten. */
+    aktFaktor = gesamt > (breite - 2*randL) ? (breite - 2*randL) / gesamt : 1;
+    aktBreite = gesamt * aktFaktor;
+    if (nr === 0) { inhalt = neueSeite(ab.titel ? false : true); }
+    if (ab.titel) {
+      /* Eine Ueberschrift ohne Zeilen darunter ist eine Luege - also lieber
+         gleich auf die naechste Seite. */
+      if (y < unten + zeilenH * 4) umbruch();
+      else if (nr > 0) y -= 10;
+      inhalt += 'BT /F2 12 Tf 0 0 0 rg 1 0 0 1 ' + randL + ' ' + y + ' Tm (' + belksPdfText(ab.titel) + ') Tj ET\n';
+      y -= 15;
+      if (ab.sub) {
+        inhalt += 'BT /F1 9 Tf 0.3 0.3 0.3 rg 1 0 0 1 ' + randL + ' ' + y + ' Tm (' + belksPdfText(ab.sub) + ') Tj ET\n';
+        y -= 14;
+      }
+      inhalt += kopfZeile();
+    }
+    if (!(ab.zeilen || []).length) {
+      inhalt += 'BT /F1 9 Tf 0.45 0.45 0.45 rg 1 0 0 1 ' + (randL + 2) + ' ' + y + ' Tm ('
+             + belksPdfText(ab.leerText || 'In diesem Zeitraum nichts erfasst.') + ') Tj ET\n';
+      y -= zeilenH;
+    }
+    (ab.zeilen || []).forEach(function(z){
+      /* Erst ausrechnen, wie hoch die Zeile wird - eine umgebrochene Zeile
+         darf nicht halb auf der naechsten Seite landen. */
+      var teile = z.map(function(wert, i){
+        var sp = aktSpalten[i] || {};
+        return umbrechen(wert, sp.b || 60, 4.6, 4);
+      });
+      var hoch = teile.reduce(function(m, t2){ return Math.max(m, t2.length); }, 1);
+      if (y < unten + zeilenH * hoch) { umbruch(); inhalt += kopfZeile(); }
+      var x = randL;
+      inhalt += 'BT\n';
+      z.forEach(function(wert, i){
+        var sp = aktSpalten[i] || {};
+        var rot = sp.rot && sp.rot(wert, z);
+        inhalt += (rot ? '/F2 9 Tf 0.78 0.11 0.11 rg' : '/F1 9 Tf 0 0 0 rg') + '\n';
+        teile[i].forEach(function(zeile, nr){
+          inhalt += '1 0 0 1 ' + (x + 2) + ' ' + (y - nr * (zeilenH - 2)) + ' Tm ('
+                 + belksPdfText(zeile) + ') Tj\n';
+        });
+        x += (sp.b || 60) * aktFaktor;
+      });
+      inhalt += 'ET\n';
+      y -= zeilenH + (hoch - 1) * (zeilenH - 2);
+    });
   });
   (o.fuss || []).forEach(function(zeile){
-    if (y < unten + zeilenH) { seiten.push(inhalt); seitenNr++; inhalt = neueSeite(); }
+    if (y < unten + zeilenH) umbruch();
     y -= 6;
     inhalt += 'BT /F1 9 Tf 0.25 0.25 0.25 rg 1 0 0 1 ' + randL + ' ' + y + ' Tm (' + belksPdfText(zeile) + ') Tj ET\n';
     y -= zeilenH;
   });
-  inhalt += 'BT /F1 8 Tf 0.45 0.45 0.45 rg 1 0 0 1 ' + randL + ' ' + (unten - 14) + ' Tm ('
-         + belksPdfText('Seite ' + seitenNr) + ') Tj ET\n';
+  inhalt += seitenZahl();
   seiten.push(inhalt);
 
   /* ---- Die PDF-Datei zusammensetzen ---- */
@@ -26255,7 +26322,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v508"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v509"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -34750,17 +34817,33 @@ function HACCPModul({
   });
 
   /* ---- Schreiben ---- */
+  /* v509: WER HAT GEMESSEN?
+     Im Monatsbericht stand bei "Erfasst von" fast immer nichts. Der Name
+     wurde nur gespeichert, wenn ihn jemand von Hand ins Feld tippte - das
+     tut im Betrieb niemand. Fuer die Behoerde ist die Angabe aber Pflicht:
+     ein Nachweis ohne Namen ist kein Nachweis.
+     Jetzt traegt sich der angemeldete Benutzer beim ERSTEN Wert des Tages
+     selbst ein, zusammen mit der Uhrzeit. Ueberschrieben wird nie: wer den
+     Namen von Hand aendert, behaelt seine Eingabe. */
+  const stempel = (vorher, wert) => {
+    const neu = { ...vorher };
+    if (wert !== '' && wert !== undefined && wert !== null) {
+      if (!neu._by && benutzer) neu._by = benutzer;
+      if (!neu._um) neu._um = new Date().toTimeString().slice(0, 5);
+    }
+    return neu;
+  };
   const setzeTemp = (d, feld, wert) => setTemp(p => ({
     ...p,
     [d]: {
-      ...(p[d] || {}),
+      ...(feld.charAt(0) === '_' ? (p[d] || {}) : stempel(p[d] || {}, wert)),
       [feld]: wert
     }
   }));
   const setzeClean = (d, feld, wert) => setClean(p => ({
     ...p,
     [d]: {
-      ...(p[d] || {}),
+      ...(feld.charAt(0) === '_' ? (p[d] || {}) : stempel(p[d] || {}, wert)),
       [feld]: wert
     }
   }));
@@ -34816,41 +34899,93 @@ function HACCPModul({
     if (fehler) { melden(fehler); return; }
     melden(pfad ? ('Gespeichert: ' + name) : ('Gespeichert: ' + name));
   };
+  /* Ein Abschnitt je Nachweisliste, mit ALLEN Feldern - nicht nur den
+     wenigen, die auf den Bildschirm passen. Die Behoerde will bei der
+     Zapfanlage sehen, was gereinigt wurde, womit und von wem. */
+  const listenAbschnitt = (m, extraSpalten) => {
+    const def = LISTEN[m];
+    const rows = (daten[m] || []).filter(r => def.ohneDatum || (r.datum || '').startsWith(monat))
+      .sort((a, b) => (a.datum || '').localeCompare(b.datum || ''));
+    const felder = def.felder;
+    const spalten = (def.ohneDatum ? [] : [{ t: 'Datum', b: 58 }])
+      .concat(felder.map(f => ({ t: f.l, b: extraSpalten && extraSpalten[f.k] ? extraSpalten[f.k] : 110 })));
+    const zeilen = rows.map(r => (def.ohneDatum ? [] : [de(r.datum)])
+      .concat(felder.map(f => {
+        const v = r[f.k];
+        return (v === undefined || v === '' || v === null) ? '–' : String(v);
+      })));
+    return { titel: def.titel, sub: def.sub, spalten, zeilen,
+             leerText: 'Im ' + monatName(monat) + ' wurde hier nichts erfasst.' };
+  };
   const monatPdf = (abw, erfasst, anzahlTage) => {
-    const jahr = +monat.slice(0, 4), mm = +monat.slice(5, 7);
-    const spalten = [{ t: 'Tag', b: 34 }].concat(
+    const spaltenTemp = [{ t: 'Tag', b: 34 }].concat(
       cfg.geraete.map(g => ({
         t: g.name, b: 62,
         /* Werte ausserhalb des Sollbereichs rot und fett - ein Pruefer soll
            sie finden, ohne jede Zahl mit der Vorgabe zu vergleichen. */
-        rot: (wert) => wert !== '' && wert !== undefined && belksAusserhalb(wert, g)
+        rot: (wert) => wert !== '' && wert !== undefined && wert !== '–' && belksAusserhalb(wert, g)
       })),
-      [{ t: 'Manahme / Bemerkung'.replace('Manahme', 'Maßnahme'), b: 150 }, { t: 'Erfasst von', b: 80 }]);
-    const zeilen = [];
+      [{ t: 'Maßnahme / Bemerkung', b: 150 }, { t: 'Zeit', b: 40 }, { t: 'Erfasst von', b: 90 }]);
+    const zeilenTemp = [];
     for (let d = 1; d <= anzahlTage; d++) {
       const key = `${monat}-${String(d).padStart(2, '0')}`;
       const t = temp[key] || {};
-      zeilen.push([String(d).padStart(2, '0') + '.']
+      const hatWert = cfg.geraete.some(g => t[g.id] !== undefined && t[g.id] !== '');
+      zeilenTemp.push([String(d).padStart(2, '0') + '.']
         .concat(cfg.geraete.map(g => (t[g.id] === undefined || t[g.id] === '') ? '–' : String(t[g.id])))
-        .concat([t._note || '', t._by || '']));
+        .concat([t._note || (t._uebernommenVon ? 'Werte vom ' + de(t._uebernommenVon) + ' bestätigt' : ''),
+                 t._um || '',
+                 /* Steht kein Name da, ist der Nachweis unvollstaendig -
+                    das soll man sehen, statt es zu verstecken. */
+                 t._by || (hatWert ? '(ohne Namen)' : '–')]));
+    }
+    /* Reinigungsplan: je Tag, was abgehakt wurde. */
+    const zeilenClean = [];
+    for (let d = 1; d <= anzahlTage; d++) {
+      const key = `${monat}-${String(d).padStart(2, '0')}`;
+      const c = clean[key] || {};
+      const erl = REINIGUNG.filter(x => c[x.id]);
+      if (!erl.length) continue;
+      const je = f => erl.filter(x => x.f === f).map(x => x.t).join(', ') || '–';
+      zeilenClean.push([de(key), je('täglich'), je('wöchentlich'), je('monatlich'),
+        c._by || '(ohne Namen)']);
     }
     const imMonat = m => (daten[m] || []).filter(r => (r.datum || '').startsWith(monat));
     const befund = imMonat('pest').filter(r => !(r.bef || '').startsWith('Kein')).length;
+    const ohneNamen = zeilenTemp.filter(z => z[z.length - 1] === '(ohne Namen)').length;
     const fuss = [
       'Übersicht: ' + erfasst + ' von ' + anzahlTage + ' Tagen mit Temperaturen erfasst, '
-        + abw + ' Abweichung(en) vom Sollbereich.',
-      'Zapfanlage gereinigt: ' + imMonat('zapf').length + ' · Warenannahmen: ' + imMonat('ware').length
-        + ' · Ölkontrollen: ' + imMonat('oil').length + ' · Schädlingsbefunde: ' + befund,
+        + abw + ' Abweichung(en) vom Sollbereich'
+        + (ohneNamen ? ', ' + ohneNamen + ' Tag(e) ohne Namen des Prüfers.' : '.'),
       'Sollbereiche: ' + cfg.geraete.map(g => g.name + ' ' + window.belksHaccpBereich(g).min
         + ' bis ' + window.belksHaccpBereich(g).max + ' °C').join(' · '),
-      '– = an diesem Tag kein Wert erfasst. Erstellt am ' + de(heute()) + ' mit Belks AI POS.'
+      'Zapfanlage: Reinigungsintervall ' + (cfg.zapfIntervall || 14) + ' Tage'
+        + (cfg.telTechnik ? ' · Technik/Kundendienst: ' + cfg.telTechnik : '')
+        + ' · Schädlingsbefunde im Monat: ' + befund,
+      '– = kein Wert erfasst. Erstellt am ' + de(heute()) + ' um '
+        + new Date().toTimeString().slice(0, 5) + ' Uhr mit Belks AI POS'
+        + (benutzer ? ' von ' + benutzer : '') + '.'
+    ];
+    const abschnitte = [
+      { titel: 'Temperaturkontrolle', sub: 'Kühl- und Tiefkühlgeräte, einmal pro Tag · rot = außerhalb des Sollbereichs',
+        spalten: spaltenTemp, zeilen: zeilenTemp },
+      listenAbschnitt('zapf', { art: 170, leit: 150, mittel: 140, von: 110 }),
+      { titel: 'Reinigungsplan', sub: 'Abgehakte Arbeiten je Tag',
+        spalten: [{ t: 'Datum', b: 58 }, { t: 'Täglich', b: 260 }, { t: 'Wöchentlich', b: 200 },
+                  { t: 'Monatlich', b: 160 }, { t: 'Erledigt von', b: 90 }],
+        zeilen: zeilenClean,
+        leerText: 'Im ' + monatName(monat) + ' wurde hier nichts abgehakt.' },
+      listenAbschnitt('ware', { lief: 110, ware: 130, temp: 60, zust: 150, von: 100, bem: 160 }),
+      listenAbschnitt('oil', { frit: 110, tpm: 55, bew: 140, von: 110 }),
+      listenAbschnitt('pest', { ort: 120, bef: 180, von: 110, bem: 190 }),
+      listenAbschnitt('staff', { name: 150, funk: 120, belehrung: 110, schulung: 130 })
     ];
     const name = 'haccp_monatsbericht_' + monat + '.pdf';
     const weg = window.belksPdfSpeichern(name, window.belksPdfTabelle({
-      titel: 'HACCP-Monatsbericht – Temperaturkontrolle',
+      titel: 'HACCP-Monatsbericht – Betriebskontrolle',
       untertitel: betrieb + ' · ' + monatName(monat) + ' · erstellt ' + de(heute())
         + (benutzer ? ' von ' + benutzer : ''),
-      spalten, zeilen, fuss, quer: true
+      abschnitte, fuss, quer: true
     }), pdfMelden(name));
     if (weg === 'plugin') melden('PDF im Ordner „Dokumente“: ' + name);
     else if (weg === 'browser') melden('PDF heruntergeladen: ' + name);
@@ -34868,7 +35003,9 @@ function HACCPModul({
         .map(g => g.name + ' ' + t[g.id] + '°C' + (belksAusserhalb(t[g.id], g) ? ' (!)' : ''));
       if (werte.length) zeilen.push([de(key), 'Temperatur', werte.join(', ') + (t._note ? ' – ' + t._note : ''), t._by || '']);
       const c = clean[key] || {};
-      const erledigt = REINIGUNG.filter(x => c[x.id]).map(x => x.l);
+      /* v509: hier stand x.l - die Reinigungspunkte heissen aber x.t.
+         Die Liste zeigte dadurch "undefined, undefined, ...". */
+      const erledigt = REINIGUNG.filter(x => c[x.id]).map(x => x.t);
       if (erledigt.length) zeilen.push([de(key), 'Reinigung', erledigt.join(', '), c._by || '']);
     }
     Object.keys(LISTEN).forEach(m => {
