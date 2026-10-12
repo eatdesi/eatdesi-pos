@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v507</title>
+<title>eatDeSi POS v508</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -14281,6 +14281,188 @@ function belksDateiWeg(){
    der Fehler wieder unsichtbar geblieben. Genau dieser stille Weg hat uns
    schon einmal Daten gekostet. beiFehler wird gerufen, wenn das Schreiben
    spaeter doch scheitert. */
+/* ===================================================================
+   v508: PDF SELBST BAUEN
+   "Monat drucken" rief window.print() auf. Im Browser oeffnet das den
+   Druckdialog; in der Android-App (WebView) passiert schlicht gar nichts -
+   deshalb schien der Knopf kaputt. Fuer das Gesundheitsamt braucht es
+   ohnehin eine Datei zum Weiterleiten, nicht einen Druckdialog.
+   Hier entsteht die PDF-Datei direkt: keine fremde Bibliothek, kein
+   Nachladen aus dem Internet (das waere wieder eine Verbindung zu einem
+   Drittserver, die wir gerade erst abgeschafft haben). PDF ist ein
+   Textformat - Seiten, Schrift und Zeilen schreiben wir selbst.
+   Schrift: Helvetica, die jedes PDF-Programm mitbringt.
+   =================================================================== */
+var BELKS_WINANSI = { '€':0x80,'‚':0x82,'ƒ':0x83,'„':0x84,'…':0x85,'†':0x86,'‡':0x87,
+  '‰':0x89,'Š':0x8a,'‹':0x8b,'Œ':0x8c,'Ž':0x8e,'‘':0x91,'’':0x92,'“':0x93,
+  '”':0x94,'•':0x95,'–':0x96,'—':0x97,'š':0x9a,'›':0x9b,'œ':0x9c,'ž':0x9e,
+  'Ÿ':0x9f };
+/* Text PDF-sicher machen: Klammern und Schraegstrich sind Steuerzeichen,
+   Umlaute brauchen ihren WinAnsi-Zahlenwert. Was keinen hat, wird "?" -
+   besser ein Fragezeichen als eine zerschossene Datei. */
+function belksPdfText(s){
+  var out = '', t = String(s === undefined || s === null ? '' : s);
+  for (var i = 0; i < t.length; i++){
+    var c = t[i], code = t.charCodeAt(i);
+    if (c === '(' || c === ')' || c === '\\') { out += '\\' + c; continue; }
+    if (code < 32) { out += ' '; continue; }
+    if (code < 127) { out += c; continue; }
+    var w = BELKS_WINANSI[c];
+    if (w === undefined && code <= 255) w = code;        // Latin-1 deckt Umlaute ab
+    if (w === undefined) { out += '?'; continue; }
+    out += '\\' + ('00' + w.toString(8)).slice(-3);
+  }
+  return out;
+}
+/* Eine Tabelle als PDF. spalten = [{t:'Tag', b:30}], zeilen = [[...]],
+   quer = Querformat (fuer breite Tabellen wie die Temperaturuebersicht). */
+window.belksPdfTabelle = function(opt){
+  var o = opt || {};
+  var quer = !!o.quer;
+  var breite = quer ? 842 : 595, hoehe = quer ? 595 : 842;
+  var randL = 30, randO = hoehe - 40, unten = 40;
+  var zeilenH = 13, kopfH = 54;
+  var spalten = o.spalten || [];
+  var gesamt = spalten.reduce(function(s, c){ return s + (c.b || 60); }, 0);
+  /* Passt die Tabelle nicht auf die Seite, werden alle Spalten gleichmaessig
+     schmaler - lieber eng als abgeschnitten. */
+  var faktor = gesamt > (breite - 2*randL) ? (breite - 2*randL) / gesamt : 1;
+  var seiten = [], akt = [], y = randO - kopfH, seitenNr = 1;
+  function kopfZeile(){
+    var s = '', x = randL;
+    s += 'BT /F2 9 Tf 0 0 0 rg\n';
+    spalten.forEach(function(c){
+      /* Auch die Ueberschrift kuerzen - sonst schob sich ein langer
+         Geraetename ueber die Nachbarspalte und die Kopfzeile war
+         unlesbar (Geraetenamen sind frei eingetippt). */
+      var kt = String(c.t || '');
+      var maxK = Math.max(1, Math.floor(((c.b || 60) * faktor - 4) / 5.0));
+      if (kt.length > maxK) kt = kt.slice(0, maxK - 1) + '…';
+      s += '1 0 0 1 ' + (x + 2) + ' ' + y + ' Tm (' + belksPdfText(kt) + ') Tj\n';
+      x += (c.b || 60) * faktor;
+    });
+    s += 'ET\n';
+    s += '0.6 w 0.4 0.4 0.4 RG ' + randL + ' ' + (y - 4) + ' m ' + (randL + gesamt*faktor) + ' ' + (y - 4) + ' l S\n';
+    y -= zeilenH + 3;
+    return s;
+  }
+  function neueSeite(){
+    var s = '';
+    y = randO;
+    s += 'BT /F2 15 Tf 0 0 0 rg 1 0 0 1 ' + randL + ' ' + y + ' Tm (' + belksPdfText(o.titel || '') + ') Tj ET\n';
+    y -= 18;
+    s += 'BT /F1 9.5 Tf 0.25 0.25 0.25 rg 1 0 0 1 ' + randL + ' ' + y + ' Tm (' + belksPdfText(o.untertitel || '') + ') Tj ET\n';
+    y -= 22;
+    s += kopfZeile();
+    return s;
+  }
+  var inhalt = neueSeite();
+  (o.zeilen || []).forEach(function(z){
+    if (y < unten + zeilenH) {
+      inhalt += 'BT /F1 8 Tf 0.45 0.45 0.45 rg 1 0 0 1 ' + randL + ' ' + (unten - 14) + ' Tm ('
+             + belksPdfText('Seite ' + seitenNr) + ') Tj ET\n';
+      seiten.push(inhalt); seitenNr++; inhalt = neueSeite();
+    }
+    var x = randL;
+    inhalt += 'BT\n';
+    z.forEach(function(wert, i){
+      var sp = spalten[i] || {};
+      var rot = sp.rot && sp.rot(wert, z);
+      inhalt += (rot ? '/F2 9 Tf 0.78 0.11 0.11 rg' : '/F1 9 Tf 0 0 0 rg') + '\n';
+      /* Zu langen Text abschneiden, damit nichts in die Nachbarspalte laeuft. */
+      var txt = String(wert === undefined || wert === null ? '' : wert);
+      var max = Math.max(1, Math.floor(((sp.b || 60) * faktor - 4) / 4.6));
+      if (txt.length > max) txt = txt.slice(0, max - 1) + '…';
+      inhalt += '1 0 0 1 ' + (x + 2) + ' ' + y + ' Tm (' + belksPdfText(txt) + ') Tj\n';
+      x += (sp.b || 60) * faktor;
+    });
+    inhalt += 'ET\n';
+    y -= zeilenH;
+  });
+  (o.fuss || []).forEach(function(zeile){
+    if (y < unten + zeilenH) { seiten.push(inhalt); seitenNr++; inhalt = neueSeite(); }
+    y -= 6;
+    inhalt += 'BT /F1 9 Tf 0.25 0.25 0.25 rg 1 0 0 1 ' + randL + ' ' + y + ' Tm (' + belksPdfText(zeile) + ') Tj ET\n';
+    y -= zeilenH;
+  });
+  inhalt += 'BT /F1 8 Tf 0.45 0.45 0.45 rg 1 0 0 1 ' + randL + ' ' + (unten - 14) + ' Tm ('
+         + belksPdfText('Seite ' + seitenNr) + ') Tj ET\n';
+  seiten.push(inhalt);
+
+  /* ---- Die PDF-Datei zusammensetzen ---- */
+  var objekte = [], n = 0;
+  function obj(txt){ objekte.push(txt); return ++n; }
+  var seitenIds = [], inhaltIds = [];
+  var katalogId = 1, baumId = 2, f1Id = 3, f2Id = 4;
+  objekte.push('', '', '', '');  n = 4;
+  objekte[f1Id-1] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
+  objekte[f2Id-1] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
+  seiten.forEach(function(s){
+    var cid = obj('<< /Length ' + s.length + ' >>\nstream\n' + s + 'endstream');
+    inhaltIds.push(cid);
+    var pid = obj('<< /Type /Page /Parent ' + baumId + ' 0 R /MediaBox [0 0 ' + breite + ' ' + hoehe
+      + '] /Resources << /Font << /F1 ' + f1Id + ' 0 R /F2 ' + f2Id + ' 0 R >> >> /Contents ' + cid + ' 0 R >>');
+    seitenIds.push(pid);
+  });
+  objekte[katalogId-1] = '<< /Type /Catalog /Pages ' + baumId + ' 0 R >>';
+  objekte[baumId-1] = '<< /Type /Pages /Count ' + seitenIds.length + ' /Kids ['
+    + seitenIds.map(function(i){ return i + ' 0 R'; }).join(' ') + '] >>';
+
+  var pdf = '%PDF-1.4\n', pos = [];
+  objekte.forEach(function(t, i){
+    pos[i] = pdf.length;
+    pdf += (i + 1) + ' 0 obj\n' + t + '\nendobj\n';
+  });
+  var xref = pdf.length;
+  pdf += 'xref\n0 ' + (objekte.length + 1) + '\n0000000000 65535 f \n';
+  objekte.forEach(function(t, i){ pdf += ('0000000000' + pos[i]).slice(-10) + ' 00000 n \n'; });
+  pdf += 'trailer\n<< /Size ' + (objekte.length + 1) + ' /Root ' + katalogId + ' 0 R >>\nstartxref\n' + xref + '\n%%EOF';
+  return pdf;
+};
+/* PDF ablegen: in der App im Ordner "Dokumente", im Browser als Download.
+   Die SD-Karte bleibt hier aussen vor - ihr Plugin schreibt Text, eine
+   PDF-Datei wuerde dabei unbrauchbar. Lieber ehrlich sagen, wo sie liegt. */
+window.belksPdfSpeichern = function(name, pdf, beiFehler){
+  var bytes = new Uint8Array(pdf.length);
+  for (var i = 0; i < pdf.length; i++) bytes[i] = pdf.charCodeAt(i) & 0xff;
+  var weg = belksDateiWeg();
+  if (weg === 'plugin') {
+    try {
+      var roh = '';
+      for (var j = 0; j < bytes.length; j++) roh += String.fromCharCode(bytes[j]);
+      var fs = window.Capacitor.Plugins.Filesystem || window.Capacitor.Plugins.FileSystem;
+      /* Ohne "encoding" schreibt das Plugin die Daten als Base64 zurueck in
+         echte Bytes - genau das braucht eine PDF-Datei. */
+      var pr = fs.writeFile({ path: name, data: btoa(roh), directory: 'DOCUMENTS' });
+      if (pr && pr.then) {
+        pr.then(function(r){
+          var u = (r && r.uri) ? String(r.uri) : '';
+          if (u) window.__belksLetzteDatei = u;
+          if (typeof beiFehler === 'function') beiFehler(null, u);
+        }).catch(function(e){
+          var txt = '⚠️ Die PDF-Datei konnte nicht geschrieben werden.\n\n'
+                  + ((e && e.message) ? e.message : String(e));
+          if (typeof beiFehler === 'function') beiFehler(txt); else alert(txt);
+        });
+      }
+      return 'plugin';
+    } catch(e){
+      console.warn('PDF-Plugin:', e);
+      if (typeof beiFehler === 'function') beiFehler('⚠️ PDF konnte nicht gespeichert werden: ' + e);
+      return 'app_ohne_plugin';
+    }
+  }
+  try {
+    var url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    var a = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    return 'browser';
+  } catch(e){
+    if (typeof beiFehler === 'function') beiFehler('⚠️ PDF konnte nicht gespeichert werden: ' + e);
+    return 'fehler';
+  }
+};
 function belksDateiSpeichern(name, inhalt, beiFehler){
   var weg = belksDateiWeg();
   /* v506: Zuerst die SD-Karte, wenn sie gewaehlt und freigegeben ist.
@@ -26073,7 +26255,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v507"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v508"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26158,29 +26340,41 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
           const perms = loggedInUser.permissions;
           if (!perms || !Array.isArray(perms)) return true;
           return perms.indexOf(item.id) >= 0;
-        }).map(item => React.createElement("button", {
-          key: item.id,
-          onClick: () => item.id === "takeaway_new" ? setShowTaCustomerSearch(true) : setView(item.id),
-          style:{ position:"relative", padding:"14px 8px", borderRadius:12, border:"2px solid #f0f0f0", background:"#fafafa", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:600, color:"#333", display:"flex", flexDirection:"column", alignItems:"center", gap:6 }
-        },
-          React.createElement("span", { style:{ fontSize:22 } }, item.icon),
-          /* v413: Zustandspunkt fuer HACCP. Rot, wenn ein Wert ausserhalb
-             liegt; gelb, wenn heute noch Geraete offen sind. */
-          item.id === "haccp" && (function(){
+        }).map(item => {
+          /* v508: DIE GANZE KACHEL FAERBT SICH, SOLANGE ETWAS OFFEN IST
+             Vorher war es ein 9 Pixel grosser Punkt oben rechts - den sieht
+             im Betrieb niemand, und die Temperaturkontrolle wurde deshalb
+             vergessen. Jetzt: rot bis erledigt, gruen danach, mit einer
+             Zeile, die sagt was fehlt. An Ruhetagen bleibt die Kachel
+             normal - da wird nicht gearbeitet und nichts gemessen. */
+          var hs = null;
+          if (item.id === "haccp") {
             try {
               var h = window.belksHaccpOffen && window.belksHaccpOffen();
-              if (!h || !h.gesamt) return null;
-              if (h.ausserhalb > 0) return React.createElement("span", {
-                style:{ position:"absolute", top:6, right:8, width:9, height:9,
-                        borderRadius:"50%", background:"#c62828" } });
-              if (h.offen > 0) return React.createElement("span", {
-                style:{ position:"absolute", top:6, right:8, width:9, height:9,
-                        borderRadius:"50%", background:"#f5c542" } });
-              return null;
-            } catch(e){ return null; }
-          })(),
-          item.label
-        ))
+              var ruhe = window.belksHaccpRuhetag && window.belksHaccpRuhetag();
+              if (h && h.gesamt && !ruhe) {
+                if (h.ausserhalb > 0) hs = { rand:"#b71c1c", grund:"#ffebee", farbe:"#b71c1c",
+                  zusatz: h.ausserhalb + (h.ausserhalb === 1 ? " Wert" : " Werte") + " außerhalb" };
+                else if (h.offen > 0) hs = { rand:"#c62828", grund:"#ffebee", farbe:"#c62828",
+                  zusatz: h.offen + " von " + h.gesamt + " offen" };
+                else hs = { rand:"#2e7d32", grund:"#e8f5e9", farbe:"#2e7d32", zusatz:"heute erledigt" };
+              }
+            } catch(e){ hs = null; }
+          }
+          return React.createElement("button", {
+          key: item.id,
+          onClick: () => item.id === "takeaway_new" ? setShowTaCustomerSearch(true) : setView(item.id),
+          style:{ position:"relative", padding:"14px 8px", borderRadius:12,
+                  border:"2px solid " + (hs ? hs.rand : "#f0f0f0"),
+                  background: hs ? hs.grund : "#fafafa",
+                  cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:600,
+                  color: hs ? hs.farbe : "#333",
+                  display:"flex", flexDirection:"column", alignItems:"center", gap:6 }
+        },
+          React.createElement("span", { style:{ fontSize:22 } }, item.icon),
+          item.label,
+          hs && React.createElement("span", { style:{ fontSize:10, fontWeight:700, lineHeight:1.2 } }, hs.zusatz)
+        ); })
       )
     ),
 
@@ -34484,6 +34678,11 @@ function HACCPModul({
   const [monat, setMonat] = useState(heute().slice(0, 7));
   const [tagDatum, setTag] = useState(heute());
   const [hinweis, setHinweis] = useState('');
+  /* v508: Entwurf und "wird gerade bearbeitet" fuer die Listen-Reiter -
+     je Reiter ein Eintrag. Sie stehen hier oben, weil jeder Durchlauf des
+     Moduls dieselbe Anzahl Zustaende haben muss (siehe Liste unten). */
+  const [modulEntwuerfe, setModulEntwuerfe] = useState({});
+  const [modulBearbeite, setModulBearbeite] = useState({});
   const [cfg, setCfg] = useGespeichert(K('cfg'), {
     geraete: GERAETE_STD,
     zapfIntervall: 14,
@@ -34608,6 +34807,91 @@ function HACCPModul({
     const kopf = def.ohneDatum ? def.felder.map(f => f.l) : ['Datum', ...def.felder.map(f => f.l)];
     const z = [kopf, ...rows.map(r => def.ohneDatum ? def.felder.map(f => r[f.k] ?? '') : [de(r.datum), ...def.felder.map(f => r[f.k] ?? '')])];
     csvDatei(`${modul}_${monat}.csv`, z);
+  };
+  /* ---- v508: BERICHTE ALS PDF ----------------------------------------
+     Fuer das Gesundheitsamt. Eine Datei zum Weiterleiten, lesbar ohne die
+     Kasse. Die JSON-Sicherung bleibt daneben bestehen: sie kann man wieder
+     einspielen, ein PDF nicht. Zwei Zwecke, zwei Dateien. */
+  const pdfMelden = (name) => (fehler, pfad) => {
+    if (fehler) { melden(fehler); return; }
+    melden(pfad ? ('Gespeichert: ' + name) : ('Gespeichert: ' + name));
+  };
+  const monatPdf = (abw, erfasst, anzahlTage) => {
+    const jahr = +monat.slice(0, 4), mm = +monat.slice(5, 7);
+    const spalten = [{ t: 'Tag', b: 34 }].concat(
+      cfg.geraete.map(g => ({
+        t: g.name, b: 62,
+        /* Werte ausserhalb des Sollbereichs rot und fett - ein Pruefer soll
+           sie finden, ohne jede Zahl mit der Vorgabe zu vergleichen. */
+        rot: (wert) => wert !== '' && wert !== undefined && belksAusserhalb(wert, g)
+      })),
+      [{ t: 'Manahme / Bemerkung'.replace('Manahme', 'Maßnahme'), b: 150 }, { t: 'Erfasst von', b: 80 }]);
+    const zeilen = [];
+    for (let d = 1; d <= anzahlTage; d++) {
+      const key = `${monat}-${String(d).padStart(2, '0')}`;
+      const t = temp[key] || {};
+      zeilen.push([String(d).padStart(2, '0') + '.']
+        .concat(cfg.geraete.map(g => (t[g.id] === undefined || t[g.id] === '') ? '–' : String(t[g.id])))
+        .concat([t._note || '', t._by || '']));
+    }
+    const imMonat = m => (daten[m] || []).filter(r => (r.datum || '').startsWith(monat));
+    const befund = imMonat('pest').filter(r => !(r.bef || '').startsWith('Kein')).length;
+    const fuss = [
+      'Übersicht: ' + erfasst + ' von ' + anzahlTage + ' Tagen mit Temperaturen erfasst, '
+        + abw + ' Abweichung(en) vom Sollbereich.',
+      'Zapfanlage gereinigt: ' + imMonat('zapf').length + ' · Warenannahmen: ' + imMonat('ware').length
+        + ' · Ölkontrollen: ' + imMonat('oil').length + ' · Schädlingsbefunde: ' + befund,
+      'Sollbereiche: ' + cfg.geraete.map(g => g.name + ' ' + window.belksHaccpBereich(g).min
+        + ' bis ' + window.belksHaccpBereich(g).max + ' °C').join(' · '),
+      '– = an diesem Tag kein Wert erfasst. Erstellt am ' + de(heute()) + ' mit Belks AI POS.'
+    ];
+    const name = 'haccp_monatsbericht_' + monat + '.pdf';
+    const weg = window.belksPdfSpeichern(name, window.belksPdfTabelle({
+      titel: 'HACCP-Monatsbericht – Temperaturkontrolle',
+      untertitel: betrieb + ' · ' + monatName(monat) + ' · erstellt ' + de(heute())
+        + (benutzer ? ' von ' + benutzer : ''),
+      spalten, zeilen, fuss, quer: true
+    }), pdfMelden(name));
+    if (weg === 'plugin') melden('PDF im Ordner „Dokumente“: ' + name);
+    else if (weg === 'browser') melden('PDF heruntergeladen: ' + name);
+  };
+  /* Alles auf einmal: Temperaturen, Reinigung und alle Listen des Monats. */
+  const gesamtPdf = () => {
+    const jahr = +monat.slice(0, 4), mm = +monat.slice(5, 7);
+    const anzahlTage = new Date(jahr, mm, 0).getDate();
+    const spalten = [{ t: 'Datum', b: 60 }, { t: 'Bereich', b: 90 }, { t: 'Eintrag', b: 330 }, { t: 'Von', b: 80 }];
+    const zeilen = [];
+    for (let d = 1; d <= anzahlTage; d++) {
+      const key = `${monat}-${String(d).padStart(2, '0')}`;
+      const t = temp[key] || {};
+      const werte = cfg.geraete.filter(g => t[g.id] !== undefined && t[g.id] !== '')
+        .map(g => g.name + ' ' + t[g.id] + '°C' + (belksAusserhalb(t[g.id], g) ? ' (!)' : ''));
+      if (werte.length) zeilen.push([de(key), 'Temperatur', werte.join(', ') + (t._note ? ' – ' + t._note : ''), t._by || '']);
+      const c = clean[key] || {};
+      const erledigt = REINIGUNG.filter(x => c[x.id]).map(x => x.l);
+      if (erledigt.length) zeilen.push([de(key), 'Reinigung', erledigt.join(', '), c._by || '']);
+    }
+    Object.keys(LISTEN).forEach(m => {
+      const def = LISTEN[m];
+      (daten[m] || []).filter(r => def.ohneDatum || (r.datum || '').startsWith(monat)).forEach(r => {
+        zeilen.push([r.datum ? de(r.datum) : '–', def.titel,
+          def.felder.map(f => f.l + ': ' + (r[f.k] ?? '')).join(', '), r.wer || r.von || '']);
+      });
+    });
+    zeilen.sort((a, b) => String(a[0]).split('.').reverse().join('').localeCompare(String(b[0]).split('.').reverse().join('')));
+    const name = 'haccp_gesamt_' + monat + '.pdf';
+    const weg = window.belksPdfSpeichern(name, window.belksPdfTabelle({
+      titel: 'HACCP-Dokumentation – alle Nachweise',
+      untertitel: betrieb + ' · ' + monatName(monat) + ' · erstellt ' + de(heute())
+        + (benutzer ? ' von ' + benutzer : ''),
+      spalten, zeilen,
+      fuss: [zeilen.length ? (zeilen.length + ' Einträge in diesem Monat.')
+                           : 'In diesem Monat wurde nichts erfasst.',
+             'Erstellt mit Belks AI POS. (!) = Wert außerhalb des Sollbereichs.'],
+      quer: true
+    }), pdfMelden(name));
+    if (weg === 'plugin') melden('PDF im Ordner „Dokumente“: ' + name);
+    else if (weg === 'browser') melden('PDF heruntergeladen: ' + name);
   };
   const sicherung = () => {
     const a = document.createElement('a');
@@ -34892,6 +35176,12 @@ function HACCPModul({
     });
     const vortag = nochLeer ? letzteMessung(tagDatum) : null;
     const jetztUhr = new Date().toTimeString().slice(0, 5);
+    /* v508: Der Knopf war bis zur Erinnerungszeit (Vorgabe 10:00) UNSICHTBAR.
+       Wer um 09:30 die Kontrolle macht, sah ihn nie und musste alles tippen.
+       Die Uhrzeit gehoert zur Erinnerung, nicht zur Bedienung: der Knopf ist
+       jetzt immer da, sobald es einen Vortag mit Werten gibt. Vor der
+       Erinnerungszeit nur ruhiger dargestellt, damit "offen" weiter auffaellt
+       wenn es wirklich spaet wird. */
     const faellig = tagDatum !== heute() || jetztUhr >= (cfg.tempErinnerung || '10:00');
     return /*#__PURE__*/React.createElement(React.Fragment, null, Karte(Object.assign({}, {
       titel: "Temperaturkontrolle",
@@ -34908,14 +35198,16 @@ function HACCPModul({
        automatische Eintragung: der Eintrag traegt einen Namen und ist ein
        Nachweis ueber eine durchgefuehrte Kontrolle. Wer nicht nachgesehen
        hat, soll auch nichts unterschreiben. */
-    vortag && faellig && /*#__PURE__*/React.createElement("div", {
+    vortag && /*#__PURE__*/React.createElement("div", {
       style: {
-        background: T.row, border: '1px solid ' + T.warn, borderLeft: '4px solid ' + T.warn,
+        background: T.row,
+        border: '1px solid ' + (faellig ? T.warn : T.line),
+        borderLeft: '4px solid ' + (faellig ? T.warn : T.line),
         borderRadius: 9, padding: '11px 13px', marginBottom: 12
       }
     },
-      /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 13.5, color: T.warn, marginBottom: 4 } },
-        '\u23f0 Temperaturkontrolle offen'),
+      /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 13.5, color: faellig ? T.warn : T.text, marginBottom: 4 } },
+        faellig ? '\u23f0 Temperaturkontrolle offen' : '\ud83c\udf21\ufe0f Temperaturkontrolle'),
       /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: T.muted, lineHeight: 1.5, marginBottom: 10 } },
         'Vom ', de(vortag), ' liegen Werte vor: ',
         cfg.geraete.map(g => (temp[vortag] || {})[g.id]).filter(v => v !== undefined && v !== '').join(' \u00b7 '),
@@ -35172,10 +35464,29 @@ function HACCPModul({
       });
       return o;
     };
-    const [entwurf, setEntwurf] = useState(leer);
+    /* v508: ABSTURZ BEIM REITERWECHSEL (React #310)
+       Hier standen zwei useState. Liste() wird seit v434 als FUNKTION
+       aufgerufen, nicht als Bauteil - die beiden Zustaende gehoerten damit
+       zu HACCPModul selbst. Auf den Listen-Reitern (Zapfanlage,
+       Wareneingang, Oel, Schaedlinge, Personal) hatte das Modul also zwei
+       Zustaende mehr als auf "Heute", "Temperatur", "Monatsbericht" oder
+       "Einstellungen". React verlangt bei jedem Durchlauf dieselbe Anzahl -
+       beim Wechsel stieg es mit "Rendered more hooks than during the
+       previous render" aus und die Kasse zeigte den Absturz-Bildschirm.
+       Jetzt liegen beide oben im Modul, je Reiter getrennt abgelegt. Das
+       Verhalten bleibt: jede Liste hat ihren eigenen Entwurf, und der geht
+       beim Hin- und Herwechseln nicht mehr verloren. */
+    const entwurf = (modulEntwuerfe[modul] !== undefined) ? modulEntwuerfe[modul] : leer();
+    const setEntwurf = wert => setModulEntwuerfe(p => {
+      const vorher = (p[modul] !== undefined) ? p[modul] : leer();
+      return { ...p, [modul]: (typeof wert === 'function') ? wert(vorher) : wert };
+    });
     /* v416: Wird gerade ein vorhandener Eintrag bearbeitet? Dann ist hier
        seine Kennung - beim Speichern wird ersetzt statt angehaengt. */
-    const [bearbeite, setBearbeite] = useState(null);
+    const bearbeite = modulBearbeite[modul] !== undefined ? modulBearbeite[modul] : null;
+    const setBearbeite = wert => setModulBearbeite(p => ({
+      ...p, [modul]: (typeof wert === 'function') ? wert(p[modul] !== undefined ? p[modul] : null) : wert
+    }));
     const rows = daten[modul].filter(r => def.ohneDatum || (r.datum || '').startsWith(monat)).sort((a, b) => (b.datum || '').localeCompare(a.datum || ''));
     return /*#__PURE__*/React.createElement(React.Fragment, null, Karte(Object.assign({}, {
       titel: def.titel,
@@ -35466,8 +35777,8 @@ function HACCPModul({
         width: '100%',
         marginTop: 12
       },
-      onClick: () => window.print()
-    }, "Monat drucken")] })));
+      onClick: () => monatPdf(abw, erfasst, anzahlTage)
+    }, "📄 Monatsbericht als PDF speichern")] })));
   };
 
   /* ---- Ansicht: Einstellungen ---- */
@@ -35613,13 +35924,27 @@ function HACCPModul({
   }) }))] })), Karte(Object.assign({}, {
     titel: "Daten sichern",
     sub: "Empfehlung: einmal im Monat, zusammen mit dem Z-Bon-Export"
-  }, { children: /*#__PURE__*/React.createElement("button", {
+  }, { children: [/*#__PURE__*/React.createElement("button", {
+    key: 'pdf',
     style: {
       ...st.btn,
+      width: '100%',
+      marginBottom: 8
+    },
+    onClick: gesamtPdf
+  }, "📄 Alle Nachweise als PDF (" + monatName(monat) + ")"),
+  /*#__PURE__*/React.createElement("div", {
+    key: 'hinw',
+    style: { fontSize: 11.5, color: T.muted, lineHeight: 1.5, marginBottom: 12 }
+  }, "Das PDF ist zum Weiterleiten, z. B. ans Gesundheitsamt. Die JSON-Datei ist zum Wiedereinspielen, falls das Gerät ausfällt – sie lässt sich nicht lesen wie ein Bericht. Am besten beides aufheben."),
+  /*#__PURE__*/React.createElement("button", {
+    key: 'json',
+    style: {
+      ...st.btnAlt,
       width: '100%'
     },
     onClick: sicherung
-  }, "Alle HACCP-Daten als JSON sichern") })));
+  }, "Alle HACCP-Daten als JSON sichern")] })));
   const REITER = [['heute', 'Heute'], ['temp', 'Temperatur'], ['zapf', 'Zapfanlage'], ['clean', 'Reinigung'], ['ware', 'Wareneingang'], ['oil', 'Fritteusenöl'], ['staff', 'Personal'], ['pest', 'Schädlinge'], ['report', 'Monatsbericht'], ['set', 'Einstellungen']];
   const inhalt = () => {
     if (reiter === 'heute') return Heute();          /* v434: Aufruf statt Bauteil */
