@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v509</title>
+<title>eatDeSi POS v511</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -8536,6 +8536,41 @@ window.belksTaTitel = function(tid){
   return 'Takeaway' + (n ? (' #' + n) : ' \u00B7 Entwurf');
 };
 
+/* v510: "ENTWURF" GEHOERT NICHT AUF DEN GASTBELEG
+   Auf der Zwischenrechnung stand in der Tisch-Zeile "Takeaway \u00B7 Entwurf".
+   "Entwurf" ist ein INNERER Zustand: die Bestellung ist noch nicht an die
+   Kueche gegangen und hat deshalb noch keine Nummer. Den Gast geht das
+   nichts an, und auf einem Zettel, den er in die Hand bekommt, sieht es
+   nach einem Fehler aus.
+   Es stand an FUENF Stellen: Thermobon, zweiter Bon-Bauer, Vorschau auf
+   dem Bildschirm und zweimal auf dem Bewirtungsbeleg. Genau deshalb hier
+   eine Funktion statt fuenf Reparaturen - sonst steht es beim naechsten
+   neuen Belegtyp wieder drauf.
+   NICHT entfernt wird es auf dem Kuechen- und Barzettel: steht es dort,
+   ist etwas schiefgelaufen, und das Personal soll es sehen. */
+/* v511: DIE MWST-ZEILE AUF DEM BELEG
+   Dort stand "MwSt. 7% (Speisen)" und "MwSt. 19% (Getraenke)". Der Zusatz
+   war nie ganz richtig: In der 19 %-Zeile steckt auch die Liefergebuehr,
+   deshalb gab es seit v331 den Sonderfall "(Getraenke/Lieferung)" - eine
+   zweite Beschriftung fuer dieselbe Zeile. Ohne den Zusatz stimmt die
+   Zeile in jedem Fall, ist kuerzer und der Sonderfall faellt weg.
+   Eine Funktion, damit die Beschriftung nicht wieder an acht Stellen
+   auseinanderlaeuft. */
+window.belksMwstText = function(satz){
+  return 'MwSt. ' + satz + '%';
+};
+
+window.belksBonLabel = function(label){
+  var s = String(label === undefined || label === null ? '' : label);
+  s = s.replace(/\s*[\u00B7\u2013\u2014-]\s*Entwurf\s*$/, '');   // "\u2026 \u00B7 Entwurf"
+  s = s.replace(/(^|\s)Entwurf\s*$/, '');                         // "\u2026 Entwurf" und "Entwurf"
+  s = s.replace(/[\s\u00B7\u2013\u2014-]+$/, '').trim();          // Trennzeichen am Ende
+  /* Bestand das Etikett NUR aus "Entwurf" (belksTaKurz ohne Nummer), darf
+     die Zeile nicht leer bleiben - dann lieber die Art des Vorgangs. */
+  if (!s) s = 'Takeaway';
+  return s;
+};
+
 window.belksTagStr = function(ms){
   var d = new Date(ms || (window.belksJetzt ? window.belksJetzt() : Date.now()));
   return d.getFullYear() + '-' +
@@ -9983,7 +10018,7 @@ function printBon(title, lines, label, bonNr, now, deliveryInfo, printerCfg, tse
          nichts davon ein reiner Entwurf. Drei Zustaende, drei Woerter. */
       : `<div class="row info-row"><span>Beleg:</span><span>Zwischenrechnung</span></div>`}
     <div class="row info-row"><span>Datum:</span><span>${fmtD(now)} ${fmtT(now)}</span></div>
-    <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
+    <div class="row info-row"><span>Tisch:</span><span>${window.belksBonLabel(label)}</span></div>
     ${deliveryBlock}
     <div class="line"></div>
     <div class="row eur-note"><span>Artikel</span><span>EUR</span></div>${lines}`}
@@ -10115,8 +10150,8 @@ function printOnlineBons(order, prepMin, printerCfg) {
     cLines += '<div class="line"></div>';
     var t7 = calcTax7(items), t19 = calcTax19(items);
     var _wsMwst = true; try { var _wc=getBonConfig(); if(_wc && _wc.webshop) _wsMwst = _wc.webshop.mwst !== false; } catch(e){}
-    if(_wsMwst && t7>0)  cLines += '<div class="row"><span>MwSt. 7% (Speisen)</span><span>'+fmt(t7)+'</span></div>';
-    if(_wsMwst && t19>0) cLines += '<div class="row"><span>MwSt. 19% (Getränke)</span><span>'+fmt(t19)+'</span></div>';
+    if(_wsMwst && t7>0)  cLines += '<div class="row"><span>'+window.belksMwstText(7)+'</span><span>'+fmt(t7)+'</span></div>';
+    if(_wsMwst && t19>0) cLines += '<div class="row"><span>'+window.belksMwstText(19)+'</span><span>'+fmt(t19)+'</span></div>';
     cLines += '<div class="line"></div><div class="row bold"><span>GESAMT</span><span>'+fmt(order.total!=null?order.total:sub)+'</span></div>';
     cLines += '<div class="line"></div><div class="center bold">⏱️ Fertig in ca. '+prepMin+' Min</div>';
     cLines += '<div class="center">'+(deliv?'🛵 Lieferung':'🥡 Abholung')+' · Zahlung: '+(order.payment||'bei '+(deliv?'Lieferung':'Abholung'))+'</div>';
@@ -10444,7 +10479,7 @@ function BonModal({
          erfundenen Nummer steht hier, was der Zettel wirklich ist. */
       : `<div class="row info-row"><span>Beleg:</span><span>Zwischenrechnung</span></div>`}
     <div class="row info-row"><span>Datum:</span><span>${fmtD(now)} ${fmtT(now)}</span></div>
-    <div class="row info-row"><span>Tisch:</span><span>${label}</span></div>
+    <div class="row info-row"><span>Tisch:</span><span>${window.belksBonLabel(label)}</span></div>
     ${deliveryBlock}
     <div class="line"></div>
     <div class="row eur-note"><span>Artikel</span><span>EUR</span></div>${lines}
@@ -10455,7 +10490,13 @@ function BonModal({
     <div class="center" style="font-size:8px;color:#aaa">${printerSettings?.firmaName||"Belks Direktvertrieb GmbH"}${printerSettings?.firmaStNr?" · StNr: "+printerSettings.firmaStNr:""}</div>
   </body></html>`;
   // Schlanker Bon NUR fuer Kueche/Bar: nur Tisch/Kunde + Speisen/Getraenke, grosse Schrift
-  const kvBonHtml = (title, lines) => {
+  /* v511: istGast = der Zettel geht an den Gast (GÄSTEBON). Dann faellt
+     "· Entwurf" aus der Kopfzeile. Kueche und Bar behalten den Hinweis:
+     steht er dort, ist etwas schiefgelaufen, und das Personal soll es
+     sehen. In v510 hatte ich kvBonHtml fuer reinen Kuechen-Code gehalten -
+     der Gaestebon benutzt sie aber auch, deshalb stand "Entwurf" dort
+     weiter auf dem gedruckten Zettel. */
+  const kvBonHtml = (title, lines, istGast) => {
     var _kbW = (printerSettings?.width || 384); try { var _kc=getBonConfig(); if(_kc && _kc.kueche && _kc.kueche.width===58) _kbW=304; } catch(e){}
     const kundeInfo = customerName ? `<div class="center bold" style="font-size:14pt;margin:2px 0">${window.belksEscapeHtml(customerName)}</div>` : "";
     /* ═══ v386: KUNDENDATEN AUF DEN GAESTEBON ═══
@@ -10491,7 +10532,7 @@ function BonModal({
     .line{border-top:2px solid #000;margin:6px 0}.center{text-align:center}
   </style></head><body>
     <div class="center bold" style="font-size:14pt;margin:4px 0">${title}</div>
-    <div class="center bold" style="font-size:14pt;margin:4px 0">${label}</div>
+    <div class="center bold" style="font-size:14pt;margin:4px 0">${istGast ? window.belksBonLabel(label) : label}</div>
     ${kundeInfo}
     ${kundeBlock}
     ${notizBlock}
@@ -10507,8 +10548,8 @@ function BonModal({
     `).join("") + `
       <div class="line"></div>
       <div class="row bold"><span>Netto</span><span>${fmt(netto)}</span></div>
-      ${(()=>{var _gm=true;try{var _gc=getBonConfig();if(_gc&&_gc.kunde)_gm=_gc.kunde.mwst!==false;}catch(e){}return _gm;})() ? `${tax7 > 0 ? `<div class="row bold"><span>MwSt. 7% (Speisen)</span><span>${fmt(tax7)}</span></div>` : ""}
-      ${tax19 > 0 ? `<div class="row bold"><span>MwSt. 19% (Getränke)</span><span>${fmt(tax19)}</span></div>` : ""}` : ""}
+      ${(()=>{var _gm=true;try{var _gc=getBonConfig();if(_gc&&_gc.kunde)_gm=_gc.kunde.mwst!==false;}catch(e){}return _gm;})() ? `${tax7 > 0 ? `<div class="row bold"><span>${window.belksMwstText(7)}</span><span>${fmt(tax7)}</span></div>` : ""}
+      ${tax19 > 0 ? `<div class="row bold"><span>${window.belksMwstText(19)}</span><span>${fmt(tax19)}</span></div>` : ""}` : ""}
       ${fee > 0 ? `<div class="row bold"><span>Liefergebühr</span><span>${fmt(fee)}</span></div>` : ""}
       <div class="line"></div>
       <div class="row bold" style="font-size:14pt"><span>GESAMT</span><span>${fmt(total)}</span></div>
@@ -10517,7 +10558,7 @@ function BonModal({
          und traegt keine Belegnummer - dass damit nicht bezahlt wurde, ist
          daran schon erkennbar. Die Zeile hat nur Platz gekostet und Gaeste
          verunsichert. */
-    doPrint(kvBonHtml("🧾 GÄSTEBON", lines), 0x00);
+    doPrint(kvBonHtml("🧾 GÄSTEBON", lines, true), 0x00);
     setPrinted(p => ({
       ...p,
       gast: true
@@ -10658,7 +10699,7 @@ function BonModal({
       display: "flex",
       justifyContent: "space-between"
     }
-  }, /*#__PURE__*/React.createElement("span", null, "Tisch:"), /*#__PURE__*/React.createElement("span", null, label)), hasDelivery && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, "Tisch:"), /*#__PURE__*/React.createElement("span", null, window.belksBonLabel(label))), hasDelivery && /*#__PURE__*/React.createElement("div", {
     style: { marginTop: 4, padding: "6px 8px", background: "#e8f5e9", borderRadius: 6, fontSize: 11 }
   }, /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, color: C.green, marginBottom: 2 } }, "🚴 Lieferadresse"),
     customerName && /*#__PURE__*/React.createElement("div", null, customerName),
@@ -10728,12 +10769,12 @@ function BonModal({
       display: "flex",
       justifyContent: "space-between"
     }
-  }, /*#__PURE__*/React.createElement("span", null, "MwSt. 7% (Speisen)"), /*#__PURE__*/React.createElement("span", null, fmt(tax7))), tax19 > 0 && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, window.belksMwstText(7)), /*#__PURE__*/React.createElement("span", null, fmt(tax7))), tax19 > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between"
     }
-  }, /*#__PURE__*/React.createElement("span", null, "MwSt. 19% (Getr\xE4nke)"), /*#__PURE__*/React.createElement("span", null, fmt(tax19))),
+  }, /*#__PURE__*/React.createElement("span", null, window.belksMwstText(19)), /*#__PURE__*/React.createElement("span", null, fmt(tax19))),
   fee > 0 && /*#__PURE__*/React.createElement("div", {
     style: { display:"flex", justifyContent:"space-between", fontSize:13, color:"#1565c0", padding:"3px 0", borderTop:"1px solid #eee", marginTop:3 }
   }, /*#__PURE__*/React.createElement("span", null, "🛵 Liefergebühr"), /*#__PURE__*/React.createElement("span", null, fmt(fee))),
@@ -17221,8 +17262,8 @@ function DayEndView({
       zeile("Bestellungen", String(filtered.length));
       zeile("Umsatz Brutto", fmt(rev));
       zeile("Umsatz Netto", fmt(netto));
-      if (tax7 > 0)  zeile("MwSt. 7%", fmt(tax7));
-      if (tax19 > 0) zeile("MwSt. 19%", fmt(tax19));
+      if (tax7 > 0)  zeile(window.belksMwstText(7), fmt(tax7));
+      if (tax19 > 0) zeile(window.belksMwstText(19), fmt(tax19));
       L += '<div class="line"></div>';
       zeile("Bar", fmt(bar));
       zeile("Karte", fmt(karte));
@@ -17529,10 +17570,10 @@ ${filtered.map((o, i) => {
     l: "Umsatz Netto",
     v: fmt(netto)
   }, {
-    l: "MwSt. 7%",
+    l: window.belksMwstText(7),
     v: fmt(tax7)
   }, {
-    l: "MwSt. 19%",
+    l: window.belksMwstText(19),
     v: fmt(tax19)
   }, {
     l: "💵 Bar",
@@ -18292,12 +18333,12 @@ function OrderListView({
         display: "flex",
         justifyContent: "space-between"
       }
-    }, /*#__PURE__*/React.createElement("span", null, "MwSt. 7%"), /*#__PURE__*/React.createElement("span", null, fmt(t7))), t19 > 0 && /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("span", null, window.belksMwstText(7)), /*#__PURE__*/React.createElement("span", null, fmt(t7))), t19 > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         justifyContent: "space-between"
       }
-    }, /*#__PURE__*/React.createElement("span", null, "MwSt. 19%"), /*#__PURE__*/React.createElement("span", null, fmt(t19))), o.trinkgeld > 0 && /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("span", null, window.belksMwstText(19)), /*#__PURE__*/React.createElement("span", null, fmt(t19))), o.trinkgeld > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         justifyContent: "space-between",
@@ -18394,8 +18435,8 @@ function OrderListView({
               t19 = Math.round((t19 + _nfs.t19)*100)/100;
             }
             bonLines += "<div class=\"line\"></div>";
-            if(t7>0)  bonLines += "<div class=\"row\"><span>MwSt. 7% (Speisen)</span><span>"+fmt(t7)+"</span></div>";
-            if(t19>0) bonLines += "<div class=\"row\"><span>MwSt. 19% "+(_nfee>0?"(Getränke/Lieferung)":"(Getränke)")+"</span><span>"+fmt(t19)+"</span></div>";   // v331
+            if(t7>0)  bonLines += "<div class=\"row\"><span>"+window.belksMwstText(7)+"</span><span>"+fmt(t7)+"</span></div>";
+            if(t19>0) bonLines += "<div class=\"row\"><span>"+window.belksMwstText(19)+"</span><span>"+fmt(t19)+"</span></div>";   // v331
             bonLines += "<div class=\"line\"></div>";
             bonLines += "<div class=\"row bold\" style=\"font-size:16px\"><span>GESAMT</span><span>"+fmt(o.total||0)+"</span></div>";
             if(o.trinkgeld>0) bonLines += "<div class=\"row\"><span>Trinkgeld</span><span>"+fmt(o.trinkgeld)+"</span></div>";
@@ -24691,8 +24732,8 @@ function _bewHtml(items, total, label, fmt80, F) {
     return '<div class="row"><span>' + name + '</span><span>' + amt + '</span></div>' + note;
   }).join('');
 
-  var t7r80  = tax7  > 0 ? '<div class="row"><span>MwSt. 7% (Speisen)</span><span>'   + tax7.toFixed(2)  + ' EUR</span></div>' : '';
-  var t19r80 = tax19 > 0 ? '<div class="row"><span>MwSt. 19% (Getr\u00e4nke)</span><span>' + tax19.toFixed(2) + ' EUR</span></div>' : '';
+  var t7r80  = tax7  > 0 ? '<div class="row"><span>' + window.belksMwstText(7) + '</span><span>'   + tax7.toFixed(2)  + ' EUR</span></div>' : '';
+  var t19r80 = tax19 > 0 ? '<div class="row"><span>' + window.belksMwstText(19) + '</span><span>' + tax19.toFixed(2) + ' EUR</span></div>' : '';
   var t7r4   = tax7  > 0 ? '<tr><td>zzgl. 7% MwSt.</td><td style="text-align:right">'  + tax7.toFixed(2)  + ' \u20ac</td></tr>' : '';
   var t19r4  = tax19 > 0 ? '<tr><td>zzgl. 19% MwSt.</td><td style="text-align:right">' + tax19.toFixed(2) + ' \u20ac</td></tr>' : '';
 
@@ -24822,7 +24863,7 @@ function _bewHtml(items, total, label, fmt80, F) {
       + (fust ? '<div class="center">USt: ' + fust + '</div>' : '')
       + '<div class="line"></div>'
       + '<div class="row"><span>Datum:</span><span>' + d + ' ' + t + '</span></div>'
-      + '<div class="row"><span>Tisch:</span><span>' + label + '</span></div>'
+      + '<div class="row"><span>Tisch:</span><span>' + window.belksBonLabel(label) + '</span></div>'
       + '<div class="line"></div>'
       + rows80
       + '<div class="line"></div>'
@@ -24851,7 +24892,7 @@ function _bewHtml(items, total, label, fmt80, F) {
       + '<div style="border-top:2px solid #333;margin:12px 0"></div>'
       + '<div style="display:flex;justify-content:space-between;margin-bottom:12px">'
       +   '<div><b style="font-size:14px">'+fn+(fz?(' \u2014 '+fz.replace(/&/g,'&amp;')):'')+'</b><br>'+[fstr,fpo].filter(Boolean).join(' \u00b7 ')+(ftel?('<br>Tel: '+ftel):'')+(fweb?(' \u00b7 '+fweb):'')+'</div>'
-      +   '<div style="text-align:right"><b>' + d + ' ' + t + '</b><br>' + label + '</div>'
+      +   '<div style="text-align:right"><b>' + d + ' ' + t + '</b><br>' + window.belksBonLabel(label) + '</div>'
       + '</div>'
       + '<table><tr><th>Bezeichnung</th><th style="text-align:right">Betrag</th></tr>'
       + rows
@@ -26322,7 +26363,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v509"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v511"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -27907,10 +27948,11 @@ function App() {
     }).join("");
     if(_fee>0) L += `<div class="row"><span>Liefergebühr</span><span>${fmt(_fee)}</span></div>`;
     L += `<div class="line"></div>`;
-    if(t7>0)  L += `<div class="row"><span>MwSt. 7% (Speisen)</span><span>${fmt(t7)}</span></div>`;
-    /* v331: Die 19 %-Zeile enthaelt jetzt auch die Liefergebuehr - die
-       Beschriftung "(Getraenke)" waere dann irrefuehrend. */
-    if(t19>0) L += `<div class="row"><span>MwSt. 19% ${_fee>0?"(Getränke/Lieferung)":"(Getränke)"}</span><span>${fmt(t19)}</span></div>`;
+    if(t7>0)  L += `<div class="row"><span>${window.belksMwstText(7)}</span><span>${fmt(t7)}</span></div>`;
+    /* v331: Die 19 %-Zeile enthaelt auch die Steuer auf die Liefergebuehr.
+       v511: Deshalb gab es hier zwei Beschriftungen fuer dieselbe Zeile.
+       Ohne Zusatz stimmt sie in jedem Fall - der Sonderfall ist entfallen. */
+    if(t19>0) L += `<div class="row"><span>${window.belksMwstText(19)}</span><span>${fmt(t19)}</span></div>`;
     L += `<div class="line"></div>`;
     L += `<div class="row bold" style="font-size:16px"><span>GESAMT</span><span>${fmt(btotal)}</span></div>`;
     if(btrinkgeld>0) L += `<div class="row"><span>Trinkgeld</span><span>${fmt(btrinkgeld)}</span></div>`;
