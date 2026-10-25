@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v512</title>
+<title>eatDeSi POS v513</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -25371,7 +25371,11 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
   const [editTime, setEditTime] = React.useState("");
   const [showAddEntry, setShowAddEntry] = React.useState(false);
   const [confirmDelId, setConfirmDelId] = React.useState(null);
-  const [addForm, setAddForm] = React.useState({ userName:"", type:"ein", time:"", pause:0 });
+  /* v513: Eine vergessene Schicht traegt man als Schicht nach, nicht als
+     zwei einzelne Stempel. Das ist der haeufigere Fall, also die Vorgabe. */
+  const heuteISO = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); };
+  const [addModus, setAddModus] = React.useState("schicht");
+  const [addForm, setAddForm] = React.useState({ userName:"", type:"ein", time:"", pause:0, datum:heuteISO(), von:"", bis:"" });
   const [newMa, setNewMa] = React.useState({ name:"", pin:"", rolle:"Kellner" });
 
   const activeUser = selUser || (isAdmin ? "" : loggedInUser?.name);
@@ -25454,6 +25458,32 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
     monatsTotal[z.userName].push(z);
   });
 
+  /* ═══ v513: VERGESSENES AUSSTEMPELN FIEL NIRGENDS AUF ═══
+     calcAZ laesst ein "ein" ohne zugehoeriges "aus" einfach weg. Die
+     Stunden fehlen dann stillschweigend in der Monatssumme - und damit in
+     der Lohnabrechnung. Gemerkt hat das bisher niemand, weil die Zeile
+     im Bildschirm ganz normal aussah.
+     Der heutige Tag bleibt aussen vor: da laeuft die Schicht vielleicht
+     noch. */
+  const offeneStempel = (() => {
+    const proTag = {};
+    filtered.forEach(z => {
+      const d = new Date(z.time).toLocaleDateString("de-DE");
+      const k = z.userName + "|" + d;
+      (proTag[k] = proTag[k] || []).push(z);
+    });
+    const heuteStr = new Date().toLocaleDateString("de-DE");
+    const offen = [];
+    Object.keys(proTag).forEach(k => {
+      const teile = k.split("|");
+      if (teile[1] === heuteStr) return;
+      const s = proTag[k].slice().sort((a, b) => new Date(a.time) - new Date(b.time));
+      if (s.length && s[s.length - 1].type === "ein") offen.push({ user: teile[0], datum: teile[1] });
+    });
+    return offen.sort((a, b) =>
+      new Date(a.datum.split(".").reverse().join("-")) - new Date(b.datum.split(".").reverse().join("-")));
+  })();
+
   const saveEdit = (id) => {
     setZeiterfassung(p => p.map(z => z.id===id ? {...z, time:new Date(editTime).toISOString(), editedBy:loggedInUser?.name} : z));
     setEditId(null);
@@ -25496,31 +25526,32 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
     return d;
   };
 
+  /* ═══ v513: DER MONATSBERICHT BRAUCHTE INTERNET - UND SAGTE NICHTS ═══
+     Hier stand "const { jsPDF } = window.jspdf". jsPDF kommt von einem
+     fremden Server im Netz. Im APK auf dem Tablet, hinter einer Firewall
+     oder bei schlechter Verbindung ist window.jspdf schlicht nicht da -
+     und diese eine Zeile warf dann sofort einen Fehler. Der Knopf tat
+     nichts, ohne jede Meldung. Genau derselbe Fehler, den der
+     HACCP-Monatsdruck hatte.
+     Jetzt baut dieselbe Maschine das PDF, die schon den HACCP-Bericht
+     schreibt: im Geraet, ohne Netz, auf Android direkt in den Ordner
+     "Dokumente".
+     Zusaetzlich steht in jeder Zeile, WIE sie entstanden ist. Ein
+     Arbeitszeitnachweis, dem man nicht ansieht, was nachtraeglich
+     eingetragen oder geaendert wurde, taugt bei einer Pruefung nichts -
+     und fuer den Mitarbeiter ist es ebenso wichtig. */
+  const zz = iso => { try { return new Date(iso).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}); } catch(e){ return ""; } };
+  const herkunft = z => z.editedBy ? ("geändert · " + z.editedBy)
+                     : z.addedBy  ? ("nachgetragen · " + z.addedBy)
+                     : "gestempelt";
   const printMonat = () => {
     const [yr, mo] = filterMonth.split("-");
     const moName = new Date(yr, mo-1, 1).toLocaleString("de-DE",{month:"long",year:"numeric"});
     const users2print = filterUser==="alle" ? [...new Set(filtered.map(z=>z.userName))] : [filterUser];
-
-    // jsPDF A4
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
-    const W = 210, margin = 15;
-    let y = 20;
-
-    // Header
-    doc.setFont("helvetica","bold");
-    doc.setFontSize(16);
-    doc.setTextColor(27, 94, 32);
-    doc.text("Arbeitszeitbericht - " + moName, margin, y);
-    y += 7;
-
-    doc.setFont("helvetica","normal");
-    doc.setFontSize(9);
-    doc.setTextColor(120,120,120);
-    doc.text((printerSettings?.firmaName||"eatDeSi") + "  |  Erstellt: " + new Date().toLocaleString("de-DE"), margin, y);
-    y += 10;
-
-    users2print.forEach(uName => {
+    const spalten = [{ t:"Datum", b:70 }, { t:"Von", b:55 }, { t:"Bis", b:55 },
+                     { t:"Pause", b:55 }, { t:"Arbeitszeit", b:80 }, { t:"Erfassung", b:170 }];
+    let offenGesamt = 0;
+    const abschnitte = users2print.map(uName => {
       const uEntries = filtered.filter(z=>z.userName===uName);
       const uGrouped = {};
       uEntries.forEach(z => {
@@ -25528,72 +25559,74 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
         if(!uGrouped[d]) uGrouped[d]=[];
         uGrouped[d].push(z);
       });
-
-      // User header
-      if (y > 260) { doc.addPage(); y = 20; }
-      doc.setFont("helvetica","bold");
-      doc.setFontSize(11);
-      doc.setTextColor(27,94,32);
-      doc.text("Mitarbeiter: " + uName, margin, y);
-      y += 6;
-
-      // Table header
-      const cols = [30, 35, 35, 25, 35];
-      const headers = ["Datum","Eingestempelt","Ausgestempelt","Pause","Arbeitszeit"];
-      doc.setFillColor(27,94,32);
-      doc.rect(margin, y, W-2*margin, 7, "F");
-      doc.setTextColor(255,255,255);
-      doc.setFontSize(9);
-      doc.setFont("helvetica","bold");
-      let x = margin + 2;
-      headers.forEach((h,i) => { doc.text(h, x, y+5); x += cols[i]; });
-      y += 7;
-
-      // Rows
-      let rowColor = false;
-      Object.keys(uGrouped).sort((a,b)=>new Date(a.split(".").reverse().join("-"))-new Date(b.split(".").reverse().join("-"))).forEach(date => {
-        const eins = uGrouped[date].filter(z=>z.type==="ein");
-        const aus  = uGrouped[date].filter(z=>z.type==="aus");
-        const maxR = Math.max(eins.length, aus.length, 1);
-        for(let i=0;i<maxR;i++){
-          if (y > 270) { doc.addPage(); y = 20; }
-          doc.setFillColor(rowColor?245:255, rowColor?245:255, rowColor?245:255);
-          doc.rect(margin, y, W-2*margin, 6, "F");
-          doc.setTextColor(50,50,50);
-          doc.setFont("helvetica","normal");
-          doc.setFontSize(9);
-          x = margin + 2;
-          const einTime = eins[i] ? roundTime(eins[i].time, "ein").toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}) : "";
-          const ausTime = aus[i]  ? roundTime(aus[i].time, "aus").toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}) : "";
-          const pauseStr = aus[i]&&aus[i].pause ? aus[i].pause+" min" : "";
-          const azStr = i===0 ? calcAZ(uGrouped[date]) : "";
-          [i===0?date:"", einTime, ausTime, pauseStr, azStr].forEach((val,ci) => {
-            doc.text(String(val), x, y+4);
-            x += cols[ci];
-          });
-          y += 6;
-          rowColor = !rowColor;
-        }
-      });
-
-      // Gesamt row
-      doc.setFillColor(220,237,200);
-      doc.rect(margin, y, W-2*margin, 7, "F");
-      doc.setFont("helvetica","bold");
-      doc.setFontSize(9);
-      doc.setTextColor(27,94,32);
-      doc.text("Gesamt " + uName, margin+2, y+5);
-      doc.text(calcAZ(uEntries)||"—", margin+2+cols[0]+cols[1]+cols[2]+cols[3], y+5);
-      y += 12;
+      const zeilen = [];
+      Object.keys(uGrouped)
+        .sort((a,b)=>new Date(a.split(".").reverse().join("-"))-new Date(b.split(".").reverse().join("-")))
+        .forEach(date => {
+          const tagSort = uGrouped[date].slice().sort((a,b)=>new Date(a.time)-new Date(b.time));
+          const eins = tagSort.filter(z=>z.type==="ein");
+          const aus  = tagSort.filter(z=>z.type==="aus");
+          const maxR = Math.max(eins.length, aus.length, 1);
+          for (let i=0;i<maxR;i++){
+            const e = eins[i], a = aus[i];
+            /* Ein "ein" ohne "aus" heisst: jemand hat vergessen
+               auszustempeln. Das muss im Bericht stehen und darf nicht
+               stillschweigend als Null-Stunden durchgehen. */
+            if (e && !a) offenGesamt++;
+            const qu = [e, a].filter(Boolean).map(herkunft);
+            let quelle = qu.filter((x,ix)=>qu.indexOf(x)===ix).join(" / ") || "gestempelt";
+            /* Der Hinweis gehoert in die breite Spalte. In der schmalen
+               "Bis"-Spalte wuerde ihn das PDF auf "nicht aus…" kuerzen -
+               und damit genau die Aussage verschlucken, auf die es
+               ankommt. */
+            if (e && !a) quelle = "nicht ausgestempelt" + (quelle === "gestempelt" ? "" : (" · " + quelle));
+            zeilen.push([
+              i===0 ? date : "",
+              e ? zz(e.time) : "—",
+              a ? zz(a.time) : (e ? "offen" : "—"),
+              (a && a.pause) ? (a.pause + " min") : "",
+              i===0 ? (calcAZ(uGrouped[date]) || "—") : "",
+              quelle
+            ]);
+          }
+        });
+      return {
+        titel: "Mitarbeiter: " + uName,
+        sub: (calcAZ(uEntries) ? ("Monatssumme: " + calcAZ(uEntries)) : "Im Monat keine abgeschlossene Schicht"),
+        spalten: spalten,
+        zeilen: zeilen,
+        leerText: "Für " + uName + " ist in diesem Monat nichts erfasst."
+      };
     });
-
-    var pdfUri = doc.output("datauristring");
+    const fuss = [
+      "Arbeitszeitnachweis nach § 17 MiLoG (Beginn, Ende und Dauer der täglichen Arbeitszeit).",
+      /* v513: Hier stand "Zeiten werden auf 15 Minuten gerundet". Der alte
+         Bericht rundete die ANGEZEIGTEN Zeiten (Beginn auf, Ende ab), die
+         Summe rechnete er aber aus den echten Stempeln. Spalten und
+         Monatssumme passten dadurch nicht zusammen, und gerundet wurde
+         stets zu Lasten des Mitarbeiters. Jetzt stehen die tatsaechlichen
+         Zeiten da - das ist es auch, was § 17 MiLoG verlangt. */
+      "Angegeben sind die tatsächlich gestempelten Zeiten.",
+      offenGesamt > 0
+        ? (offenGesamt + " Schicht(en) ohne Ausstempeln — bitte vor der Lohnabrechnung nachtragen.")
+        : "Alle Schichten sind vollständig gestempelt.",
+      "Erstellt mit Belks AI POS."
+    ];
+    const name = "arbeitszeit_" + filterMonth + (filterUser!=="alle" ? ("_" + String(filterUser).replace(/[^A-Za-z0-9_-]/g,"_")) : "") + ".pdf";
+    const weg = window.belksPdfSpeichern(name, window.belksPdfTabelle({
+      titel: "Arbeitszeitbericht – " + moName,
+      untertitel: (printerSettings?.firmaName || "eatDeSi")
+        + (filterUser!=="alle" ? (" · " + filterUser) : " · alle Mitarbeiter")
+        + " · erstellt " + new Date().toLocaleDateString("de-DE")
+        + (loggedInUser?.name ? (" von " + loggedInUser.name) : ""),
+      abschnitte: abschnitte, fuss: fuss, quer: true
+    }), function(fehler){
+      if (fehler) { try { window.belksHinweis(fehler, "#c62828"); } catch(e) { alert(fehler); } }
+    });
     try {
-      var a = document.createElement("a");
-      a.href = pdfUri; a.download = "Arbeitszeitbericht_" + filterMonth + ".pdf"; a.click();
-    } catch(e) {
-      try { window.location.href = pdfUri; } catch(e2) { alert("PDF fertig."); }
-    }
+      if (weg === "plugin") window.belksHinweis("PDF im Ordner „Dokumente“: " + name, "#2e7d32");
+      else if (weg === "browser") window.belksHinweis("PDF heruntergeladen: " + name, "#2e7d32");
+    } catch(e) {}
   };
 
   const btnStyle = (active) => ({
@@ -25749,28 +25782,97 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
         }, "⬇️ PDF herunterladen")
       ),
 
-      // Manuell hinzuf_gen
+      /* ═══ v513: EINE VERGESSENE SCHICHT IN EINEM RUTSCH ═══
+         Bisher musste man zweimal durch dieses Formular: einmal fuer das
+         Einstempeln, einmal fuer das Ausstempeln, jedes Mal mit vollem
+         Datum. Der haeufigste Fall ist aber genau einer: jemand hat
+         vergessen zu stempeln, und der Chef weiss "Montag, 17 bis 22
+         Uhr". Das ist jetzt ein Formular mit vier Feldern.
+         Der einzelne Stempel bleibt daneben erhalten - fuer den Fall,
+         dass nur das Ausstempeln fehlt. */
       showAddEntry && React.createElement("div", { style:{background:"#fff",borderRadius:12,padding:14,marginBottom:12,border:"2px solid #a5d6a7"} },
+        React.createElement("div", { style:{display:"flex",gap:6,marginBottom:10} },
+          React.createElement("button", { onClick:()=>setAddModus("schicht"),
+            style:{flex:1,padding:"7px 0",borderRadius:8,border:"2px solid "+(addModus==="schicht"?C.green:"#ddd"),background:addModus==="schicht"?"#e8f5e9":"#fff",color:addModus==="schicht"?C.green:"#777",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12} }, "🕐 Ganze Schicht"),
+          React.createElement("button", { onClick:()=>setAddModus("einzeln"),
+            style:{flex:1,padding:"7px 0",borderRadius:8,border:"2px solid "+(addModus==="einzeln"?C.green:"#ddd"),background:addModus==="einzeln"?"#e8f5e9":"#fff",color:addModus==="einzeln"?C.green:"#777",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12} }, "▶ Einzelner Stempel")
+        ),
         React.createElement("select", { value:addForm.userName, onChange:e=>setAddForm(f=>({...f,userName:e.target.value})), style:{width:"100%",padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",marginBottom:8,fontFamily:"inherit",fontSize:13} },
           React.createElement("option",{value:""},"Mitarbeiter wählen..."),
           (users||[]).filter(u=>!u.deleted).map(u=>React.createElement("option",{key:u.name,value:u.name},u.name))
         ),
-        React.createElement("div", { style:{display:"flex",gap:8,marginBottom:8} },
-          React.createElement("select", { value:addForm.type, onChange:e=>setAddForm(f=>({...f,type:e.target.value})), style:{flex:1,padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",fontFamily:"inherit",fontSize:12} },
-            React.createElement("option",{value:"ein"},"▶ Eingestempelt"),
-            React.createElement("option",{value:"aus"},"⏹ Ausgestempelt")
+
+        // -- ganze Schicht: Datum, von, bis, Pause --
+        addModus==="schicht" && React.createElement(React.Fragment, null,
+          React.createElement("input", { type:"date", value:addForm.datum, onChange:e=>setAddForm(f=>({...f,datum:e.target.value})), style:{width:"100%",padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",marginBottom:8,fontFamily:"inherit",fontSize:13} }),
+          React.createElement("div", { style:{display:"flex",gap:8,marginBottom:8,alignItems:"center"} },
+            React.createElement("span",{style:{fontSize:12,color:"#888",fontWeight:700,width:28}},"von"),
+            React.createElement("input", { type:"time", value:addForm.von, onChange:e=>setAddForm(f=>({...f,von:e.target.value})), style:{flex:1,padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",fontFamily:"inherit",fontSize:13} }),
+            React.createElement("span",{style:{fontSize:12,color:"#888",fontWeight:700,width:22}},"bis"),
+            React.createElement("input", { type:"time", value:addForm.bis, onChange:e=>setAddForm(f=>({...f,bis:e.target.value})), style:{flex:1,padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",fontFamily:"inherit",fontSize:13} })
           ),
-          React.createElement("input", { type:"datetime-local", value:addForm.time, onChange:e=>setAddForm(f=>({...f,time:e.target.value})), style:{flex:2,padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",fontFamily:"inherit",fontSize:12} })
+          React.createElement("input", { type:"number", value:addForm.pause||"", onChange:e=>setAddForm(f=>({...f,pause:parseInt(e.target.value)||0})), placeholder:"Pause in Minuten (optional)", style:{width:"100%",padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",fontFamily:"inherit",fontSize:12,marginBottom:8} }),
+          /* Ueber Mitternacht hinaus ist in der Gastronomie der Normalfall,
+             nicht die Ausnahme: 18:00 bis 01:30. Die Endzeit landet dann
+             auf dem Folgetag - sonst kaeme eine negative Arbeitszeit
+             heraus und der Monat waere falsch. */
+          addForm.von && addForm.bis && addForm.bis <= addForm.von &&
+            React.createElement("div", { style:{fontSize:11.5,color:"#e65100",background:"#fff3e0",borderRadius:8,padding:"7px 9px",marginBottom:8,lineHeight:1.4} },
+              "🌙 Ende liegt vor dem Beginn — wird als Schicht über Mitternacht gerechnet (Ende am Folgetag).")
         ),
-        addForm.type==="aus" && React.createElement("input", { type:"number", value:addForm.pause||"", onChange:e=>setAddForm(f=>({...f,pause:parseInt(e.target.value)||0})), placeholder:"Pause in Minuten", style:{width:"100%",padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",fontFamily:"inherit",fontSize:12,marginBottom:8} }),
+
+        // -- einzelner Stempel --
+        addModus==="einzeln" && React.createElement(React.Fragment, null,
+          React.createElement("div", { style:{display:"flex",gap:8,marginBottom:8} },
+            React.createElement("select", { value:addForm.type, onChange:e=>setAddForm(f=>({...f,type:e.target.value})), style:{flex:1,padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",fontFamily:"inherit",fontSize:12} },
+              React.createElement("option",{value:"ein"},"▶ Eingestempelt"),
+              React.createElement("option",{value:"aus"},"⏹ Ausgestempelt")
+            ),
+            React.createElement("input", { type:"datetime-local", value:addForm.time, onChange:e=>setAddForm(f=>({...f,time:e.target.value})), style:{flex:2,padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",fontFamily:"inherit",fontSize:12} })
+          ),
+          addForm.type==="aus" && React.createElement("input", { type:"number", value:addForm.pause||"", onChange:e=>setAddForm(f=>({...f,pause:parseInt(e.target.value)||0})), placeholder:"Pause in Minuten", style:{width:"100%",padding:"8px 10px",borderRadius:8,border:"2px solid #ddd",fontFamily:"inherit",fontSize:12,marginBottom:8} })
+        ),
+
         React.createElement("button", {
           onClick:()=>{
-            if(!addForm.userName||!addForm.time) return;
-            setZeiterfassung(p=>[...p,{id:"z_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),userName:addForm.userName,type:addForm.type,time:new Date(addForm.time).toISOString(),pause:addForm.pause||0,deleted:false,addedBy:loggedInUser?.name}]);
-            setAddForm({userName:"",type:"ein",time:"",pause:0}); setShowAddEntry(false);
+            const mk = (typ, iso, pause) => ({
+              id:"z_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),
+              userName:addForm.userName, type:typ, time:iso,
+              pause:pause||0, deleted:false, addedBy:loggedInUser?.name
+            });
+            if (addModus==="schicht") {
+              if(!addForm.userName||!addForm.datum||!addForm.von||!addForm.bis) return;
+              const ein = new Date(addForm.datum + "T" + addForm.von + ":00");
+              const aus = new Date(addForm.datum + "T" + addForm.bis + ":00");
+              if (aus <= ein) aus.setDate(aus.getDate() + 1);   // über Mitternacht
+              setZeiterfassung(p=>[...p,
+                mk("ein", ein.toISOString(), 0),
+                mk("aus", aus.toISOString(), addForm.pause||0)
+              ]);
+            } else {
+              if(!addForm.userName||!addForm.time) return;
+              setZeiterfassung(p=>[...p, mk(addForm.type, new Date(addForm.time).toISOString(), addForm.pause||0)]);
+            }
+            setAddForm({userName:"",type:"ein",time:"",pause:0,datum:heuteISO(),von:"",bis:""});
+            setShowAddEntry(false);
           },
           style:{width:"100%",padding:10,borderRadius:8,border:"none",background:C.green,color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:700}
-        }, "✓ Hinzufügen")
+        }, addModus==="schicht" ? "✓ Schicht nachtragen" : "✓ Stempel hinzufügen")
+      ),
+
+      // v513: Offene Schichten zuerst - sie veraendern die Monatssumme
+      offeneStempel.length > 0 && React.createElement("div", {
+        style:{background:"#fff3e0",border:"2px solid #ffb74d",borderRadius:10,padding:"10px 13px",marginBottom:12}
+      },
+        React.createElement("div",{style:{fontWeight:800,fontSize:13,color:"#e65100",marginBottom:4}},
+          "⚠️ " + offeneStempel.length + " Schicht" + (offeneStempel.length===1?"":"en") + " ohne Ausstempeln"),
+        React.createElement("div",{style:{fontSize:11.5,color:"#8d6e63",lineHeight:1.5,marginBottom:6}},
+          "Diese Stunden fehlen in der Monatssumme. Bitte über „Eintrag hinzufügen“ das Ausstempeln nachtragen."),
+        offeneStempel.slice(0,8).map((o,ix)=>
+          React.createElement("div",{key:"off"+ix,style:{fontSize:12,color:"#5d4037",fontWeight:600}},
+            "• " + o.user + " — " + o.datum)),
+        offeneStempel.length>8 && React.createElement("div",{style:{fontSize:11,color:"#8d6e63",marginTop:3}},
+          "… und " + (offeneStempel.length-8) + " weitere")
       ),
 
       // Monats_bersicht
@@ -25802,9 +25904,22 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
                   ),
                   editId===z.id
                     ? React.createElement("input",{type:"datetime-local",value:editTime,onChange:e=>setEditTime(e.target.value),style:{fontSize:12,padding:"3px 6px",borderRadius:6,border:"1px solid #ddd",marginTop:2,width:"100%"}})
-                    : React.createElement("div",{style:{fontSize:12,color:"#888"}},
-                        new Date(z.time).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}),
-                        z.pause>0?" · Pause: "+z.pause+" min":""
+                    : React.createElement(React.Fragment,null,
+                        React.createElement("div",{style:{fontSize:12,color:"#888"}},
+                          new Date(z.time).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}),
+                          z.pause>0?" · Pause: "+z.pause+" min":""
+                        ),
+                        /* ═══ v513: WOHER DIESER STEMPEL KOMMT ═══
+                           addedBy und editedBy wurden seit jeher
+                           mitgeschrieben, aber nirgends angezeigt. Ein
+                           Arbeitszeitnachweis, dem man nicht ansieht, was
+                           nachtraeglich eingetragen oder geaendert wurde,
+                           taugt bei einer Pruefung nichts - und der
+                           Mitarbeiter hat ein Recht darauf, es zu sehen. */
+                        (z.editedBy || z.addedBy) && React.createElement("div",{
+                          style:{fontSize:10.5,fontWeight:700,color:"#e65100",marginTop:1}
+                        }, z.editedBy ? ("✏️ geändert von " + z.editedBy)
+                                      : ("➕ nachgetragen von " + z.addedBy))
                       )
                 ),
                 editId===z.id
@@ -26501,7 +26616,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v512"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v513"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -35637,7 +35752,17 @@ function HACCPModul({
     const nochLeer = !cfg.geraete.some(g => {
       const v = t[g.id]; return v !== undefined && v !== '';
     });
-    const vortag = nochLeer ? letzteMessung(tagDatum) : null;
+    /* ═══ v513: DER KNOPF WAR WEG, SOBALD EINE ZAHL DRINSTAND ═══
+       Bis v512 erschien das Angebot nur, wenn der Tag KOMPLETT leer war.
+       Der uebliche Ablauf ist aber genau andersherum: Der Kuechenchef
+       tippt die erste Kuehlung ein, merkt dann, dass der Rest wie gestern
+       ist - und findet den Knopf nicht mehr. Uebernommen wurden ohnehin
+       immer nur die leeren Felder, der Schutz war also doppelt.
+       Jetzt zaehlt nur noch, ob ueberhaupt etwas offen ist. */
+    const offene = cfg.geraete.filter(g => {
+      const v = t[g.id]; return v === undefined || v === '';
+    });
+    const vortag = offene.length ? letzteMessung(tagDatum) : null;
     const jetztUhr = new Date().toTimeString().slice(0, 5);
     /* v508: Der Knopf war bis zur Erinnerungszeit (Vorgabe 10:00) UNSICHTBAR.
        Wer um 09:30 die Kontrolle macht, sah ihn nie und musste alles tippen.
@@ -35670,15 +35795,25 @@ function HACCPModul({
       }
     },
       /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 13.5, color: faellig ? T.warn : T.text, marginBottom: 4 } },
-        faellig ? '\u23f0 Temperaturkontrolle offen' : '\ud83c\udf21\ufe0f Temperaturkontrolle'),
+        nochLeer
+          ? (faellig ? '\u23f0 Temperaturkontrolle offen' : '\ud83c\udf21\ufe0f Temperaturkontrolle')
+          : ('\ud83c\udf21\ufe0f Noch ' + offene.length + ' Ger\u00e4t' + (offene.length === 1 ? '' : 'e') + ' offen')),
       /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: T.muted, lineHeight: 1.5, marginBottom: 10 } },
         'Vom ', de(vortag), ' liegen Werte vor: ',
         cfg.geraete.map(g => (temp[vortag] || {})[g.id]).filter(v => v !== undefined && v !== '').join(' \u00b7 '),
-        ' \u00b0C. \u00dcbernehmen und dann pr\u00fcfen \u2013 abweichende Werte einfach \u00fcberschreiben.'),
+        ' \u00b0C. ',
+        /* v513: Bei einem halb ausgefuellten Tag muss dastehen, dass die
+           eigene Messung nicht ueberschrieben wird - sonst traut sich
+           niemand, den Knopf zu druecken. */
+        nochLeer
+          ? '\u00dcbernehmen und dann pr\u00fcfen \u2013 abweichende Werte einfach \u00fcberschreiben.'
+          : 'Bereits eingetragene Werte bleiben stehen \u2013 gef\u00fcllt werden nur die offenen Ger\u00e4te.'),
       /*#__PURE__*/React.createElement("button", {
         style: { ...st.btn, width: '100%' },
         onClick: () => uebernehmen(vortag, tagDatum)
-      }, 'Werte vom ' + de(vortag) + ' \u00fcbernehmen')
+      }, nochLeer
+          ? ('Werte vom ' + de(vortag) + ' \u00fcbernehmen')
+          : ('Offene Ger\u00e4te vom ' + de(vortag) + ' f\u00fcllen'))
     ), /* Wurde uebernommen, muss das im Nachweis stehen - sonst sieht ein
        Pruefer sechs gleiche Tage und kann nicht unterscheiden, ob gemessen
        oder uebernommen wurde. */
