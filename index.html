@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v511</title>
+<title>eatDeSi POS v512</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -15588,6 +15588,8 @@ function OrderView({
   onSave,
   onBestellen,
   onWechseln,
+  onTeilKassieren,  // v512: nur die markierten Artikel kassieren
+  onTeilVerschieben,// v512: nur die markierten Artikel auf einen anderen Tisch
   onNotiz,          // v385
   tischNotiz,       // v385
   onLieferFee,      // v466: Liefergebuehr sofort in die Bestellung schreiben
@@ -15643,6 +15645,24 @@ function OrderView({
   const orderListRef = React.useRef(null);
   const [splitTarget, setSplitTarget] = React.useState(null);
   const [splitQty, setSplitQty] = React.useState(1);
+  /* ═══ v512: ARTIKEL MARKIEREN ═══
+     Bisher gab es nur ganz oder gar nicht: "Wechseln" nahm den kompletten
+     Tisch mit, "Zahlen" kassierte die komplette Rechnung. Wollten drei von
+     acht Gaesten getrennt zahlen oder zogen zwei Leute mit ihren Getraenken
+     an den Nebentisch, musste der Kellner den Tisch loeschen und neu
+     tippen - was seit v346 einen Storno erzeugt, obwohl niemand storniert
+     hat, und was die Kueche ein zweites Mal anwirft.
+     Jetzt steht vor jeder Zeile ein Kaestchen. Was markiert ist, laesst
+     sich einzeln kassieren oder auf einen anderen Tisch setzen.
+     Der Schluessel ist die MENGE, nicht ein Ja/Nein: eine Zeile "10x
+     Bitburger" muss sich bei 3 Glaesern teilen lassen, ohne vorher die
+     Schere zu bemuehen. auswahl haelt deshalb _key -> markierte Menge. */
+  const [auswahl, setAuswahl] = React.useState({});
+  /* Tischwechsel leert die Markierung. Sonst wuerden Schluessel vom alten
+     Tisch auf dem neuen weiterzaehlen und die Leiste zeigte Artikel an,
+     die hier gar nicht liegen. */
+  React.useEffect(() => { setAuswahl({}); }, [tableId]);
+  const mengeRef = React.useRef(0);
   // Liefergeb_hr
   const defaultLiefergebühr = parseFloat(printerSettings?.liefergebühr) || 0;
   /* ═══ v466: DIE GEBUEHR GEHOERT ZUR BESTELLUNG, NICHT ZUM BILDSCHIRM ═══
@@ -15678,6 +15698,39 @@ function OrderView({
   const itemsTotal = items.reduce((s, i) => s + i.finalPrice * i.qty, 0);
   const lieferFee = isTakeaway && liefergebührOn ? (parseFloat(liefergebührAmt)||0) : 0;
   const total = itemsTotal + lieferFee;
+  /* ═══ v512: WAS IST MARKIERT ═══
+     Immer frisch aus den echten Zeilen gerechnet statt aus dem Merker.
+     Verschwindet eine Zeile - storniert, aufgeteilt, umgebucht - faellt
+     ihr Eintrag hier von selbst weg. Ein Rest im Merker kann so weder die
+     Summe noch die Anzahl verfaelschen. */
+  const auswahlMenge = z => Math.min(auswahl[z._key] || 0, z.qty || 0);
+  const auswahlZeilen = items.map(z => ({ z: z, m: auswahlMenge(z) })).filter(x => x.m > 0);
+  const auswahlAnzahl = auswahlZeilen.reduce((s, x) => s + x.m, 0);
+  const auswahlSumme = auswahlZeilen.reduce((s, x) => s + (x.z.finalPrice || 0) * x.m, 0);
+  /* Die markierten Artikel so, wie sie weitergereicht werden: mit der
+     markierten Menge, nicht der ganzen Zeile. _urKey zeigt auf die
+     Originalzeile zurueck - ohne ihn findet die Teilzahlung die Zeile
+     nicht wieder, von der sie die Menge abziehen muss. */
+  const auswahlItems = () => auswahlZeilen.map(x => Object.assign({}, x.z, {
+    qty: x.m, _urKey: belksZeilenKey(x.z)
+  }));
+  const auswahlSetzen = (z, m) => setAuswahl(p => {
+    const n = Object.assign({}, p);
+    if (m <= 0) delete n[z._key]; else n[z._key] = Math.min(m, z.qty || 0);
+    return n;
+  });
+  /* ═══ v512: NACH DEM KASSIEREN MUSS DIE MARKIERUNG WEG ═══
+     Wurden 3 von 10 Bier bezahlt, bleiben 7 in derselben Zeile liegen -
+     und der Merker stuende weiter auf 3. Der Kellner saehe drei markierte
+     Biere, die er eben kassiert hat, und koennte sie ein zweites Mal
+     buchen. Dasselbe gilt nach einem Storno und nach dem Umsetzen.
+     Nur das WENIGER-Werden loescht: beim Aufnehmen neuer Artikel soll
+     eine begonnene Markierung stehen bleiben. */
+  const mengeGesamt = items.reduce((s, i) => s + (i.qty || 0), 0);
+  React.useEffect(() => {
+    if (mengeGesamt < mengeRef.current) setAuswahl({});
+    mengeRef.current = mengeGesamt;
+  }, [mengeGesamt]);
   const cats = Object.keys(MENU_LIVE);
   /* v475: Flache Trefferliste ueber ALLE Kategorien, fuer die Artikel-Suche
      in der Kopfzeile. Bei jedem Artikel steht seine eigene Kategorie dran
@@ -16254,7 +16307,45 @@ function OrderView({
       fontWeight: 700,
       fontSize: 16
     }
-  }, fmt(total))), items.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, fmt(total))),
+  /* ═══ v512: DIE LEISTE DER MARKIERTEN ARTIKEL ═══
+     Sie erscheint erst, wenn wirklich etwas markiert ist, und sitzt
+     zwischen Kopfzeile und Bestellliste - dort, wo der Daumen ohnehin
+     hinwandert. Ohne Markierung ist der Bildschirm unveraendert.
+     "Kassieren" bucht NUR das Markierte als eigenen Beleg; der Rest des
+     Tisches bleibt offen stehen. "Umsetzen" schiebt das Markierte auf
+     einen anderen Tisch, ohne die Kueche erneut anzuwerfen. */
+  auswahlAnzahl > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap",
+      padding: "8px 11px", background: "#fff3e0",
+      borderBottom: "2px solid " + C.orange
+    }
+  },
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => setAuswahl({}),
+      title: "Markierung aufheben",
+      style: { background: "none", border: "none", color: "#8d6e63", fontSize: 16,
+               cursor: "pointer", padding: "0 2px", fontFamily: "inherit", flexShrink: 0 }
+    }, "✕"),
+    /*#__PURE__*/React.createElement("div", { style: { flex: "1 1 90px", minWidth: 0, lineHeight: 1.25 } },
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: "#e65100" } },
+        auswahlAnzahl + " Artikel markiert"),
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 15, fontWeight: 900, color: "#e65100" } },
+        fmt(auswahlSumme))),
+    !isTakeaway && typeof onTeilVerschieben === "function" && /*#__PURE__*/React.createElement("button", {
+      onClick: () => { onTeilVerschieben(tableId, auswahlItems()); setAuswahl({}); },
+      style: { padding: "9px 12px", borderRadius: 10, border: "2px solid " + C.orange,
+               background: "#fff", color: "#e65100", cursor: "pointer", fontFamily: "inherit",
+               fontWeight: 800, fontSize: 12.5, whiteSpace: "nowrap", flexShrink: 0 }
+    }, "🔀 Umsetzen"),
+    !isTakeaway && typeof onTeilKassieren === "function" && /*#__PURE__*/React.createElement("button", {
+      onClick: () => onTeilKassieren(tableId, auswahlItems()),
+      style: { padding: "9px 14px", borderRadius: 10, border: "none",
+               background: C.green, color: "#fff", cursor: "pointer", fontFamily: "inherit",
+               fontWeight: 800, fontSize: 12.5, whiteSpace: "nowrap", flexShrink: 0 }
+    }, "💳 Kassieren")),
+  items.length > 0 && /*#__PURE__*/React.createElement("div", {
     ref: orderListRef,
     /* v313: Die Bestellliste war auf 220 px gedeckelt und weiss wie die
        Speisekarte darunter - ab der vierten Zeile musste man in einem
@@ -16273,9 +16364,31 @@ function OrderView({
       display: "flex",
       alignItems: "center",
       padding: "9px 12px",
-      borderBottom: "1px solid #f0e6d8"
+      borderBottom: "1px solid #f0e6d8",
+      /* v512: Eine markierte Zeile muss man im Vorbeigehen erkennen -
+         sonst kassiert jemand die falsche Haelfte des Tisches. */
+      background: auswahlMenge(item) > 0 ? "#fff3e0" : "transparent"
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  },
+  /* v512: Das Kaestchen. Ein Tipp markiert die ganze Zeile, der naechste
+     hebt sie wieder auf. Bei mehreren Stueck kommt darunter der kleine
+     Mengenregler zum Vorschein.
+     Nur am Tisch: eine Abholung hat keinen Resttisch, auf dem etwas
+     stehen bleiben koennte, und nichts, wohin man umsetzen wuerde. Ein
+     Kaestchen ohne Wirkung waere dort nur im Weg. */
+  !isTakeaway && /*#__PURE__*/React.createElement("button", {
+    onClick: () => auswahlSetzen(item, auswahlMenge(item) > 0 ? 0 : (item.qty || 1)),
+    style: {
+      width: 24, height: 24, flexShrink: 0, marginRight: 9,
+      borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: 14, fontWeight: 900, lineHeight: 1, padding: 0,
+      border: "2px solid " + (auswahlMenge(item) > 0 ? C.orange : "#ccc"),
+      background: auswahlMenge(item) > 0 ? C.orange : "#fff",
+      color: "#fff"
+    }
+  }, auswahlMenge(item) > 0 ? "✓" : ""),
+  /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
       minWidth: 0
@@ -16302,7 +16415,32 @@ function OrderView({
       fontSize: 10,
       color: C.blue
     }
-  }, "\uD83D\uDCDD ", item.kitchenNote)), /*#__PURE__*/React.createElement("button", {
+  }, "\uD83D\uDCDD ", item.kitchenNote),
+  /* \u2550\u2550\u2550 v512: WIE VIELE VON DIESER ZEILE \u2550\u2550\u2550
+     Eine Zeile "10x Bitburger" soll sich bei drei Glaesern teilen lassen,
+     ohne vorher die Schere zu bemuehen und die Zeile dauerhaft zu
+     zerlegen. Der Regler erscheint nur an einer markierten Zeile mit mehr
+     als einem Stueck - sonst waere er auf jedem Tisch im Weg. */
+  auswahlMenge(item) > 0 && (item.qty || 1) > 1 && /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", alignItems: "center", gap: 6, marginTop: 4 }
+  },
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => auswahlSetzen(item, auswahlMenge(item) - 1),
+      style: { width: 22, height: 22, borderRadius: "50%", border: "1.5px solid " + C.orange,
+               background: "#fff", color: C.orange, cursor: "pointer", fontFamily: "inherit",
+               fontWeight: 900, fontSize: 13, lineHeight: 1, padding: 0 }
+    }, "\u2212"),
+    /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: 11, fontWeight: 800, color: "#e65100", minWidth: 42, textAlign: "center" }
+    }, auswahlMenge(item) + " von " + item.qty),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => auswahlSetzen(item, auswahlMenge(item) + 1),
+      disabled: auswahlMenge(item) >= (item.qty || 1),
+      style: { width: 22, height: 22, borderRadius: "50%", border: "none",
+               background: auswahlMenge(item) >= (item.qty || 1) ? "#ddd" : C.orange,
+               color: "#fff", cursor: "pointer", fontFamily: "inherit",
+               fontWeight: 900, fontSize: 13, lineHeight: 1, padding: 0 }
+    }, "+"))), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       setNoteTarget(item._key);
       setNoteText(item.kitchenNote || "");
@@ -26363,7 +26501,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v511"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v512"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -26651,6 +26789,9 @@ function App() {
   const [clearConfirm, setClearConfirm] = React.useState(null);
   const [stornoGrund, setStornoGrund] = React.useState(null);   // v346
   const [wechselVon, setWechselVon] = React.useState(null);     // v351
+  /* v512: null = der ganze Tisch zieht um (wie bisher). Eine Liste =
+     nur diese Artikel in dieser Menge; der Rest bleibt am Platz. */
+  const [wechselItems, setWechselItems] = React.useState(null);
   const [tableOrders, setTableOrders] = useState(() => LS.get("eatdesi_tableorders", {}));
   const [takeaway, setTakeaway] = useState(() => {
     const saved = LS.get("eatdesi_takeaway", []);
@@ -27883,7 +28024,7 @@ function App() {
       setTableOrders(p => p[tid] ? { ...p, [tid]: { ...p[tid], items: setzen(p[tid].items) } } : p);
     }
   };
-  const startPay = (tid, items, total, directSplit = false, lieferFee = 0) => {
+  const startPay = (tid, items, total, directSplit = false, lieferFee = 0, teil = false) => {
     const label = String(tid).startsWith("ta_") ? window.belksTaTitel(tid) : `Tisch ${tid}`;
     /* ═══ v461: NICHT ZWEIMAL KASSIEREN ═══
        Eine Abholung bleibt nach der Zahlung absichtlich stehen, bis die
@@ -27912,10 +28053,14 @@ function App() {
        hier mitfahren. */
     setCheckout({
       tableId: tid,
-      label,
+      /* v512: Beim Kassieren markierter Artikel steht "Tisch 31" allein
+         auf dem Bildschirm und auf dem Beleg - der Kellner saehe nicht,
+         dass hier nur ein Teil gebucht wird. */
+      label: teil ? (label + " · Teil") : label,
       items,
       total,
       directSplit,
+      teil: !!teil,
       lieferFee: Number(lieferFee) || 0
     });
     setBonModal(null);
@@ -27991,7 +28136,7 @@ function App() {
      werden ("Bezahlt und drucken"), und dann muss auf dem Beleg und im
      Tagesbericht Bar stehen. Eine falsche Zahlart faellt beim Kassensturz
      auf: die Schublade stimmt dann nicht mit dem Bericht ueberein. */
-  const belksTeilzahlung = async (tid, gastItems, trinkgeld, rabatt, gastNr, payMethod = "Karte", drucken = true) => {   /* v472 */
+  const belksTeilzahlung = async (tid, gastItems, trinkgeld, rabatt, gastNr, payMethod = "Karte", drucken = true, schliesseWennLeer = false) => {   /* v472; v512: schliesseWennLeer */
     try {
       if (String(tid).startsWith("ta_")) return;      // nur Tische, kein Takeaway
       const o = tableOrders[tid];
@@ -28005,7 +28150,12 @@ function App() {
         _tse = await window.TSE.signOrder({ bonNr: _bonNr, total: orderTotal, payMethod: payMethod, items: gastItems, tableId: tid });   /* v469 */
       } catch (e) { console.warn("TSE Signatur Fehler (Teilzahlung):", e); }
 
-      const _label = (o.label || ("Tisch " + tid)) + " · Gast " + gastNr;
+      /* v512: Beim getrennten Zahlen ist gastNr eine Zahl ("Gast 3").
+         Beim Kassieren markierter Artikel gibt es keinen Gast - dort
+         kommt ein fertiger Text herein und wird unveraendert genommen. */
+      const _zusatz = (typeof gastNr === "string" && isNaN(Number(gastNr)))
+        ? gastNr : ("Gast " + gastNr);
+      const _label = (o.label || ("Tisch " + tid)) + " · " + _zusatz;
       setCompletedOrders(p => [...p, Object.assign({}, o, {
         items: gastItems.map(i => Object.assign({}, i)),
         time: new Date(), tableId: tid, label: _label,
@@ -28035,8 +28185,25 @@ function App() {
           const rest = (z.qty || 0) - (weg[belksZeilenKey(z)] || 0);
           if (rest > 0) neu.push(Object.assign({}, z, { qty: rest }));
         });
+        /* ═══ v512: WAR ES DER LETZTE ARTIKEL, IST DER TISCH FERTIG ═══
+           Beim Kassieren markierter Artikel kann die letzte Zeile mit
+           weggehen. Bliebe der Tisch dann als leere Huelle stehen, sieht
+           er im Plan weiter belegt aus und der naechste Gast bekaeme
+           einen Tisch mit fremder Vorgeschichte. Nur dieser Weg raeumt
+           auf - beim getrennten Zahlen schliesst belksTischOhneBuchung
+           den Tisch wie bisher selbst. */
+        if (schliesseWennLeer && neu.length === 0) {
+          const ohne = Object.assign({}, p);
+          delete ohne[tid];
+          return ohne;
+        }
         return Object.assign({}, p, { [tid]: Object.assign({}, alt, { items: neu }) });
       });
+      if (schliesseWennLeer) {
+        const restMenge = (o.items || []).reduce((s, z) =>
+          s + Math.max(0, (z.qty || 0) - (weg[belksZeilenKey(z)] || 0)), 0);
+        if (restMenge <= 0) { setView("tables"); setActiveTable(null); }
+      }
     } catch (e) { console.warn("Teilzahlung fehlgeschlagen:", e); }
   };
 
@@ -28246,37 +28413,96 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
      wuerde einen zweiten Vorgang vortaeuschen.
      Ebenso ziehen die Entwurfs-Marken mit: was noch nicht in der Kueche
      war, ist es nach dem Umzug auch nicht. */
-  const belksTischWechsel = (vonId, nachId) => {
+  const belksTischWechsel = (vonId, nachId, nurItems) => {
     if (vonId === undefined || nachId === undefined) return;
     if (String(vonId) === String(nachId)) return;
+    /* ═══ v512: NUR EIN TEIL ZIEHT UM ═══
+       Zwei Gaeste nehmen ihre Getraenke mit an den Nebentisch. Bisher ging
+       das nur ueber "loeschen und neu tippen" - mit Storno und einem
+       zweiten Durchlauf durch die Kueche.
+       Mengengenau: aus "10x Bier" koennen 3 mitgehen und 7 bleiben.
+       Der Abzug laeuft ueber denselben Zeilenschluessel wie die
+       Teilzahlung, damit beide Wege dieselbe Zeile treffen. */
+    var _weg = null;
+    if (nurItems && nurItems.length) {
+      _weg = {};
+      nurItems.forEach(function(i){
+        var k = i._urKey || belksZeilenKey(i);
+        _weg[k] = (_weg[k] || 0) + (i.qty || 1);
+      });
+    }
+    /* Ob am alten Tisch etwas bleibt, muss VOR dem Setzen feststehen:
+       die Funktion in setTableOrders laeuft spaeter, ihr Ergebnis ist hier
+       noch nicht da. Gerechnet wird deshalb am aktuellen Stand. */
+    var _quelleLeer = true;
+    try {
+      var _q0 = (tableOrders || {})[vonId];
+      if (_q0 && _weg) {
+        _quelleLeer = (_q0.items || []).every(function(z){
+          return ((z.qty || 0) - Math.min(_weg[belksZeilenKey(z)] || 0, z.qty || 0)) <= 0;
+        });
+      }
+    } catch(e) {}
     setTableOrders(p => {
       const quelle = p[vonId];
       if (!quelle) return p;
       const ziel = p[nachId];
       const n = { ...p };
+      /* Was mitgeht und was bleibt. Ohne Markierung geht alles mit -
+         das ist der alte Tischwechsel, unveraendert. */
+      var mit = (quelle.items || []), rest = [];
+      if (_weg) {
+        mit = []; rest = [];
+        (quelle.items || []).forEach(function(z){
+          var k = belksZeilenKey(z);
+          var nimm = Math.min(_weg[k] || 0, z.qty || 0);
+          if (nimm > 0) mit.push(Object.assign({}, z, { qty: nimm }));
+          var bleibt = (z.qty || 0) - nimm;
+          if (bleibt > 0) rest.push(Object.assign({}, z, { qty: bleibt }));
+        });
+        if (!mit.length) return p;
+      }
+      _quelleLeer = (rest.length === 0);
       delete n[vonId];
+      if (rest.length) n[vonId] = Object.assign({}, quelle, { items: rest });
+      const quelleMit = Object.assign({}, quelle, { items: mit });
       if (!ziel) {
-        n[nachId] = Object.assign({}, quelle);
+        n[nachId] = Object.assign({}, quelleMit, {
+          /* Eine Signatur gehoert zum Vorgang, nicht zum Platz. Zieht die
+             ganze Bestellung um, zieht sie mit. Bleibt ein Rest am alten
+             Tisch, bleibt sie dort - sonst haetten zwei Tische dieselbe. */
+          tseBestellung: rest.length ? null : (quelle.tseBestellung || null),
+          /* Ein Teilumzug ist eine eigene Runde: die Startzeit des neuen
+             Tisches ist jetzt, nicht die des alten. */
+          time: rest.length ? new Date() : quelle.time
+        });
       } else {
         /* Zusammenlegen: die Artikel des umziehenden Tisches kommen hinten
            dran. Die Schluessel muessen neu sein, sonst treffen zwei Zeilen
            mit demselben _key aufeinander und das Bearbeiten trifft die
            falsche. */
-        const zusatz = (quelle.items || []).map((i, idx) => Object.assign({}, i, {
+        const zusatz = (quelleMit.items || []).map((i, idx) => Object.assign({}, i, {
           _key: (i._key || "x") + "_um" + Date.now() + "_" + idx
         }));
         n[nachId] = Object.assign({}, ziel, {
           items: [...(ziel.items || []), ...zusatz],
           /* Die aeltere Startzeit gewinnt - die Kueche soll die laengere
              Wartezeit sehen, nicht die kuerzere. */
-          time: (ziel.time && quelle.time && new Date(quelle.time) < new Date(ziel.time)) ? quelle.time : (ziel.time || quelle.time),
-          tseBestellung: ziel.tseBestellung || quelle.tseBestellung || null
+          time: (ziel.time && quelleMit.time && new Date(quelleMit.time) < new Date(ziel.time)) ? quelleMit.time : (ziel.time || quelleMit.time),
+          /* v512: Der Zieltisch behaelt seine eigene Signatur. Die des
+             Quelltisches kommt nur dann mit, wenn dort nichts bleibt -
+             sonst traegt sie an zwei Orten denselben Vorgang. */
+          tseBestellung: ziel.tseBestellung || (rest.length ? null : (quelle.tseBestellung || null))
         });
       }
       return n;
     });
     setWechselVon(null);
-    setActiveTable(nachId);
+    setWechselItems(null);
+    /* v512: Beim ganzen Umzug folgt der Kellner den Gaesten an den neuen
+       Tisch. Bleibt dagegen ein Rest stehen, arbeitet er dort weiter -
+       ihn wegzuschieben waere nur laestig. */
+    if (_quelleLeer) setActiveTable(nachId);
   };
 
   const clearTable = tid => {
@@ -28994,39 +29220,63 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
     _alle = _alle.filter(function(t, i3){ return _alle.indexOf(t) === i3 && String(t) !== String(wechselVon); });
     var _frei   = _alle.filter(function(t){ return !tableOrders[t]; });
     var _belegt = _alle.filter(function(t){ return !!tableOrders[t]; });
-    var _summe  = ((tableOrders[wechselVon] || {}).items || []).reduce(function(su,i){ return su + (i.finalPrice||0)*(i.qty||0); }, 0);
+    /* v512: Bei einem Teilumzug zaehlt nur das Markierte - sonst stuende
+       im Dialog der volle Tischbetrag und der Kellner glaubte, er schiebe
+       die ganze Rechnung weiter. */
+    var _teil   = !!(wechselItems && wechselItems.length);
+    var _quelle = _teil ? wechselItems : ((tableOrders[wechselVon] || {}).items || []);
+    var _summe  = _quelle.reduce(function(su,i){ return su + (i.finalPrice||0)*(i.qty||0); }, 0);
+    var _stueck = _quelle.reduce(function(su,i){ return su + (i.qty||0); }, 0);
 
     return /*#__PURE__*/React.createElement("div", { style:{ position:"fixed", inset:0, background:"#0009", zIndex:9000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 } },
       /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:16, padding:18, width:"100%", maxWidth:400, maxHeight:"85vh", overflowY:"auto" } },
         /*#__PURE__*/React.createElement("div", { style:{ fontWeight:800, fontSize:16, color:C.green, marginBottom:4 } },
-          "\uD83D\uDD00 Tisch " + wechselVon + " umziehen"),
-        /*#__PURE__*/React.createElement("div", { style:{ fontSize:12.5, color:"#666", marginBottom:14 } },
-          fmt(_summe) + " \u00b7 Wohin sollen die G\u00e4ste?"),
+          _teil
+            ? ("\uD83D\uDD00 " + _stueck + " Artikel von Tisch " + wechselVon + " umsetzen")
+            : ("\uD83D\uDD00 Tisch " + wechselVon + " umziehen")),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:12.5, color:"#666", marginBottom:_teil?8:14 } },
+          fmt(_summe) + (_teil ? " \u00b7 Wohin damit?" : " \u00b7 Wohin sollen die G\u00e4ste?")),
+        /* v512: Beim Teilumzug muss sichtbar sein, WAS mitgeht - sonst
+           laesst sich der Klick auf den Zieltisch nicht mehr pruefen. */
+        _teil && /*#__PURE__*/React.createElement("div", {
+          style:{ background:"#fff3e0", border:"1px solid #ffcc80", borderRadius:10,
+                  padding:"8px 10px", marginBottom:14, fontSize:12, color:"#6d4c41",
+                  maxHeight:120, overflowY:"auto", lineHeight:1.6 }
+        }, _quelle.map(function(i, ix){
+          return /*#__PURE__*/React.createElement("div", { key:"wi"+ix },
+            (i.qty||1) + "\u00D7 " + (i.name||""));
+        })),
 
         /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, fontWeight:700, color:"#888", marginBottom:6 } }, "FREIE TISCHE"),
         _frei.length === 0
           ? /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#bbb", marginBottom:12 } }, "Kein Tisch frei.")
           : /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:6, marginBottom:16 } },
               _frei.map(function(t){
-                return /*#__PURE__*/React.createElement("button", { key:"f"+t, onClick:function(){ belksTischWechsel(wechselVon, t); },
+                return /*#__PURE__*/React.createElement("button", { key:"f"+t, onClick:function(){ belksTischWechsel(wechselVon, t, wechselItems); },
                   style:{ padding:"12px 0", borderRadius:10, border:"2px solid "+C.green, background:"#fff", color:C.green, cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:14 } }, t);
               })
             ),
 
         _belegt.length > 0 && /*#__PURE__*/React.createElement("div", null,
-          /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, fontWeight:700, color:"#c62828", marginBottom:2 } }, "BELEGTE TISCHE \u2014 ZUSAMMENLEGEN"),
+          /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, fontWeight:700, color:"#c62828", marginBottom:2 } },
+            _teil ? "BELEGTE TISCHE" : "BELEGTE TISCHE \u2014 ZUSAMMENLEGEN"),
           /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:"#999", marginBottom:6, lineHeight:1.4 } },
-            "Die Artikel beider Tische landen auf einer Rechnung. Das l\u00e4sst sich danach nicht mehr trennen."),
+            _teil
+              ? "Die Artikel kommen auf die Rechnung dieses Tisches. Zur\u00fcckholen geht genauso \u2014 markieren und umsetzen."
+              : "Die Artikel beider Tische landen auf einer Rechnung. Das l\u00e4sst sich danach nicht mehr trennen."),
           /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:6, marginBottom:12 } },
             _belegt.map(function(t){
               return /*#__PURE__*/React.createElement("button", { key:"b"+t,
-                onClick:function(){ if (window.confirm("Tisch " + wechselVon + " mit Tisch " + t + " zusammenlegen?\n\nDie Artikel kommen auf EINE Rechnung.")) belksTischWechsel(wechselVon, t); },
+                onClick:function(){
+                  if (_teil) { belksTischWechsel(wechselVon, t, wechselItems); return; }
+                  if (window.confirm("Tisch " + wechselVon + " mit Tisch " + t + " zusammenlegen?\n\nDie Artikel kommen auf EINE Rechnung.")) belksTischWechsel(wechselVon, t);
+                },
                 style:{ padding:"12px 0", borderRadius:10, border:"2px dashed #ef9a9a", background:"#fff5f5", color:"#c62828", cursor:"pointer", fontFamily:"inherit", fontWeight:800, fontSize:14 } }, t);
             })
           )
         ),
 
-        /*#__PURE__*/React.createElement("button", { onClick:function(){ setWechselVon(null); },
+        /*#__PURE__*/React.createElement("button", { onClick:function(){ setWechselVon(null); setWechselItems(null); },
           style:{ width:"100%", padding:12, borderRadius:10, border:"2px solid #ddd", background:"#fff", color:"#555", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
         }, "Abbrechen")
       )
@@ -30013,7 +30263,22 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
     onLieferFee: setLieferGebuehr,   /* v466 */
     onSave: saveOrder,
     onBestellen: belksBestellen,   // v344
-    onWechseln: setWechselVon,     // v351
+    onWechseln: (tid) => { setWechselItems(null); setWechselVon(tid); },     // v351 / v512
+    /* v512: Nur das Markierte kassieren. Die Summe kommt aus den
+       uebergebenen Zeilen, nicht aus dem Tisch - sonst stuende im
+       Kassierfenster der volle Tischbetrag. */
+    onTeilKassieren: (tid, teilItems) => {
+      if (!teilItems || !teilItems.length) return;
+      const s = teilItems.reduce((su, i) => su + (i.finalPrice || 0) * (i.qty || 0), 0);
+      startPay(tid, teilItems, Math.round(s * 100) / 100, false, 0, true);
+    },
+    /* v512: Nur das Markierte umsetzen - derselbe Zieltisch-Dialog wie
+       beim ganzen Tisch, nur mit einer Ladung statt allem. */
+    onTeilVerschieben: (tid, teilItems) => {
+      if (!teilItems || !teilItems.length) return;
+      setWechselItems(teilItems);
+      setWechselVon(tid);
+    },
     onNotiz: setTischNotiz,        // v385
     onArtikelStorno: artikelStorno,   // v392
     users: users,                     // v394
@@ -30496,6 +30761,25 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
           return n;
         });
       } catch(e){}
+      /* ═══ v512: NUR DIE MARKIERTEN ARTIKEL ═══
+         completeOrder schliesst immer den GANZEN Tisch ab - es liest die
+         Artikel selbst aus tableOrders und loescht den Eintrag danach.
+         Beim Kassieren markierter Artikel waere damit der Rest des
+         Tisches lautlos mitgebucht und verschwunden. Deshalb geht dieser
+         Fall ueber belksTeilzahlung: eigener Beleg, eigene Nummer, eigene
+         Signatur - und abgezogen wird mengengenau. */
+      if (checkout.teil) {
+        /* Ein eingeloester Gutschein ist oben bereits abgebucht worden.
+           belksTeilzahlung kennt keinen eigenen Gutschein-Topf, deshalb
+           geht sein Betrag hier als Nachlass mit ein - sonst waere der
+           Gutschein verbraucht UND der volle Betrag gebucht, und in der
+           Kasse fehlte das Geld. */
+        const _rabGes = (rabatt || 0) + (usedGutschein ? (usedGutschein.rabatt || 0) : 0);
+        belksTeilzahlung(checkout.tableId, checkout.items, tg, _rabGes,
+          "Teilzahlung", method, !ohneBon, true);
+        setCheckout(null);
+        return;
+      }
       completeOrder(checkout.tableId, method, tg, rabatt, loyaltyPhone, redeemedPts, splitDetails, usedGutschein ? (usedGutschein.rabatt||0) : 0, checkout.lieferFee || 0, !!ohneBon);   // v330 / v469
     },
     onTeilzahlung: (gastItems, tg, rabatt, gastNr, payMethod, drucken) => belksTeilzahlung(checkout.tableId, gastItems, tg, rabatt, gastNr, payMethod, drucken),   /* v472 */   /* v469 */
