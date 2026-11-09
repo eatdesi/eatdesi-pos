@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v513</title>
+<title>eatDeSi POS v516</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -52,6 +52,68 @@ if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
     });
   });
 }
+
+/* ═══ v514: NEU LADEN HEISST NICHT NEUE FASSUNG ═══
+   Die Versionspruefung holt die Seite mit "?v=<Zeit>" und sieht deshalb
+   wirklich, was auf GitHub liegt. Danach rief sie aber schlicht
+   location.reload() auf - und das laedt die Adresse OHNE den Zusatz.
+   Genau diese Adresse hat der Service Worker im Zwischenspeicher. Das
+   Geraet lud also die ALTE Datei neu, meldete beim naechsten Tippen
+   wieder "neue Version verfuegbar", und von aussen sah es aus, als
+   kaeme die Aenderung nie an.
+   Vor dem Neuladen wird der Zwischenspeicher deshalb geleert und der
+   Service Worker zur Erneuerung angestossen. Abgemeldet wird er NICHT -
+   sonst liefe die Kasse bis zum naechsten Start nicht mehr ohne Netz.
+   Die Daten der Kasse liegen in localStorage, nicht im Cache des
+   Service Workers; geleert wird nur das Programm selbst. */
+window.belksNeuLaden = function(){
+  var fertig = false;
+  var los = function(){
+    if (fertig) return;
+    fertig = true;
+    try { window.location.reload(); } catch(e) {}
+  };
+  /* Notbremse: haengt das Aufraeumen, wird trotzdem neu geladen. Ein
+     Geraet, das nach dem Tippen auf "Jetzt laden" gar nichts tut, ist
+     schlimmer als eines mit altem Zwischenspeicher. */
+  setTimeout(los, 4000);
+  /* Geloescht wird NUR die Programmdatei selbst, nicht der ganze
+     Zwischenspeicher. Waer alles weg, haette ein Service Worker, der
+     ausschliesslich aus dem Speicher ausliefert, nichts mehr - und die
+     Kasse stuende ohne Netz still. Bilder, Schriften und der Rest
+     bleiben also liegen; nur index.html muss neu vom Server kommen. */
+  var istProgramm = function(u){
+    try {
+      var p = new URL(u, window.location.href).pathname;
+      if (p === window.location.pathname) return true;
+      return /(^|\/)(index\.html)?$/.test(p) && window.location.pathname.indexOf(p.replace(/index\.html$/, '')) === 0;
+    } catch(e) { return false; }
+  };
+  try {
+    var schritte = [];
+    if (window.caches && window.caches.keys) {
+      schritte.push(window.caches.keys().then(function(namen){
+        return Promise.all(namen.map(function(n){
+          return window.caches.open(n).then(function(c){
+            return c.keys().then(function(reqs){
+              return Promise.all(reqs.filter(function(r){ return istProgramm(r.url); })
+                                     .map(function(r){ return c.delete(r); }));
+            });
+          });
+        }));
+      }));
+    }
+    if (window.navigator.serviceWorker && window.navigator.serviceWorker.getRegistrations) {
+      schritte.push(window.navigator.serviceWorker.getRegistrations().then(function(rs){
+        return Promise.all(rs.map(function(r){
+          try { return r.update(); } catch(e) { return null; }
+        }));
+      }));
+    }
+    if (!schritte.length) return los();
+    Promise.all(schritte).then(los).catch(los);
+  } catch(e) { los(); }
+};
 </script>
 
 </head>
@@ -14161,7 +14223,20 @@ window.belksSichKonf = function(){
   var k = null;
   try { k = JSON.parse(localStorage.getItem(BELKS_SICH_KEY) || 'null'); } catch(e){ k = null; }
   if(!k || typeof k !== 'object') k = {};
-  return { geraet: k.geraet || '', name: k.name || '', ziel: k.ziel || 'geraet', sdUri: k.sdUri || '', sdName: k.sdName || '' };
+  /* ═══ v515: AUS DEM SICHERUNGSGERAET WIRD DAS HAUPTGERAET ═══
+     Bisher hatte dieses Geraet eine Aufgabe: die taegliche Sicherung.
+     Mit der TSE kommt eine zweite dazu, und es ist dasselbe Geraet -
+     dasjenige, das immer im Lokal steht und eingeschaltet ist. Statt
+     zwei Begriffe nebeneinander zu fuehren, die auseinanderlaufen
+     koennen, traegt ein Hauptgeraet beide Rollen.
+     fiskal ist standardmaessig an: wer ein Hauptgeraet benennt, meint
+     das Geraet an der Theke. Getrennt werden kann es trotzdem, falls
+     ein Betrieb das spaeter anders braucht.
+     Die Wahl bleibt lokal auf dem Geraet - ein Cloud-Abgleich duerfte
+     sie nicht auf ein anderes Geraet tragen. */
+  return { geraet: k.geraet || '', name: k.name || '', ziel: k.ziel || 'geraet',
+           sdUri: k.sdUri || '', sdName: k.sdName || '',
+           fiskal: k.fiskal === false ? false : true };
 };
 window.belksSichKonfSetzen = function(neu){
   var k = window.belksSichKonf();
@@ -14174,10 +14249,42 @@ window.belksSichKonfSetzen = function(neu){
    bleibt es beim alten Verhalten: wer abschliesst, sichert. */
 window.belksIstSicherungsGeraet = function(){
   var k = window.belksSichKonf();
-  if(!k.geraet) return true;
-  return k.geraet === window._deviceId;
+  if(k.geraet) return k.geraet === window._deviceId;
+  /* ═══ v515: ANZEIGE UND VERHALTEN SAGTEN VERSCHIEDENES ═══
+     Die Einstellung liegt bewusst nur lokal. Ein Geraet, das nie
+     angefasst wurde, hatte sie also leer - und fiel damit auf "wer
+     abschliesst, sichert" zurueck, obwohl laengst ein anderes Geraet
+     benannt war. Es sicherte also mit, waehrend auf dem Bildschirm
+     stand "Dieses Geraet sichert nicht". Die Anzeige las die
+     gemeldete Information, das Verhalten die lokale Einstellung.
+     Jetzt lesen beide dasselbe: ist lokal nichts gesetzt, entscheidet
+     die Meldung des Betriebs. Erst wenn auch die nichts weiss, gilt
+     wieder der alte Rueckfall. */
+  var info = window.belksSichInfoLesen && window.belksSichInfoLesen();
+  if(info && info.geraet) return info.geraet === window._deviceId;
+  return true;
 };
 window.belksSichGeraetBenannt = function(){ return !!window.belksSichKonf().geraet; };
+/* ═══ v515: IST DIESES GERAET DIE KASSE? ═══
+   Die Frage, die mit der TSE zaehlt. Anders als bei der Sicherung gibt
+   es hier KEINEN Rueckfall auf "dann macht es eben, wer gerade da ist":
+   Ein Beleg darf nur dort entstehen, wo signiert werden kann. Ist kein
+   Hauptgeraet benannt, ist dieses Geraet auch nicht die Kasse - und die
+   Kasse muss das spaeter sagen, statt stillschweigend ohne Signatur
+   weiterzulaufen. */
+window.belksIstKasse = function(){
+  var k = window.belksSichKonf();
+  if(!k.geraet) return false;
+  return k.geraet === window._deviceId && k.fiskal !== false;
+};
+/* Welches Geraet ist im ganzen Betrieb die Kasse? Kommt aus der
+   gemeldeten Information, ist also auf jedem Geraet lesbar. */
+window.belksKasseInfo = function(){
+  var info = window.belksSichInfoLesen && window.belksSichInfoLesen();
+  if(!info || !info.geraet || info.fiskal === false) return null;
+  return { geraet: info.geraet, name: info.name || info.geraet,
+           diesesGeraet: info.geraet === window._deviceId };
+};
 
 /* ---- v507: DIE WAHL WIRD GEMELDET -------------------------------------
    Die Einstellung oben bleibt lokal (der SD-Ordner gehoert dem Geraet).
@@ -14198,6 +14305,10 @@ window.belksSichInfoMelden = function(zusatz){
     geraet: k.geraet || '',
     name: k.name || '',
     ziel: k.ziel || 'geraet',
+    /* v515: Auch die Fiskal-Rolle gehoert in die Meldung. Nur so sieht
+       ein Kellner an seinem Handy, welches Geraet die Kasse ist - und
+       spaeter, ob ueberhaupt eines bereitsteht. */
+    fiskal: k.fiskal !== false,
     zuletzt: (zusatz && zusatz.zuletzt) || alt.zuletzt || '',
     tag: (zusatz && zusatz.tag) || alt.tag || '',
     gemeldet: new Date(window.belksJetzt ? window.belksJetzt() : Date.now()).toISOString()
@@ -14688,11 +14799,11 @@ function BackupView({ data, onRestore }) {
         if (!w) return;
       }
       let nm = "";
-      try { nm = window.prompt("Name f\u00FCr dieses Ger\u00E4t (z. B. \u201EHandy Theke\u201C):", sich.name || "Hauptger\u00E4t") || "Hauptger\u00E4t"; }
+      try { nm = window.prompt("Name f\u00FCr dieses Ger\u00E4t (z. B. \u201ETablet Theke\u201C):", sich.name || "Hauptger\u00E4t") || "Hauptger\u00E4t"; }
       catch (e) { nm = "Hauptger\u00E4t"; }
-      sichSetzen({ geraet: window._deviceId, name: nm });
+      sichSetzen({ geraet: window._deviceId, name: nm, fiskal: true });
       try { window.belksSichInfoMelden({}); } catch (e) { console.warn("Meldung:", e); }
-      setSichMsg("\u2705 Dieses Ger\u00E4t (" + nm + ") sichert ab jetzt jeden Tagesabschluss, auch den automatischen um 04:00.");
+      setSichMsg("\u2705 Dieses Ger\u00E4t (" + nm + ") ist jetzt das Hauptger\u00E4t. Es sichert jeden Tagesabschluss, auch den automatischen um 04:00 \u2013 und es wird die Kasse, sobald die TSE l\u00E4uft. Es sollte dauerhaft im Lokal bleiben.");
     }
   };
   const sdWaehlen = async () => {
@@ -14780,16 +14891,24 @@ function BackupView({ data, onRestore }) {
 
     /* === v506: Taegliche Sicherung - Geraet und Ziel === */
     /*#__PURE__*/React.createElement("div", { style:{ background:"#e8f5e9", borderRadius:12, padding:14, marginBottom:12, border:"2px solid #66bb6a" } },
-      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, marginBottom:6, color:"#1b5e20" } }, "\uD83D\uDEE1\uFE0F T\u00E4gliche Sicherung"),
+      /*#__PURE__*/React.createElement("div", { style:{ fontWeight:700, fontSize:13, marginBottom:6, color:"#1b5e20" } }, "\uD83D\uDEE1\uFE0F Hauptger\u00E4t (Kasse)"),
+      /* \u2550\u2550\u2550 v515: EIN BEGRIFF STATT ZWEI \u2550\u2550\u2550
+         Fuer das Personal gibt es ab jetzt genau ein Hauptgeraet je
+         Lokal: es sichert taeglich, und sobald die TSE laeuft, ist es
+         auch die Kasse, die signiert. Zwei getrennte Begriffe fuer
+         dasselbe Geraet haetten nur zu zwei verschiedenen Antworten
+         gefuehrt, wenn jemand fragt, welches Geraet denn nun gemeint
+         ist. */
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#33691e", marginBottom:10, lineHeight:1.5 } },
         sich.geraet
           ? (istDiesesGeraet
-              ? "\u2705 Dieses Ger\u00E4t ist das Sicherungsger\u00E4t" + (sich.name ? " (" + sich.name + ")" : "") + ". Es sichert jeden Tagesabschluss, auch den automatischen um 04:00."
-              : "\u2139\uFE0F Gesichert wird auf dem Ger\u00E4t \u201E" + (sich.name || sich.geraet) + "\u201C. Dieses Ger\u00E4t sichert nicht.")
+              ? "\u2705 Dieses Ger\u00E4t ist das Hauptger\u00E4t" + (sich.name ? " (" + sich.name + ")" : "") + ". Es sichert jeden Tagesabschluss, auch den automatischen um 04:00."
+                + (sich.fiskal ? " Sobald die TSE l\u00E4uft, signiert es auch die Belege." : "")
+              : "\u2139\uFE0F Hauptger\u00E4t ist \u201E" + (sich.name || sich.geraet) + "\u201C. Dieses Ger\u00E4t sichert nicht.")
           : (sichInfo && sichInfo.geraet
-              ? "\u2139\uFE0F Gesichert wird auf dem Ger\u00E4t \u201E" + (sichInfo.name || sichInfo.geraet) + "\u201C. Dieses Ger\u00E4t sichert nicht."
+              ? "\u2139\uFE0F Hauptger\u00E4t ist \u201E" + (sichInfo.name || sichInfo.geraet) + "\u201C. Dieses Ger\u00E4t sichert nicht."
                 + (sichInfo.tag ? " Zuletzt gesichert: " + sichInfo.tag + "." : " Es hat aber noch nie gesichert.")
-              : "\u26A0\uFE0F Noch kein Sicherungsger\u00E4t festgelegt. Zurzeit sichert das Ger\u00E4t, an dem der Abschluss gemacht wird \u2013 beim automatischen Abschluss um 04:00 gar keins.")),
+              : "\u26A0\uFE0F Noch kein Hauptger\u00E4t festgelegt. Zurzeit sichert das Ger\u00E4t, an dem der Abschluss gemacht wird \u2013 beim automatischen Abschluss um 04:00 gar keins. Bitte das Ger\u00E4t festlegen, das dauerhaft im Lokal bleibt.")),
       /* v507: Das Sicherungsgeraet meldet sich seit Tagen nicht. */
       sichVermisst.warnung && /*#__PURE__*/React.createElement("div", {
         style:{ background:"#ffebee", border:"2px solid #c62828", borderRadius:10, padding:"9px 11px", marginBottom:10, fontSize:12, color:"#b71c1c", lineHeight:1.5 } },
@@ -14798,7 +14917,32 @@ function BackupView({ data, onRestore }) {
       /*#__PURE__*/React.createElement("button", {
         onClick: sichGeraetUmschalten,
         style:{ width:"100%", padding:10, borderRadius:10, border:"none", background: istDiesesGeraet ? "#9e9e9e" : "#2e7d32", color:"#fff", fontWeight:700, fontSize:13, marginBottom:10 } },
-        istDiesesGeraet ? "Dieses Ger\u00E4t nicht mehr als Sicherungsger\u00E4t" : "Dieses Ger\u00E4t als Sicherungsger\u00E4t festlegen"),
+        istDiesesGeraet ? "Dieses Ger\u00E4t nicht mehr als Hauptger\u00E4t" : "Dieses Ger\u00E4t als Hauptger\u00E4t festlegen"),
+      /* \u2550\u2550\u2550 v515: DIE ZWEITE ROLLE, ABSCHALTBAR \u2550\u2550\u2550
+         Normalerweise ist das Hauptgeraet auch die Kasse. Der Schalter
+         ist trotzdem da, weil ein Betrieb die beiden Aufgaben spaeter
+         trennen koennte - etwa wenn die TSE-App nur auf einem
+         bestimmten Geraet laeuft, die Sicherung aber auf dem Tablet
+         bleiben soll, das abends da ist. */
+      istDiesesGeraet && /*#__PURE__*/React.createElement("div", {
+        style:{ display:"flex", alignItems:"center", gap:9, marginBottom:10,
+                background:"#fff", border:"1px solid #c5e1a5", borderRadius:9, padding:"8px 10px" }
+      },
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => { sichSetzen({ fiskal: !sich.fiskal }); try { window.belksSichInfoMelden({}); } catch(e){}
+                           setSichMsg(sich.fiskal
+                             ? "\u2139\uFE0F Dieses Ger\u00E4t sichert weiterhin, wird aber nicht die Kasse f\u00FCr die TSE."
+                             : "\u2705 Dieses Ger\u00E4t wird auch die Kasse, sobald die TSE l\u00E4uft."); },
+          style:{ width:24, height:24, flexShrink:0, borderRadius:6, cursor:"pointer", padding:0,
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  fontSize:14, fontWeight:900, lineHeight:1, fontFamily:"inherit",
+                  border:"2px solid " + (sich.fiskal ? "#2e7d32" : "#bbb"),
+                  background: sich.fiskal ? "#2e7d32" : "#fff", color:"#fff" }
+        }, sich.fiskal ? "\u2713" : ""),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:11.5, color:"#33691e", lineHeight:1.45 } },
+          /*#__PURE__*/React.createElement("b", null, "Dieses Ger\u00E4t ist die Kasse f\u00FCr die TSE"),
+          /*#__PURE__*/React.createElement("br", null),
+          "Die Belege werden hier signiert. Das Ger\u00E4t muss dann w\u00E4hrend der \u00D6ffnungszeiten eingeschaltet und im Lokal sein.")),
       /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, color:"#33691e", marginBottom:6, fontWeight:700 } }, "Wohin gesichert wird:"),
       /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:6, marginBottom:10 } },
         [["geraet","\uD83D\uDCF1 Ger\u00E4t"],["sd","\uD83D\uDCBE SD-Karte"],["beide","\uD83D\uDCF1+\uD83D\uDCBE Beides"]].map(([w,t]) =>
@@ -25378,7 +25522,18 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
   const [addForm, setAddForm] = React.useState({ userName:"", type:"ein", time:"", pause:0, datum:heuteISO(), von:"", bis:"" });
   const [newMa, setNewMa] = React.useState({ name:"", pin:"", rolle:"Kellner" });
 
-  const activeUser = selUser || (isAdmin ? "" : loggedInUser?.name);
+  /* ═══ v514: FUER DEN CHEF WAR DER BILDSCHIRM LEER ═══
+     Hier stand: Admin bekommt niemanden vorausgewaehlt. Dadurch endete
+     die Stempel-Ansicht nach den Namen - kein Status, keine Knoepfe,
+     nichts. Von aussen sah das aus, als sei die Zeiterfassung kaputt,
+     dabei fehlte nur ein Tipp auf den eigenen Namen.
+     Der Chef ist selbst Mitarbeiter und stempelt selbst. Er bekommt
+     deshalb sich vorausgewaehlt wie jeder andere auch; die Namen
+     daneben bleiben da, um fuer jemand anderen zu stempeln.
+     Nur wenn er gar nicht in der Mitarbeiterliste steht, bleibt die
+     Auswahl offen - dann gaebe es nichts, worauf man stempeln koennte. */
+  const istMitarbeiter = (users || []).some(u => u && !u.deleted && u.name === loggedInUser?.name);
+  const activeUser = selUser || (istMitarbeiter ? loggedInUser?.name : "");
 
   // Last entry today for selected user
   const todayStr = new Date().toLocaleDateString("de-DE");
@@ -25677,11 +25832,14 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
 
     React.createElement("div", { style:{fontWeight:900,fontSize:18,marginBottom:16,color:"#1b5e20"} }, "⏱️ Zeiterfassung"),
 
-    // Tabs
-    React.createElement("div", { style:{display:"flex",gap:8,marginBottom:16} },
+    /* v514: Ein einzelner Reiter ist kein Reiter. Ohne Admin-Rechte gab
+       es nur "Stempeln" - ein breiter gruener Knopf, der nichts tut,
+       weil man ohnehin schon dort ist. Jetzt erscheint die Leiste nur,
+       wenn es wirklich etwas zu wechseln gibt. */
+    isAdmin && React.createElement("div", { style:{display:"flex",gap:8,marginBottom:16} },
       React.createElement("button", { onClick:()=>setTab("stempel"), style:btnStyle(tab==="stempel") }, "🕐 Stempeln"),
-      isAdmin && React.createElement("button", { onClick:()=>setTab("uebersicht"), style:btnStyle(tab==="uebersicht") }, "📋 Übersicht"),
-      isAdmin && React.createElement("button", { onClick:()=>setTab("mitarbeiter"), style:btnStyle(tab==="mitarbeiter") }, "👤 Mitarbeiter")
+      React.createElement("button", { onClick:()=>setTab("uebersicht"), style:btnStyle(tab==="uebersicht") }, "📋 Übersicht"),
+      React.createElement("button", { onClick:()=>setTab("mitarbeiter"), style:btnStyle(tab==="mitarbeiter") }, "👤 Mitarbeiter")
     ),
 
     // == STEMPELN ==
@@ -25705,6 +25863,18 @@ function ZeiterfassungView({ users, setUsers, loggedInUser, zeiterfassung, setZe
           )
         )
       ),
+
+      /* v514: Ohne Auswahl stand der Bildschirm einfach still. Jetzt sagt
+         er, was zu tun ist - und wenn gar kein Mitarbeiter angelegt ist,
+         sagt er auch das, statt eine leere Reihe zu zeigen. */
+      !activeUser && React.createElement("div", {
+        style:{textAlign:"center",marginBottom:14,padding:"13px 12px",background:"#fff3e0",
+               borderRadius:10,border:"2px dashed #ffb74d",color:"#8d6e63",
+               fontSize:13,fontWeight:600,lineHeight:1.5}
+      }, (users||[]).filter(u=>!u.deleted).length === 0
+           ? (isAdmin ? "Noch kein Mitarbeiter angelegt — unter 👤 Mitarbeiter hinzufügen."
+                      : "Noch kein Mitarbeiter angelegt. Bitte beim Chef melden.")
+           : "👆 Bitte oben den Mitarbeiter antippen, der stempeln soll."),
 
       // Status
       activeUser && React.createElement("div", { style:{textAlign:"center",marginBottom:14,padding:"10px",background:isEin?"#e8f5e9":"#fff3e0",borderRadius:10,border:"2px solid "+(isEin?C.green:"#ff9800")} },
@@ -26616,7 +26786,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v513"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v516"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -29193,17 +29363,50 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
   })();
   /* Solange die Benutzerliste noch nicht gelesen ist, klar sagen was los ist -
      sonst steht der Kellner vor einem leeren Bildschirm und probiert Dinge aus. */
+  /* \u2550\u2550\u2550 v516: DIESER BILDSCHIRM WAR EINE SACKGASSE \u2550\u2550\u2550
+     Eine frisch angelegte Tochter hat noch keine Anmeldung bei der
+     Zentrale - die wird je Tochter getrennt gespeichert. Ohne Anmeldung
+     laesst sich die Benutzerliste nicht aus der Cloud lesen, also wird
+     _darfErstBenutzer nie wahr, also bleibt dieser Wartebildschirm
+     stehen. Er lag ueber allem (zIndex 9999) und hatte genau einen
+     Knopf, der nur neu laedt. Damit kam man nicht mehr heraus: anmelden
+     ging nicht, weil der Bildschirm die Anmeldung verdeckte.
+     Zwei Aenderungen: Er sagt jetzt, WORAN es wirklich liegt - "die
+     Verbindung ist langsam" war schlicht falsch, wenn gar keine
+     Anmeldung vorliegt - und er bietet den Weg dorthin an. */
+  var _keinKonto = false;
+  try {
+    _keinKonto = !!window.__belksAnmeldungTot || !!window.__belksRechteFehler
+              || !(window.belksAuthEmail && window.belksAuthEmail());
+  } catch(e) { _keinKonto = false; }
   const _wartetAufBenutzer = (!loggedInUser && _activeUsers.length===0 && !_darfErstBenutzer)
     ? /*#__PURE__*/React.createElement("div",{style:{position:"fixed",inset:0,background:"linear-gradient(135deg,#C84B31 0%,#6B1200 100%)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}},
         /*#__PURE__*/React.createElement("div",{style:{background:"#fff",borderRadius:18,padding:"26px 22px",maxWidth:360,width:"100%",textAlign:"center"}},
-          /*#__PURE__*/React.createElement("div",{style:{fontSize:30}},"\u23F3"),
-          /*#__PURE__*/React.createElement("div",{style:{fontWeight:800,fontSize:17,color:"#C84B31",margin:"6px 0 8px"}},"Benutzer werden geladen \u2026"),
+          /*#__PURE__*/React.createElement("div",{style:{fontSize:30}}, _keinKonto ? "\uD83D\uDD12" : "\u23F3"),
+          /*#__PURE__*/React.createElement("div",{style:{fontWeight:800,fontSize:17,color:"#C84B31",margin:"6px 0 8px"}},
+            _keinKonto ? "Noch nicht bei der Zentrale angemeldet" : "Benutzer werden geladen \u2026"),
           /*#__PURE__*/React.createElement("div",{style:{fontSize:13,color:"#666",lineHeight:1.55}},
-            "Die Verbindung ist gerade langsam. Bitte kurz warten \u2013 die Benutzer dieses Restaurants kommen aus der Cloud."),
+            _keinKonto
+              ? "Dieses Restaurant ist neu auf diesem Ger\u00E4t. Die Anmeldung gilt je Restaurant getrennt \u2013 ohne sie k\u00F6nnen die Benutzer nicht aus der Cloud geladen werden. Bitte mit E-Mail und Passwort anmelden."
+              : "Die Verbindung ist gerade langsam. Bitte kurz warten \u2013 die Benutzer dieses Restaurants kommen aus der Cloud."),
+          _keinKonto && /*#__PURE__*/React.createElement("button",{
+            onClick:function(){ try{ window.belksAccountOverlay && window.belksAccountOverlay({lock:true}); }catch(e){} },
+            style:{marginTop:16,width:"100%",padding:13,borderRadius:11,border:"none",background:"#2e7d32",color:"#fff",fontWeight:800,fontSize:15,cursor:"pointer",fontFamily:"inherit"}
+          },"\uD83D\uDD13 Bei der Zentrale anmelden"),
           /*#__PURE__*/React.createElement("button",{
             onClick:function(){ try{ if(window.runSyncJetzt) window.runSyncJetzt().then(function(){ location.reload(); }); else location.reload(); }catch(e){ location.reload(); } },
-            style:{marginTop:16,width:"100%",padding:12,borderRadius:10,border:"none",background:"#C84B31",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer",fontFamily:"inherit"}
-          },"\uD83D\uDD04 Nochmal versuchen")
+            style:{marginTop:_keinKonto?8:16,width:"100%",padding:12,borderRadius:10,
+                   border:_keinKonto?"2px solid #ddd":"none",
+                   background:_keinKonto?"#fff":"#C84B31",color:_keinKonto?"#777":"#fff",
+                   fontWeight:800,fontSize:14,cursor:"pointer",fontFamily:"inherit"}
+          },"\uD83D\uDD04 Nochmal versuchen"),
+          /* Letzter Ausweg: Wer sich im falschen Restaurant wiederfindet,
+             muss zurueck kommen koennen, ohne die App zu loeschen. */
+          /*#__PURE__*/React.createElement("button",{
+            onClick:function(){ try{ window.belksAccountOverlay && window.belksAccountOverlay(); }catch(e){} },
+            style:{marginTop:8,width:"100%",padding:10,borderRadius:10,border:"none",background:"transparent",
+                   color:"#999",fontWeight:700,fontSize:12.5,cursor:"pointer",fontFamily:"inherit"}
+          },"\uD83C\uDFE2 Restaurant wechseln")
         ))
     : null;
   const _firstUserSetup = (!loggedInUser && _activeUsers.length===0 && _darfErstBenutzer) ? /*#__PURE__*/React.createElement("div",{style:{position:"fixed",inset:0,background:"linear-gradient(135deg,#C84B31 0%,#6B1200 100%)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}},
@@ -29793,7 +29996,20 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
       color: "#aaa",
       textAlign: "center"
     }
-  }, tenantDisplayName()+" POS", /*#__PURE__*/React.createElement("br", null), tenantAddressLine()),
+  }, tenantDisplayName()+" POS", /*#__PURE__*/React.createElement("br", null), tenantAddressLine(),
+  /* ═══ v514: DIE LAUFENDE VERSION MUSS AUFFINDBAR SEIN ═══
+     Sie stand nur auf dem Startbildschirm, in der Begruessungskarte. Wer
+     gerade in der Zeiterfassung oder an einem Tisch steht und wissen
+     will, ob seine Aenderung ueberhaupt auf dem Geraet angekommen ist,
+     findet sie dort nicht - und haelt die neue Fassung fuer kaputt,
+     obwohl noch die alte laeuft. Das Menue ist von jedem Bildschirm aus
+     einen Tipp entfernt, also gehoert sie hierhin.
+     Gelesen wird sie aus dem Titel, nicht aus einem zweiten
+     Zahlenwert: zwei Stellen, die dasselbe wissen muessen, laufen
+     auseinander. */
+  /*#__PURE__*/React.createElement("div", {
+    style: { marginTop: 4, fontSize: 11, color: "#bbb", fontWeight: 700, letterSpacing: .3 }
+  }, (String(document.title).match(/v\d+/) || ["?"])[0])),
   loggedInUser && /*#__PURE__*/React.createElement("button", {
     onClick:()=>{
       try{ localStorage.setItem('eatdesi_full_logout','1'); }catch(e){}
@@ -30158,7 +30374,10 @@ setCustomers(p => p.map((c,i) => i===cIdx ? {...c, points:(c.points||0)+pts, gea
                   if (!neu || neu === jetzt) return;
                   if (window.confirm('Neue Version ' + neu + ' verf\u00fcgbar (hier l\u00e4uft ' + jetzt + ').\n\n'
                       + 'Jetzt laden? Offene Tische bleiben erhalten.')) {
-                    location.reload();
+                    /* v514: NICHT location.reload() - das holte die Datei
+                       aus dem Zwischenspeicher des Service Workers und
+                       lud damit genau die alte Fassung wieder. */
+                    window.belksNeuLaden();
                   }
                 })
                 .catch(function(e){ try{ console.warn('Versionspruefung:', e && e.message); }catch(_e){} });
