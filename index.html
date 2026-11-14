@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v516</title>
+<title>eatDeSi POS v518</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -26786,7 +26786,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v516"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v518"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -32847,6 +32847,16 @@ function BelksZentraleView(){
   var [email,setEmail]=R.useState('');
   var [email2,setEmail2]=R.useState('');
   var [loginPwNew,setLoginPwNew]=R.useState('');
+  /* ═══ v517: DER WEBSITE-PIN GEHOERT ZUR TOCHTER ═══
+     Bis September stand der Website-PIN fest im Quelltext ('0000', fuer
+     jeden Standort gleich) - eine offene Tuer, die jeder kannte, der die
+     Adresse hatte. Seit die Pruefung auf dem Server laeuft, gibt es fuer
+     einen neuen Standort gar keinen PIN mehr, und eingerichtet werden
+     konnte er nur mit SQL von Hand.
+     Das war fuer zwei eigene Laeden laestig. Fuer verkaufte Kassen waere
+     es unmoeglich: kein Wirt oeffnet Supabase.
+     Jetzt wird er hier vergeben, zusammen mit allem anderen. */
+  var [webPin,setWebPin]=R.useState('');
   var [showLinks,setShowLinks]=R.useState('');
   var [linkEmail,setLinkEmail]=R.useState('');
   var [linkPw,setLinkPw]=R.useState('');
@@ -32938,6 +32948,10 @@ function BelksZentraleView(){
     if(!String(email||'').trim() || String(email).indexOf('@')<1){setErr('\uD83D\uDCE7 Login-E-Mail ist PFLICHT.');return;}
     if(String(email).trim().toLowerCase()!==String(email2||'').trim().toLowerCase()){setErr('\uD83D\uDCE7 Die beiden E-Mail-Felder stimmen nicht \u00fcberein.');return;}
     if(String(loginPwNew||'').length<6){setErr('\uD83D\uDD10 Bitte ein Login-Passwort mit mind. 6 Zeichen w\u00e4hlen.');return;}
+    /* Genau vier Ziffern - das Tastenfeld im Website-Admin kann nichts
+       anderes. Ein Buchstabe darin hiesse: nie wieder hineinkommen. */
+    if(!/^[0-9]{4}$/.test(String(webPin||''))){setErr('\uD83D\uDD12 Website-PIN: genau 4 Ziffern.');return;}
+    if(belksPinZuEinfach(webPin)){setErr('\uD83D\uDD12 Dieser Website-PIN ist zu leicht zu erraten. Bitte eine andere Zahl.');return;}
     var pw=belksRandPw();
     var loginPw=String(loginPwNew);
     var mail=String(email||'').trim().toLowerCase();
@@ -32950,6 +32964,28 @@ function BelksZentraleView(){
           body:JSON.stringify({location_id:effCode,name:name.trim(),street:street.trim(),city:city.trim(),phone:phone.trim(),plan:'free',active:true,secret:pw,email:mail||null})});
         if(r.status===409) throw new Error('Code "'+effCode+'" existiert schon \u2013 bitte anderen Code w\u00e4hlen.');
         if(!r.ok&&r.status!==201) throw new Error('HTTP '+r.status);
+
+        /* v517: Website-PIN setzen, sobald die Tochter existiert - die
+           Serverfunktion prueft gegen belks_tenants, die Zeile muss also
+           schon da sein. Schlaegt es fehl, bleibt die Tochter trotzdem
+           bestehen; die Meldung sagt dann, dass der PIN noch fehlt.
+           Ein stiller Fehlschlag waere das Schlimmste: der Betreiber
+           glaubte, alles sei eingerichtet, und stuende Tage spaeter vor
+           einem Tastenfeld, das ihn nicht einlaesst. */
+        var _pinWarnung = '';
+        try{
+          var _rp = await fetch(SUPA_URL+'/rest/v1/rpc/belks_website_pin_setzen',{
+            method:'POST',
+            headers:{...window.belksSupaKopf(),'Content-Type':'application/json'},
+            body: JSON.stringify({ p_loc: effCode, p_pin: String(webPin) })});
+          var _tx = await _rp.text();
+          var _j = null; try{ _j = JSON.parse(_tx); }catch(e){}
+          if(_rp.status===404 || (_j && _j.code==='42883')){
+            _pinWarnung = ' \u26a0\ufe0f Website-PIN NICHT gesetzt: die Serverfunktion belks_website_pin_setzen fehlt noch.';
+          } else if(!(_j && _j.ok)){
+            _pinWarnung = ' \u26a0\ufe0f Website-PIN NICHT gesetzt ('+((_j&&_j.grund)||('HTTP '+_rp.status))+').';
+          }
+        }catch(e){ _pinWarnung = ' \u26a0\ufe0f Website-PIN NICHT gesetzt: '+String(e.message||e); }
 
         // ══ v210: ALLE Stammdaten sofort in die Cloud der neuen Tochter ══
         // Damit muss die Tochter-App nichts mehr erfragen und nichts kann
@@ -33019,12 +33055,13 @@ function BelksZentraleView(){
           }
         }
         else msg+=' \u00b7 Restaurant-Passwort: '+pw+' (kein E-Mail-Login verbunden)';
+        msg += _pinWarnung;
         setOk(msg);
         setName('');setCode('');setCodeTouched(false);setStreet('');setCity('');setPhone('');setEmail('');setEmail2('');setLoginPwNew('');
         setSteuernr('');setUstId('');setAmtsger('');setTischzahl('30');setSumupKey('');setAiEnabled(true);setWebsite('');
         setBonFuss('Danke & bis bald! \uD83D\uDE4F');
         setKarteText('');setKarteInfo('');
-        setGoogleReview('');setMenuPdf('');setInstagram('');setFacebook('');setTiktok('');
+        setGoogleReview('');setMenuPdf('');setInstagram('');setFacebook('');setTiktok('');setWebPin('');
         setShowLinks(effCode); load(); setBusy(false);
       }catch(e){ setErr(String(e.message||e)); setBusy(false); }
     })();
@@ -33032,6 +33069,55 @@ function BelksZentraleView(){
   function switchTo(c){
     var t=(tenants||[]).filter(function(x){return x.location_id===c;})[0];
     belksQuickSwitch(c, t&&t.name);
+  }
+  /* ═══ v518: DIESELBE LISTE WIE AUF DEM SERVER ═══
+     Die Serverfunktion lehnt 0000, 1234 und 1111 ab. Prueft die Kasse
+     das nicht selbst, tippt der Wirt den PIN, drueckt, wartet - und
+     bekommt dann erst die Absage. Hier faellt sie sofort.
+     Die Liste steht bewusst an EINER Stelle im Programm; der Server
+     bleibt die letzte Instanz, dies hier ist nur die schnelle Antwort. */
+  var BELKS_PIN_ZU_EINFACH = ['0000','1234','1111'];
+  function belksPinZuEinfach(p){ return BELKS_PIN_ZU_EINFACH.indexOf(String(p)) >= 0; }
+  /* v517: Website-PIN einer bestehenden Tochter aendern. Bad Wildungen,
+     Felsberg und Fritzlar gibt es laengst - ohne das hier muesste fuer
+     jeden von ihnen weiter SQL getippt werden. */
+  function webPinSetzen(c){
+    var p='';
+    try{ p = window.prompt('Neuer Website-PIN für "'+c+'"\n\nGenau 4 Ziffern. Er gilt für den Admin-Bereich der Gäste-Website.', ''); }
+    catch(e){ p=null; }
+    if(p===null) return;
+    p = String(p).trim();
+    if(!/^[0-9]{4}$/.test(p)){ setErr('🔒 Website-PIN: genau 4 Ziffern.'); return; }
+    if(belksPinZuEinfach(p)){ setErr('🔒 Dieser PIN ist zu leicht zu erraten. Bitte eine andere Zahl.'); return; }
+    setErr(''); setOk('');
+    fetch(SUPA_URL+'/rest/v1/rpc/belks_website_pin_setzen',{method:'POST',
+      headers:{...window.belksSupaKopf(),'Content-Type':'application/json'},
+      body:JSON.stringify({p_loc:c,p_pin:p})})
+    .then(function(r){ return r.text().then(function(t){ return {status:r.status,text:t}; }); })
+    .then(function(res){
+      var j=null; try{ j=JSON.parse(res.text); }catch(e){}
+      if(res.status===404 || (j && j.code==='42883')){
+        throw new Error('Die Serverfunktion belks_website_pin_setzen fehlt noch in der Datenbank.');
+      }
+      if(j && j.ok){ setOk('🔒 Website-PIN für '+c+' gesetzt. Bitte notieren – zurücklesen kann ihn niemand.'); return; }
+      var g=(j&&j.grund)||('HTTP '+res.status);
+      if(g==='keine_berechtigung') throw new Error('Dieses Konto darf den PIN von "'+c+'" nicht ändern.');
+      if(g==='nicht_angemeldet')  throw new Error('Dafür musst du bei der Zentrale angemeldet sein.');
+      if(g==='pin_format')        throw new Error('Website-PIN: genau 4 Ziffern.');
+      /* v518: Die Serverfunktion kennt diese beiden Gründe schon seit
+         September. Ohne eigenen Satz stünde beim Wirt nur das nackte
+         Wort "pin_zu_einfach" - und er wüsste nicht, dass er einfach
+         eine andere Zahl nehmen soll. */
+      if(g==='pin_zu_einfach')    throw new Error('Dieser PIN ist zu leicht zu erraten. Bitte eine andere Zahl wählen (nicht 0000, 1234 oder 1111).');
+      if(g==='code_ungueltig')    throw new Error('Der Standort-Code "'+c+'" hat ein ungültiges Format.');
+      /* Einen eigenen Grund "Standort unbekannt" gibt es bewusst NICHT:
+         belks_my_locations() listet einen fremden oder nicht
+         vorhandenen Standort gleichermassen nicht auf, und beides als
+         "keine Berechtigung" zu beantworten verraet nebenbei auch nicht,
+         welche Standort-Codes es ueberhaupt gibt. */
+      throw new Error(String(g));
+    })
+    .catch(function(e){ setErr(String(e.message||e)); });
   }
   function regenPw(c){
     if(!window.confirm('Neues Restaurant-Passwort f\u00fcr "'+c+'" erzeugen?\n\nDas alte Passwort gilt danach NICHT mehr f\u00fcr neue Ger\u00e4te-Aktivierungen. Bereits aktivierte Ger\u00e4te laufen normal weiter.')) return;
@@ -33112,6 +33198,12 @@ function BelksZentraleView(){
       lbl('\uD83D\uDD10 Login-Passwort w\u00e4hlen * (mind. 6 Zeichen \u2013 damit meldet sich das Restaurant an)'),
       R.createElement('input',{type:'password',value:loginPwNew,onChange:function(e){setLoginPwNew(e.target.value);},style:iS,placeholder:'Passwort f\u00fcr dieses Restaurant'}),
       R.createElement('div',{style:{fontSize:11,color:'#7b1fa2',fontWeight:700,margin:'2px 0 8px'}},'\uD83D\uDD10 Die Tochter meldet sich mit dieser E-Mail + deinem gew\u00e4hlten Passwort an (wie GloriaFood). Nach dem Anlegen: Best\u00e4tigungs-Link anklicken. \u201EPasswort vergessen\u201C schickt automatisch eine Reset-E-Mail.'),
+      lbl('\uD83D\uDD12 Website-PIN * (genau 4 Ziffern \u2013 f\u00FCr den Admin-Bereich der G\u00e4ste-Website)'),
+      R.createElement('input',{type:'tel',inputMode:'numeric',maxLength:4,value:webPin,
+        onChange:function(e){ setWebPin(String(e.target.value||'').replace(/[^0-9]/g,'').slice(0,4)); },
+        style:iS,placeholder:'z. B. 4821'}),
+      R.createElement('div',{style:{fontSize:11,color:'#888',margin:'-4px 0 8px',lineHeight:1.5}},
+        'Nur Ziffern \u2013 das Tastenfeld der Website kennt nichts anderes. Nicht 0000, 1234 oder 1111. Gespeichert wird er verschl\u00FCsselt; zur\u00FCcklesen kann ihn danach niemand, auch du nicht. Also aufschreiben.'),
 
       // ══ v210: Stammdaten gleich hier eintragen – sie landen sofort in der
       // Cloud der neuen Tochter. Die Tochter-App muss danach nichts mehr
@@ -33289,6 +33381,15 @@ function BelksZentraleView(){
             R.createElement('div',{style:{display:'flex',gap:6}},
               R.createElement('input',{readOnly:true,value:t.secret||'\u2014 (keins gesetzt)',style:Object.assign({},iS,{fontFamily:'monospace',fontSize:11,fontWeight:700,flex:1,width:'auto'}),onFocus:function(e){e.target.select();}}),
               R.createElement('button',{onClick:function(){regenPw(c);},style:{flex:'0 0 auto',padding:'8px 10px',borderRadius:8,border:'none',background:'#e65100',color:'#fff',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit',marginBottom:8}},'\uD83D\uDD11 Neues Passwort')),
+            /* v517: Der Website-PIN steht hier bei den anderen Zugaengen -
+               dort sucht man ihn. Angezeigt wird er nie: gespeichert ist
+               nur ein Hash, zurueckrechnen kann ihn niemand. */
+            lbl('Website-PIN (Admin-Bereich der G\u00e4ste-Website):'),
+            R.createElement('div',{style:{display:'flex',gap:8,alignItems:'center',marginBottom:8}},
+              R.createElement('div',{style:Object.assign({},iS,{flex:1,width:'auto',marginBottom:0,background:'#fafafa',color:'#888',fontSize:11.5})},
+                '\u2022\u2022\u2022\u2022 \u2013 nicht lesbar, nur neu setzbar'),
+              R.createElement('button',{onClick:function(){webPinSetzen(c);},
+                style:{flex:'0 0 auto',padding:'8px 10px',borderRadius:8,border:'none',background:'#6a1b9a',color:'#fff',fontWeight:800,fontSize:11,cursor:'pointer',fontFamily:'inherit'}},'\ud83d\udd12 PIN setzen')),
             lbl('POS-Link (auf neuem Ger\u00e4t EINMAL \u00f6ffnen \u2013 fragt dann das Restaurant-Passwort):'),
             R.createElement('input',{readOnly:true,value:posBase+'?restaurant='+c,style:Object.assign({},iS,{fontFamily:'monospace',fontSize:10.5}),onFocus:function(e){e.target.select();}}),
             lbl('Website-Link (Gast-Bestellseite \u2013 Website-Umbau folgt als n\u00e4chster Schritt):'),
