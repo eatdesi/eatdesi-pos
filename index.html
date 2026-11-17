@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#C84B31">
-<title>eatDeSi POS v518</title>
+<title>eatDeSi POS v520</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -15828,6 +15828,16 @@ function OrderView({
     if (g > 0) setLiefergebührAmt(String(g));
   }, [tableId]);
   const items = order?.items || [];
+  /* ═══ v520: WORAUF SICH DIESE EINGABE STUETZT ═══
+     addItem & Co. rechnen mit der Liste, die GERADE auf dem Schirm steht.
+     Zeichnet die Ansicht zwischen zwei Tippern nicht neu - weil der
+     Abgleich dazwischenfunkt oder der Kellner schnell ist - dann fehlt
+     in dieser Liste eine Zeile, die im Zustand laengst steht. Bisher
+     galt sie dadurch als geloescht und bekam eine Loeschmarke.
+     Deshalb reicht jeder Aufruf mit, welche Zeilen er gesehen hat.
+     Nur die duerfen ueberhaupt als geloescht gelten. */
+  const _basis = () => items.map(i => i && i._iid).filter(Boolean);
+  const onUpdateB = (tid, next) => onUpdate(tid, next, _basis());
   /* v451: Hier stand belksTaTitel(tableId) - das liest die Ablage im
      Browser. Die Nummer kommt aber vom Server und steht erst im Zustand,
      bevor sie in der Ablage landet. In dieser Luecke zeigte die Kopfzeile
@@ -15957,7 +15967,7 @@ function OrderView({
          KI-Bestellungen nach dem Update sichtbar. */
       _entwurf: true
     }];
-    onUpdate(tableId, next);
+    onUpdateB(tableId, next);
     setOptItem(null);
     // Scroll to bottom of order list to show newly added item
     setTimeout(() => {
@@ -15966,7 +15976,7 @@ function OrderView({
       }
     }, 50);
   };
-  const mengeSetzen = (key, d) => onUpdate(tableId, items.map(i => i._key === key ? {
+  const mengeSetzen = (key, d) => onUpdateB(tableId, items.map(i => i._key === key ? {
     ...i,
     qty: i.qty + d
   } : i).filter(i => i.qty > 0));
@@ -16055,7 +16065,7 @@ function OrderView({
                   { ...i, qty: rest, _key: newKey }
                 ];
               });
-              onUpdate(tableId, updated);
+              onUpdateB(tableId, updated);
               setSplitTarget(null);
             },
             style:{ flex:2, padding:12, borderRadius:10, border:"none", background:C.green, color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700, fontSize:14 }
@@ -16180,7 +16190,7 @@ function OrderView({
     onClick: () => {
       const menge = bearbMengeZahl();
       const endpreis = bearbEndpreis();
-      onUpdate(tableId, items.map(i => {
+      onUpdateB(tableId, items.map(i => {
         if (i._key !== noteTarget) return i;
         const neu = Object.assign({}, i, { kitchenNote: noteText, qty: menge });
         if (darfPreis) {
@@ -19624,7 +19634,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
   var [showForm, setShowForm] = R.useState(false);
   var [newCat, setNewCat] = R.useState('');
   var [showNewCat, setShowNewCat] = R.useState(false);
-  var [form, setForm] = R.useState({nr:'',name:'',price:'',description:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});
+  var [form, setForm] = R.useState({nr:'',name:'',price:'',description:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[],kategorie:'',allergene:[]});
 
   /* v496: Beschreibungen aus der Vorlage uebernehmen - fuellt NUR Artikel
      auf, die noch KEINE eigene Beschreibung haben, und trifft nur bei
@@ -19681,6 +19691,8 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
   var [dragCat, setDragCat] = R.useState(null);
   var [overCat, setOverCat] = R.useState(null);
   var [dragItem, setDragItem] = R.useState(null);
+  /* v519: Welcher Artikel soll die Kategorie wechseln? null = keiner. */
+  var [verschiebe, setVerschiebe] = R.useState(null);
   var [overItem, setOverItem] = R.useState(null);
   var C = {green:'#2e7d32',pink:'#880e4f',red:'#c62828',blue:'#1565c0'};
   var iS = {width:'100%',padding:'8px 10px',borderRadius:8,border:'1.5px solid #ddd',fontSize:13,fontFamily:'inherit',boxSizing:'border-box',marginBottom:8};
@@ -19724,19 +19736,36 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
       nr:form.nr,name:form.name,price:parseFloat(form.price)||0,description:(form.description||'').trim(),
       veg:form.veg,vegan:form.vegan,taxRate:form.taxRate||'food',channel:form.channel||'both',bon:form.bon||'auto',
       options:cleanOpts,
+      /* v519: Allergene wurden im Formular angehakt, aber nie gespeichert.
+         Dadurch stand die Warnung dauerhaft in der Liste und die
+         Pflichtangabe nach EU 1169/2011 liess sich gar nicht pflegen. */
+      allergene:(form.allergene||[]).slice(),
       selectedGroups:form.selectedGroups||[]};
     var u=Object.assign({},menuData);
-    if(editing!==null){u[activeCat]=u[activeCat].map(function(x,i){return i===editing?Object.assign({},x,item,{id:x.id}):x;});}
-    else{u[activeCat]=(u[activeCat]||[]).concat([item]);}
+    /* v519: Die im Formular gewaehlte Kategorie. Leer oder unbekannt
+       heisst: bleibt, wo er ist - so verhaelt sich eine alte gespeicherte
+       Eingabe genauso wie vorher. */
+    var zielCat=(form.kategorie && Object.prototype.hasOwnProperty.call(menuData, form.kategorie)) ? form.kategorie : activeCat;
+    if(editing!==null){
+      u[activeCat]=u[activeCat].map(function(x,i){return i===editing?Object.assign({},x,item,{id:x.id}):x;});
+      if(zielCat!==activeCat){
+        /* Erst die Aenderungen eintragen, dann umhaengen - sonst wandert
+           der alte Stand mit und das Bearbeiten waere verloren. */
+        var nachUmzug=belksArtikelUmhaengen(u,activeCat,editing,zielCat);
+        if(nachUmzug) u=nachUmzug;
+      }
+    }
+    else{u[zielCat]=(u[zielCat]||[]).concat([item]);}
     onUpdate(u);
-    setForm({nr:'',name:'',price:'',description:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});
+    setForm({nr:'',name:'',price:'',description:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[],kategorie:'',allergene:[]});
     setEditing(null);setShowForm(false);
+    if(zielCat!==activeCat) toast('Gespeichert und nach "'+zielCat+'" verschoben');
   };
 
   var deleteItem=function(i){var u=Object.assign({},menuData);u[activeCat]=u[activeCat].filter(function(_,j){return j!==i;});onUpdate(u);};
 
   var startEdit=function(item,i){
-    setForm({nr:item.nr||'',name:item.name||'',price:String(item.price||''),description:item.description||'',veg:item.veg||false,vegan:item.vegan||false,taxRate:item.taxRate||'food',channel:item.channel||'both',bon:item.bon||'auto',options:item.options||[],selectedGroups:item.selectedGroups||[]});
+    setForm({nr:item.nr||'',name:item.name||'',price:String(item.price||''),description:item.description||'',veg:item.veg||false,vegan:item.vegan||false,taxRate:item.taxRate||'food',channel:item.channel||'both',bon:item.bon||'auto',options:item.options||[],selectedGroups:item.selectedGroups||[],kategorie:activeCat,allergene:(item.allergene||[]).slice()});
     setEditing(i);setShowForm(true);
   };
 
@@ -19754,6 +19783,37 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
     try{localStorage.setItem('eatdesi_cat_order',JSON.stringify(nk));}catch(e){}
   };
 
+  /* v519: Artikel in eine andere Kategorie umhaengen.
+     REIN rechnend - nimmt eine Karte, gibt eine neue zurueck (oder null,
+     wenn nichts zu tun ist). Formular und Zeilen-Pfeil rufen beide hier
+     herein, damit es nicht zwei Wege gibt, die irgendwann auseinander
+     laufen. Der Artikel behaelt seine id, sonst verliert er Verkaufs-
+     historie und Option-Gruppen-Bezuege. */
+  var belksArtikelUmhaengen=function(karte,vonCat,index,nachCat){
+    if(!karte||!vonCat||!nachCat||vonCat===nachCat) return null;
+    if(!Object.prototype.hasOwnProperty.call(karte,nachCat)) return null;
+    var quelle=(karte[vonCat]||[]).slice();
+    if(index==null||index<0||index>=quelle.length) return null;
+    var artikel=quelle.splice(index,1)[0];
+    if(!artikel) return null;
+    var u=Object.assign({},karte);
+    u[vonCat]=quelle;
+    u[nachCat]=(u[nachCat]||[]).concat([artikel]);
+    return u;
+  };
+
+  /* v519: derselbe Vorgang aus der Liste heraus. */
+  var verschiebeArtikel=function(index,nachCat){
+    var u=belksArtikelUmhaengen(menuData,activeCat,index,nachCat);
+    if(!u) return false;
+    onUpdate(u);
+    setVerschiebe(null);
+    /* Das Formular zeigte auf eine Zeile, die es nicht mehr gibt. */
+    if(editing!==null){ setEditing(null); setShowForm(false); }
+    toast('Verschoben nach "'+nachCat+'" - noch "Speisekarte speichern" druecken');
+    return true;
+  };
+
   var reorderItems=function(from,to){
     if(from===to||from==null||to==null)return;
     var items=(menuData[activeCat]||[]).slice();
@@ -19763,6 +19823,37 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
   };
 
   return R.createElement('div',{style:{height:'calc(100vh - 90px)',display:'flex',flexDirection:'column',overflow:'hidden'}},
+
+    /* v519: Auswahl der Zielkategorie. Liegt ueber allem, weil die Liste
+       darunter scrollt - ein eingeklapptes Feld in der Zeile waere beim
+       Tippen auf dem Tablet staendig aus dem Bild gerutscht. */
+    verschiebe && R.createElement('div',{
+        onClick:function(){setVerschiebe(null);},
+        style:{position:'fixed',inset:0,zIndex:9000,background:'rgba(0,0,0,.45)',display:'flex',alignItems:'flex-end',justifyContent:'center'}},
+      R.createElement('div',{
+          onClick:function(e){e.stopPropagation();},
+          style:{background:'#fff',width:'100%',maxWidth:520,maxHeight:'72vh',borderRadius:'16px 16px 0 0',display:'flex',flexDirection:'column',overflow:'hidden'}},
+        R.createElement('div',{style:{padding:'16px 18px 10px',borderBottom:'1px solid #eee'}},
+          R.createElement('div',{style:{fontWeight:800,fontSize:15,color:C.pink}},'Verschieben'),
+          R.createElement('div',{style:{fontSize:13,color:'#666',marginTop:3}},
+            '"'+(verschiebe.name||'Artikel')+'" aus "'+activeCat+'" in welche Kategorie?')
+        ),
+        R.createElement('div',{style:{flex:1,overflowY:'auto',padding:'8px 10px'}},
+          Object.keys(menuData||{}).filter(function(cat){return cat!==activeCat;}).map(function(cat){
+            return R.createElement('button',{key:cat,
+              onClick:function(){verschiebeArtikel(verschiebe.index,cat);},
+              style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,width:'100%',textAlign:'left',padding:'13px 14px',marginBottom:6,borderRadius:10,border:'1.5px solid #eee',background:'#fafafa',cursor:'pointer',fontFamily:'inherit',fontSize:14,fontWeight:600,color:'#333'}},
+              R.createElement('span',null,cat),
+              R.createElement('span',{style:{fontSize:11,color:'#999',fontWeight:400,flexShrink:0}},(menuData[cat]||[]).length+' Artikel')
+            );
+          })
+        ),
+        R.createElement('div',{style:{padding:'10px 14px',borderTop:'1px solid #eee'}},
+          R.createElement('button',{onClick:function(){setVerschiebe(null);},
+            style:{width:'100%',padding:12,borderRadius:10,border:'none',background:'#eee',color:'#555',fontWeight:700,fontSize:14,cursor:'pointer',fontFamily:'inherit'}},'Abbrechen')
+        )
+      )
+    ),
 
     R.createElement('div',{style:{display:'flex',background:'#fff',borderBottom:'2px solid #e0e0e0',flexShrink:0}},
       R.createElement('button',{onClick:function(){setActiveTab('menu');},style:{flex:1,padding:'10px 0',border:'none',background:'transparent',cursor:'pointer',fontFamily:'inherit',fontWeight:700,fontSize:13,color:activeTab==='menu'?C.green:'#999',borderBottom:activeTab==='menu'?'3px solid '+C.green:'3px solid transparent'}},'Speisekarte'),
@@ -19839,7 +19930,7 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
               activeCat,' ',R.createElement('span',{style:{fontSize:12,color:'#888',fontWeight:400}},'('+(menuData[activeCat]||[]).length+' Artikel)')
             ),
             R.createElement('div',{style:{display:'flex',gap:6}},
-              R.createElement('button',{onClick:function(){setEditing(null);setForm({nr:'',name:'',price:'',description:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[]});setShowForm(true);},style:bS(C.green)},'+ Artikel'),
+              R.createElement('button',{onClick:function(){setEditing(null);setForm({nr:'',name:'',price:'',description:'',veg:false,vegan:false,taxRate:'food',channel:'both',bon:'auto',options:[],selectedGroups:[],kategorie:activeCat,allergene:[]});setShowForm(true);},style:bS(C.green)},'+ Artikel'),
               vorlageTreffer>0 && R.createElement('button',{onClick:uebernehmeVorlage,title:'Vorgefertigte Beschreibungen fuer bekannte Standard-Gerichte (Pommes, Calamari, Wonder Bites, ...) uebernehmen',style:{padding:'8px 12px',borderRadius:8,border:'2px solid #ffb300',background:'#fff8e1',color:'#e65100',fontWeight:700,cursor:'pointer',fontSize:12}},'🪄 '+vorlageTreffer+' Beschreibungen übernehmen'),
               alkoholTreffer>0 && R.createElement('button',{onClick:markiereAlkohol,title:'Artikel in Bier/Wein/Cocktail-Kategorien als Alkohol markieren (wichtig fuer die Altersbestaetigung im Webshop)',style:{padding:'8px 12px',borderRadius:8,border:'2px solid #c62828',background:'#ffebee',color:'#c62828',fontWeight:700,cursor:'pointer',fontSize:12}},'🔞 '+alkoholTreffer+' als Alkohol markieren'),
               R.createElement('button',{onClick:function(){deleteCat(activeCat);},style:{padding:'8px 10px',borderRadius:8,border:'none',background:'#ffebee',color:C.red,fontWeight:700,cursor:'pointer',fontSize:13}},'Loeschen')
@@ -19875,6 +19966,22 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                 R.createElement('div',{style:{fontSize:11,color:'#888',marginBottom:3}},'Preis'),
                 R.createElement('input',{value:form.price,onChange:function(e){setForm(Object.assign({},form,{price:e.target.value}));},placeholder:'14.90',type:'number',step:'0.10',style:iS})
               )
+            ),
+            /* v519: Kategorie direkt im Formular. Beim Bearbeiten steht
+               hier die jetzige Kategorie; waehlt man eine andere, wandert
+               der Artikel beim Speichern dorthin. */
+            R.createElement('div',{style:{marginBottom:8}},
+              R.createElement('label',{style:{fontSize:11,color:'#888',display:'block',marginBottom:3}},'Kategorie'),
+              R.createElement('select',{value:form.kategorie||activeCat,
+                onChange:function(e){setForm(Object.assign({},form,{kategorie:e.target.value}));},
+                style:Object.assign({},iS,{marginBottom:0,background:'#fff'})},
+                Object.keys(menuData||{}).map(function(cat){
+                  return R.createElement('option',{key:cat,value:cat},cat);
+                })
+              ),
+              (form.kategorie && form.kategorie!==activeCat) && R.createElement('div',
+                {style:{fontSize:11,color:'#e65100',marginTop:4,fontWeight:600}},
+                'Wird beim Speichern nach "'+form.kategorie+'" verschoben.')
             ),
             /* v486: Beschreibung/Zutaten - fehlte bisher komplett im Formular.
                Ohne dieses Feld konnte Priya (die KI) nur Namen und Preis
@@ -20088,6 +20195,12 @@ function MenuManagementView({ menuData, onUpdate, optionGroups, onUpdateOptionGr
                     ),
                     R.createElement('div',{style:{display:'flex',gap:4,flexShrink:0}},
                       R.createElement('button',{onClick:function(e){e.stopPropagation();startEdit(item,i);},style:{padding:'6px 10px',borderRadius:7,border:'none',background:'#e3f2fd',color:C.blue,cursor:'pointer',fontSize:13,fontWeight:700}},'Bearb.'),
+                      /* v519: Kategorie wechseln, ohne das Formular zu oeffnen.
+                         Nur sinnvoll, wenn es ueberhaupt eine zweite Kategorie gibt. */
+                      (Object.keys(menuData||{}).length>1) && R.createElement('button',{
+                        title:'In eine andere Kategorie verschieben',
+                        onClick:function(e){e.stopPropagation();setVerschiebe({index:i,name:item.name||''});},
+                        style:{padding:'6px 10px',borderRadius:7,border:'none',background:'#ede7f6',color:'#4527a0',cursor:'pointer',fontSize:13,fontWeight:700}},'\u21C4'),
                       R.createElement('button',{onClick:function(e){e.stopPropagation();deleteItem(i);},style:{padding:'6px 10px',borderRadius:7,border:'none',background:'#ffebee',color:C.red,cursor:'pointer',fontSize:13,fontWeight:700}},'Loe.')
                     )
                   );
@@ -26786,7 +26899,7 @@ function DashboardView({ completedOrders, tableOrders, takeaway, floors, expense
       React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
         React.createElement("div", null,
           React.createElement("div", { style:{ fontSize:13, opacity:0.8, marginBottom:2 } }, greeting + " 👋"),
-          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v518"))),
+          React.createElement("div", { style:{ fontSize:22, fontWeight:800, letterSpacing:-0.5 } }, tenantDisplayName()+" POS ", React.createElement("span", { style:{ fontSize:13, fontWeight:600, opacity:0.85 } }, ("v520"))),
           React.createElement("div", { style:{ fontSize:11, opacity:0.7, marginTop:2 } }, todayStr + " · " + now)
         ),
         React.createElement("div", { style:{ textAlign:"right" } },
@@ -28079,7 +28192,7 @@ function App() {
     });
   };
 
-  const updateOrder = (tid, items) => {
+  const updateOrder = (tid, items, basis) => {
     if (String(tid).startsWith("ta_")) {
       const taId = parseInt(String(tid).replace("ta_", ""));
       setTakeaway(t => t.map(x => window.belksTaIst(x, taId)
@@ -28095,10 +28208,22 @@ function App() {
       var alt = (p[tid] && p[tid].items) || [];
       var neu = items;
       try { neu = belksZeilenStempeln(items, alt); } catch(e) { neu = items; }
+      /* ═══ v520: NUR WAS DER AUFRUFER SAH, KANN ER GELOESCHT HABEN ═══
+         Bisher galt jede Zeile als geloescht, die im neuen Stand fehlte.
+         Der Aufrufer rechnet aber mit dem Bild auf dem Schirm, und das
+         kann aelter sein als der Zustand - beim schnellen Tippen oder
+         wenn der Abgleich dazwischenfunkt. Eine gerade getippte Zeile
+         bekam dann eine Loeschmarke und war endgueltig weg.
+         Mit der Basis weiss diese Stelle, welche Zeilen der Aufrufer
+         ueberhaupt kannte. Was er nie gesehen hat, bleibt stehen.
+         Ohne Basis bleibt alles wie vorher - die uebrigen Aufrufer
+         (Kassieren, Zusammenlegen, Leeren) schicken bewusst die
+         vollstaendige Liste. */
       try {
-        var weg = belksZeilenWeg(alt, neu);
-        if (weg.length) belksZeilenMarkeSetzen(tid, weg);
-      } catch(e) {}
+        var uebern = belksZeilenUebernehmen(alt, neu, basis);
+        neu = uebern.zeilen;
+        if (uebern.weg.length) belksZeilenMarkeSetzen(tid, uebern.weg);
+      } catch(e) { console.warn('v520 Zeilen-Basis:', e); }
       return {
         ...p,
         [tid]: {
@@ -40471,6 +40596,42 @@ function belksZeilenStempeln(neu, alt){
 }
 
 /* Welche Zeilen sind verschwunden? Die brauchen eine Loeschmarke. */
+/* ═══ v520: WAS DER AUFRUFER NIE GESEHEN HAT, KANN ER NICHT GELOESCHT HABEN ═══
+   Bisher galt jede Zeile als geloescht, die in der neuen Liste fehlte.
+   Der Aufrufer rechnet aber mit dem Bild auf dem Bildschirm - und das
+   kann aelter sein als der Zustand: beim schnellen Tippen zweier Artikel
+   oder wenn der Abgleich dazwischenfunkt. Eine gerade getippte Zeile
+   bekam dann eine Loeschmarke und war endgueltig weg; der Kellner musste
+   sie neu tippen.
+   'basis' sind die Kennungen der Zeilen, die der Aufrufer vor sich hatte.
+   Nur die duerfen als geloescht gelten. Alles, was er nie gesehen hat,
+   bleibt stehen. Ohne basis bleibt es beim alten Verhalten - Kassieren,
+   Zusammenlegen und Leeren schicken bewusst die vollstaendige Liste.
+   Eine Funktion, ein Ort: updateOrder und die Pruefung rufen dieselbe. */
+function belksZeilenUebernehmen(alt, neu, basis){
+  alt = Array.isArray(alt) ? alt : [];
+  neu = Array.isArray(neu) ? neu : [];
+  var weg = belksZeilenWeg(alt, neu);
+  if (!Array.isArray(basis)) return { zeilen: neu, weg: weg, gerettet: [] };
+  var gesehen = {};
+  basis.forEach(function(id){ if (id) gesehen[id] = 1; });
+  var gerettet = [];
+  weg = weg.filter(function(id){
+    if (gesehen[id]) return true;
+    gerettet.push(id);
+    return false;
+  });
+  if (!gerettet.length) return { zeilen: neu, weg: weg, gerettet: [] };
+  var drin = {};
+  neu.forEach(function(z){ if (z && z._iid) drin[z._iid] = 1; });
+  var zeilen = neu.slice();
+  alt.forEach(function(z){
+    if (z && z._iid && !drin[z._iid] && gerettet.indexOf(z._iid) >= 0) zeilen.push(z);
+  });
+  zeilen.sort(function(x,y){ return (x._ts||0) - (y._ts||0); });
+  return { zeilen: zeilen, weg: weg, gerettet: gerettet };
+}
+
 function belksZeilenWeg(alt, neu){
   alt = Array.isArray(alt) ? alt : [];
   neu = Array.isArray(neu) ? neu : [];
@@ -40530,11 +40691,24 @@ function belksZeilenMischen(a, b, geloescht, aIstNeuer){
   a = Array.isArray(a) ? a : [];
   b = Array.isArray(b) ? b : [];
   geloescht = geloescht || {};
+  /* ═══ v520: EINE LOESCHMARKE AUS DER ZUKUNFT GILT NICHT ═══
+     belksJetzt() ist die Geraeteuhr plus Serverversatz. Steht der Versatz
+     noch nicht (direkt nach dem Start, ohne Netz) und geht die Uhr des
+     Geraets vor, bekommt eine Marke eine Zeit, die noch gar nicht da ist.
+     Sie schlaegt dann JEDE spaeter getippte Zeile - auf allen Geraeten,
+     dauerhaft. Eine Marke, die in der Zukunft liegt, ist falsch; dann
+     lieber die Zeile stehen lassen. Eine zu viel sieht der Kellner und
+     nimmt sie weg, eine zu wenig kostet Umsatz. */
+  var _jetztMax = (window.belksJetzt ? window.belksJetzt() : Date.now()) + 60000;
   var raus = {}, ohneA = [], ohneB = [], serviert = {};
   function rein(z, ausA){
     if (!z) return;
     if (!z._iid) { (ausA ? ohneA : ohneB).push(z); return; }   // Altbestand ohne Kennung
     var tot = geloescht[z._iid] || 0;
+    if (tot > _jetztMax) {
+      try { console.warn('Loeschmarke liegt in der Zukunft, wird uebergangen:', z._iid, new Date(tot).toISOString()); } catch(e){}
+      tot = 0;
+    }
     if (tot && tot >= (z._ts || 0)) return;           // geloescht und seitdem nicht angefasst
     /* v293: Abhaken ist nicht umkehrbar. Was auf IRGENDEINEM Geraet einmal
        serviert war, bleibt serviert - unabhaengig davon, welche Fassung der
@@ -40565,11 +40739,19 @@ function belksZeilenMischen(a, b, geloescht, aIstNeuer){
      EINE Seite nehmen, naemlich die neuere. Sobald eine Zeile einmal
      angefasst wird, bekommt sie ohnehin eine Kennung und der Sonderfall
      erledigt sich von selbst. */
-  var altbestand = aIstNeuer ? ohneA : ohneB;
-  if (!altbestand.length) altbestand = ohneA.length ? ohneA : ohneB;
-  if (altbestand.length) {
+  /* ═══ v520: BEIDE SEITEN, NICHT NUR EINE ═══
+     Bisher wurde EINE Seite genommen - die neuere - und die andere fiel
+     ganz weg. Hatten beide Seiten Zeilen ohne Kennung (Webshop- und
+     KI-Bestellungen bringen solche mit), verschwand damit eine davon
+     spurlos. Jetzt werden beide betrachtet und nur nach INHALT
+     zusammengefasst: eine Zeile, die es wirklich auf beiden Seiten gibt,
+     steht weiterhin nur einmal da - aber zwei verschiedene Zeilen
+     ueberleben jetzt beide. Die neuere Seite kommt zuerst, damit bei
+     gleichem Inhalt ihre Fassung gewinnt. */
+  var beide = aIstNeuer ? ohneA.concat(ohneB) : ohneB.concat(ohneA);
+  if (beide.length) {
     var gesehen = {};
-    altbestand.forEach(function(z){
+    beide.forEach(function(z){
       var ik = z._key || ((z.nr||'') + '_' + (z.name||'') + '_' + (z.note||'') + '_' + (z.finalPrice||0));
       if (gesehen[ik]) return;
       gesehen[ik] = 1;
